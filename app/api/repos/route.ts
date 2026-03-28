@@ -5,6 +5,8 @@ import { handleApiError } from "@/lib/api/errors";
 import { validateRepoFullName } from "@/lib/api/validate";
 import { fetchUserRepos } from "@/lib/api/github";
 import { encryptToken } from "@/lib/api/crypto";
+import { logActivity } from "@/lib/api/activity";
+import { backfillRepoActivity } from "@/lib/api/backfill";
 
 /**
  * GET /api/repos — Returns repos based on source:
@@ -95,7 +97,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: Request) {
   try {
-    const { user, supabase } = await getAuthenticatedUser();
+    const { user, supabase, githubToken } = await getAuthenticatedUser();
     const body = await request.json();
 
     const fullName = validateRepoFullName(body.repo_full_name);
@@ -146,6 +148,26 @@ export async function POST(request: Request) {
       },
       { onConflict: "repo_full_name,user_id" }
     );
+
+    // Log activity event
+    logActivity({
+      userId: user.id,
+      repoFullName: fullName,
+      source: "kontext",
+      eventType: "repo_added",
+      title: `${fullName} was added`,
+      description: body.description || undefined,
+      metadata: { language: body.language, stars: body.stargazers_count },
+    });
+
+    // Backfill recent GitHub activity (fire-and-forget)
+    if (githubToken) {
+      backfillRepoActivity({
+        userId: user.id,
+        repoFullName: fullName,
+        githubToken,
+      });
+    }
 
     return NextResponse.json({ repo, hasCustomToken: !!body.custom_access_token });
   } catch (error) {

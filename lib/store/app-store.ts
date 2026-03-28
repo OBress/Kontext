@@ -36,6 +36,8 @@ export interface IngestionState {
   error?: string;
 }
 
+export type RepoSortMode = "recent" | "stars" | "name" | "added";
+
 interface AppState {
   // API Key (persisted)
   apiKey: string | null;
@@ -51,6 +53,16 @@ interface AppState {
   addRepo: (repo: Repo) => void;
   updateRepo: (fullName: string, updates: Partial<Repo>) => void;
   removeRepo: (fullName: string) => void;
+
+  // Pinned repos (persisted, max 8)
+  pinnedRepos: string[];
+  pinRepo: (fullName: string) => void;
+  unpinRepo: (fullName: string) => void;
+  reorderPinnedRepos: (reordered: string[]) => void;
+
+  // Sort mode (persisted)
+  repoSortMode: RepoSortMode;
+  setRepoSortMode: (mode: RepoSortMode) => void;
 
   // Ingestion status per repo (globally tracked for task indicator)
   ingestionStatus: Record<string, IngestionState>;
@@ -94,7 +106,26 @@ export const useAppStore = create<AppState>()(
       removeRepo: (fullName) =>
         set((prev) => ({
           repos: prev.repos.filter((r) => r.full_name !== fullName),
+          pinnedRepos: prev.pinnedRepos.filter((fn) => fn !== fullName),
         })),
+
+      // Pinned repos
+      pinnedRepos: [],
+      pinRepo: (fullName) =>
+        set((prev) => {
+          if (prev.pinnedRepos.length >= 8) return prev;
+          if (prev.pinnedRepos.includes(fullName)) return prev;
+          return { pinnedRepos: [...prev.pinnedRepos, fullName] };
+        }),
+      unpinRepo: (fullName) =>
+        set((prev) => ({
+          pinnedRepos: prev.pinnedRepos.filter((fn) => fn !== fullName),
+        })),
+      reorderPinnedRepos: (reordered) => set({ pinnedRepos: reordered }),
+
+      // Sort mode
+      repoSortMode: "recent" as RepoSortMode,
+      setRepoSortMode: (mode) => set({ repoSortMode: mode }),
 
       ingestionStatus: {},
       setIngestionStatus: (repoFullName, state) =>
@@ -119,7 +150,8 @@ export const useAppStore = create<AppState>()(
       name: "kontext-app-store",
       partialize: (state) => ({
         apiKey: state.apiKey,
-        activeRepo: state.activeRepo,
+        pinnedRepos: state.pinnedRepos,
+        repoSortMode: state.repoSortMode,
       }),
     }
   )

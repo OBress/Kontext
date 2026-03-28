@@ -1,14 +1,26 @@
 "use client";
 
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { AppShell } from "@/app/components/shell/AppShell";
 import { TabBar } from "@/app/components/repo/TabBar";
+import { useAppStore } from "@/lib/store/app-store";
 import { GitBranch } from "lucide-react";
 
 export default function RepoLayout({ children }: { children: ReactNode }) {
   const params = useParams<{ owner: string; name: string }>();
   const basePath = `/repo/${params.owner}/${params.name}`;
+  const setRepos = useAppStore((s) => s.setRepos);
+
+  // Fetch fresh repo data from DB so overview always reflects latest state
+  useEffect(() => {
+    fetch("/api/repos")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.repos) setRepos(data.repos);
+      })
+      .catch(() => {});
+  }, [setRepos]);
 
   return (
     <AppShell>

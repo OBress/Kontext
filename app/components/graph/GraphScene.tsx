@@ -5,12 +5,22 @@ import { useGraphStore } from "@/lib/store/graph-store";
 
 // We have to do this because react-force-graph-3d doesn't support SSR
 // and we need to ensure Three.js objects are available
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let ForceGraph3DComponent: any = null;
+
+interface GraphNode {
+  id: string;
+  x?: number;
+  y?: number;
+  z?: number;
+  [key: string]: unknown;
+}
 
 export function GraphScene() {
   const containerRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null);
-  const { graphData, hoveredNode, setHoveredNode, setSelectedNode, filters } =
+  const { graphData, setHoveredNode, setSelectedNode, filters } =
     useGraphStore();
   const [isReady, setIsReady] = useState(false);
 
@@ -74,7 +84,7 @@ export function GraphScene() {
   })();
 
   const handleNodeHover = useCallback(
-    (node: any) => {
+    (node: GraphNode | null) => {
       setHoveredNode(node?.id || null);
       if (containerRef.current) {
         containerRef.current.style.cursor = node ? "pointer" : "default";
@@ -84,7 +94,7 @@ export function GraphScene() {
   );
 
   const handleNodeClick = useCallback(
-    (node: any) => {
+    (node: GraphNode | null) => {
       setSelectedNode(node?.id || null);
       // Fly camera to node
       if (graphRef.current && node) {

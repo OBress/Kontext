@@ -4,6 +4,7 @@ import { rateLimit } from "@/lib/api/rate-limit";
 import { handleApiError } from "@/lib/api/errors";
 import { validateRepoFullName, validateApiKey, validateTarget } from "@/lib/api/validate";
 import { generateText } from "@/lib/api/embeddings";
+import { logActivity } from "@/lib/api/activity";
 
 // Config files that indicate tech stack
 const CONFIG_FILES = [
@@ -133,6 +134,17 @@ Format your response EXACTLY as:
       detected_stack: detectedStack,
       prompt_text: promptText,
       custom_instructions: customInstructions || null,
+    });
+
+    // Log activity event
+    logActivity({
+      userId: user.id,
+      repoFullName,
+      source: "kontext",
+      eventType: "prompt_generated",
+      title: `System prompt generated for ${repoFullName}`,
+      description: `Target: ${targetNames[target] || target}`,
+      metadata: { target, stack_count: detectedStack.length },
     });
 
     return NextResponse.json({ prompt: promptText, detectedStack });

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { GlowCard } from "@/app/components/shared/GlowCard";
 import { PulseOrb } from "@/app/components/shared/PulseOrb";
-import { Server, Copy, RotateCcw, Search, ChevronDown, ChevronRight, ToggleLeft, ToggleRight, Pause, Play } from "lucide-react";
+import { Copy, RotateCcw, Search, ChevronDown, ChevronRight, ToggleLeft, ToggleRight, Pause, Play } from "lucide-react";
 
 const mcpTools = [
   { name: "search_code", description: "Semantic search across indexed codebase", params: { query: "string", max_results: "number (default: 5)" }, enabled: true, usage: 142 },

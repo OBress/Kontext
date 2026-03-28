@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     );
 
     try {
-      let result: any;
+      let result: unknown;
 
       switch (name) {
         case "search_code": {
@@ -139,7 +139,7 @@ export async function POST(request: Request) {
           });
 
           const context = (chunks || [])
-            .map((c: any) => `// ${c.file_path}\n${c.content}`)
+            .map((c: { file_path: string; content: string }) => `// ${c.file_path}\n${c.content}`)
             .join("\n\n");
 
           const answer = await generateText(
@@ -165,11 +165,12 @@ export async function POST(request: Request) {
         id: body.id,
         result: { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] },
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Unknown error";
       return NextResponse.json({
         jsonrpc: "2.0",
         id: body.id,
-        error: { code: -32000, message: err.message },
+        error: { code: -32000, message },
       });
     }
   }

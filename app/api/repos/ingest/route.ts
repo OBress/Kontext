@@ -5,9 +5,10 @@ import { handleApiError, ApiError } from "@/lib/api/errors";
 import { validateRepoFullName, validateApiKey } from "@/lib/api/validate";
 import { fetchRepoTree, fetchFileContent, fetchLatestCommit, fetchCommitsSince } from "@/lib/api/github";
 import { chunkFile } from "@/lib/api/chunker";
-import { generateEmbeddings, generateFileSummary } from "@/lib/api/embeddings";
+import { generateEmbeddings } from "@/lib/api/embeddings";
 import { extractImports } from "@/lib/api/graph-builder";
 import { TaskType } from "@google/generative-ai";
+import { logActivity } from "@/lib/api/activity";
 
 /**
  * POST /api/repos/ingest — Full ingestion pipeline with SSE progress
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
       .eq("user_id", user.id)
       .eq("full_name", fullName)
       .single();
-    const understandingTier = repoSettings?.understanding_tier || 2;
+    // understanding_tier is queried but reserved for future use
     const defaultBranch = repoSettings?.default_branch || "main";
 
     // Use custom PAT if stored, otherwise fall back to OAuth token
@@ -58,7 +59,7 @@ export async function POST(request: Request) {
       throw new ApiError(401, "GITHUB_TOKEN_REQUIRED", "GitHub token not available. Please re-authenticate or provide an access token.");
     }
 
-    const adminDb = createAdminClient();
+    const adminDb = await createAdminClient();
 
     // Create ingestion job
     const { data: job } = await supabase
@@ -127,7 +128,7 @@ export async function POST(request: Request) {
             if (content) {
               const ext = file.path.split(".").pop() || "";
               const lines = content.split("\n").length;
-              const imports = extractImports(content, file.path);
+              const imports = extractImports(content);
 
               fileRecords.push({
                 user_id: user.id,
@@ -247,7 +248,7 @@ export async function POST(request: Request) {
           if (headSHA) {
             try {
               send({ status: "timeline", message: "Backfilling commit history..." });
-              const commits = await fetchCommitsSince(
+              await fetchCommitsSince(
                 effectiveToken, owner, name, defaultBranch, headSHA, 50
               ).catch(() => []);
 
@@ -284,19 +285,31 @@ export async function POST(request: Request) {
             })
             .eq("id", job!.id);
 
+          // Log activity event
+          logActivity({
+            userId: user.id,
+            repoFullName: fullName,
+            source: "kontext",
+            eventType: "repo_indexed",
+            title: `${fullName} was indexed`,
+            description: `${allChunks.length} chunks from ${tree.length} files`,
+            metadata: { chunks: allChunks.length, files: tree.length },
+          });
+
           send({
             status: "done",
             filesTotal: tree.length,
             filesProcessed: tree.length,
             chunksCreated: allChunks.length,
           });
-        } catch (err: any) {
-          send({ status: "error", message: err.message });
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          send({ status: "error", message });
 
           // Update job and repo status
           await supabase
             .from("ingestion_jobs")
-            .update({ status: "error", error_message: err.message })
+            .update({ status: "error", error_message: message })
             .eq("id", job!.id);
 
           await adminDb

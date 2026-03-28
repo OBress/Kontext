@@ -43,11 +43,12 @@ export async function generateEmbeddings(
     }
 
     return results;
-  } catch (err: any) {
-    if (err.message?.includes("API key")) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    if (message.includes("API key")) {
       throw aiError("Invalid Google AI API key. Please check your key in Settings.");
     }
-    throw aiError(`Embedding generation failed: ${err.message}`);
+    throw aiError(`Embedding generation failed: ${message}`);
   }
 }
 
@@ -98,10 +99,11 @@ export async function generateChatStream(
           encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`)
         );
         controller.close();
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Unknown error";
         controller.enqueue(
           encoder.encode(
-            `data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`
+            `data: ${JSON.stringify({ type: "error", message })}\n\n`
           )
         );
         controller.close();
@@ -127,8 +129,9 @@ export async function generateText(
 
     const result = await model.generateContent(prompt);
     return result.response.text();
-  } catch (err: any) {
-    throw aiError(`Text generation failed: ${err.message}`);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    throw aiError(`Text generation failed: ${message}`);
   }
 }
 

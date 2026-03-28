@@ -3,6 +3,7 @@ import { getAuthenticatedUser } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/api/rate-limit";
 import { handleApiError, ApiError } from "@/lib/api/errors";
 import { validateRepoFullName, validateRole, validateGitHubUsername } from "@/lib/api/validate";
+import { logActivity } from "@/lib/api/activity";
 
 /**
  * GET /api/team?repo=owner/name — List team members
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
       .order("joined_at", { ascending: true });
 
     // Get pending invites (only for owners/admins)
-    let invites: any[] = [];
+    let invites: Record<string, unknown>[] = [];
     if (["owner", "admin"].includes(membership.role)) {
       const { data } = await supabase
         .from("team_invites")
@@ -95,6 +96,17 @@ export async function POST(request: Request) {
       .single();
 
     if (error) throw error;
+
+    // Log activity event
+    logActivity({
+      userId: user.id,
+      repoFullName,
+      source: "kontext",
+      eventType: "team_invite_sent",
+      title: `Invited @${githubUsername} to ${repoFullName}`,
+      description: `Role: ${role}`,
+      metadata: { github_username: githubUsername, role },
+    });
 
     return NextResponse.json({ invite });
   } catch (error) {

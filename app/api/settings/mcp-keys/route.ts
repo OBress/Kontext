@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/api/rate-limit";
 import { handleApiError } from "@/lib/api/errors";
-import { generateApiKey, hashApiKey } from "@/lib/api/crypto";
+import { generateApiKey } from "@/lib/api/crypto";
 
 /**
  * GET /api/settings/mcp-keys — List user's MCP API keys (prefix only)

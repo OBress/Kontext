@@ -4,13 +4,11 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { useChatStore, ChatMessage, ChatSource } from "@/lib/store/chat-store";
 import { useAppStore } from "@/lib/store/app-store";
-import { GlowCard } from "@/app/components/shared/GlowCard";
 import {
   Send,
   Square,
   Trash2,
   FileCode,
-  ExternalLink,
   Copy,
   Check,
 } from "lucide-react";
@@ -69,6 +67,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               code({ className, children, ...props }: any) {
                 const match = /language-(\w+)/.exec(className || "");
                 const codeStr = String(children).replace(/\n$/, "");
@@ -324,8 +323,9 @@ export default function ChatPage() {
             }
           }
         }
-      } catch (err: any) {
-        if (err.name !== "AbortError") {
+      } catch (err: unknown) {
+        const errObj = err as { name?: string };
+        if (errObj.name !== "AbortError") {
           updateLastMessage("An error occurred. Please try again.");
         }
       }
@@ -333,7 +333,7 @@ export default function ChatPage() {
       setIsStreaming(false);
       abortRef.current = null;
     },
-    [addMessage, updateLastMessage, setIsStreaming, setCurrentSources]
+    [addMessage, updateLastMessage, setIsStreaming, setCurrentSources, apiKey, repoFullName]
   );
 
   const handleStop = () => {

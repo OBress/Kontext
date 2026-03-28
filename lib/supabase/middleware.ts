@@ -37,6 +37,7 @@ export async function updateSession(request: NextRequest) {
 
   // Auth redirect: if no user and not on a public path, redirect to /login
   const isPublicPath =
+    request.nextUrl.pathname === "/" ||
     request.nextUrl.pathname === "/login" ||
     request.nextUrl.pathname.startsWith("/auth/");
 
@@ -46,11 +47,11 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // If user is logged in and trying to access /login, redirect to /
+  // If user is logged in and trying to access /login, redirect to /dashboard
   if (user && request.nextUrl.pathname === "/login") {
-    const homeUrl = request.nextUrl.clone();
-    homeUrl.pathname = "/";
-    return NextResponse.redirect(homeUrl);
+    const dashUrl = request.nextUrl.clone();
+    dashUrl.pathname = "/dashboard";
+    return NextResponse.redirect(dashUrl);
   }
 
   return supabaseResponse;

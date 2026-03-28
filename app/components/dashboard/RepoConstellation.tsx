@@ -104,7 +104,10 @@ function DustParticles({ count = DUST_COUNT }: { count?: number }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
-  const particles = useMemo(() => {
+  // Particle positions are generated once and never change — intentional randomness for 3D visuals
+  /* eslint-disable react-hooks/purity */
+  const particlesRef = useRef<Array<{x: number; y: number; z: number; scale: number; speed: number}> | null>(null);
+  if (!particlesRef.current) {
     const arr = [];
     for (let i = 0; i < count; i++) {
       const theta = Math.random() * Math.PI * 2;
@@ -118,8 +121,10 @@ function DustParticles({ count = DUST_COUNT }: { count?: number }) {
         speed: 0.08 + Math.random() * 0.2,
       });
     }
-    return arr;
-  }, [count]);
+    particlesRef.current = arr;
+  }
+  /* eslint-enable react-hooks/purity */
+  const particles = particlesRef.current;
 
   useFrame((state) => {
     if (!meshRef.current) return;
@@ -425,6 +430,7 @@ function Scene({
   onSpotlightScreenPos,
   isUserHovering,
 }: SceneProps) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const controlsRef = useRef<any>(null);
   const { camera } = useThree();
   const [isDragging, setIsDragging] = useState(false);
@@ -439,11 +445,13 @@ function Scene({
 
     if (autoRotateStrength.current > 0.001) {
       const speed = 0.15 * autoRotateStrength.current * delta;
-      // Rotate camera position around the origin on the Y axis
+      // Rotate camera position around the origin on the Y axis — Three.js requires direct mutation
       const x = camera.position.x;
       const z = camera.position.z;
+      /* eslint-disable react-hooks/immutability */
       camera.position.x = x * Math.cos(speed) - z * Math.sin(speed);
       camera.position.z = x * Math.sin(speed) + z * Math.cos(speed);
+      /* eslint-enable react-hooks/immutability */
       camera.lookAt(0, 0, 0);
 
       // Sync TrackballControls target
@@ -559,6 +567,7 @@ export function RepoConstellation({ repos, onNodeClick, fillContainer }: RepoCon
   // Auto-spotlight
   useEffect(() => {
     if (isUserHovering) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSpotlightIds(new Set());
       setSpotlightScreenPos(null);
       if (spotlightTimerRef.current) {

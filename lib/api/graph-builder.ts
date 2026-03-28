@@ -149,7 +149,7 @@ function resolveImport(
 /**
  * Extract import paths from file content.
  */
-export function extractImports(content: string, filePath: string): string[] {
+export function extractImports(content: string): string[] {
   const imports: string[] = [];
   const seen = new Set<string>();
 

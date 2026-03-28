@@ -4,6 +4,7 @@ import { rateLimit } from "@/lib/api/rate-limit";
 import { handleApiError } from "@/lib/api/errors";
 import { validateRepoFullName, validateMessage, validateApiKey } from "@/lib/api/validate";
 import { generateEmbeddings, generateChatStream } from "@/lib/api/embeddings";
+import { logActivity } from "@/lib/api/activity";
 
 /**
  * POST /api/chat — RAG chatbot with streaming Gemini response
@@ -25,6 +26,16 @@ export async function POST(request: Request) {
     const repoFullName = validateRepoFullName(body.repo_full_name);
     const apiKey = validateApiKey(request);
 
+    // Log chat session activity (fire-and-forget)
+    logActivity({
+      userId: user.id,
+      repoFullName,
+      source: "kontext",
+      eventType: "chat_session",
+      title: `Chat with ${repoFullName}`,
+      description: message.slice(0, 100),
+    });
+
     // 1. Embed the user's question
     const [queryEmbedding] = await generateEmbeddings(apiKey, [message]);
 
@@ -41,7 +52,8 @@ export async function POST(request: Request) {
     }
 
     // 3. Build sources for frontend
-    const sources = (chunks || []).map((c: any) => ({
+    interface MatchChunk { file_path: string; content: string; similarity: number }
+    const sources = (chunks || []).map((c: MatchChunk) => ({
       file_path: c.file_path,
       content: c.content,
       similarity: c.similarity,
@@ -50,7 +62,7 @@ export async function POST(request: Request) {
     // 4. Build system prompt with context
     const contextBlocks = sources
       .map(
-        (s: any, i: number) =>
+        (s: MatchChunk, i: number) =>
           `--- Source ${i + 1}: ${s.file_path} (similarity: ${(s.similarity * 100).toFixed(1)}%) ---\n${s.content}\n`
       )
       .join("\n");
@@ -88,10 +100,11 @@ ${contextBlocks || "No relevant code chunks found. Answer based on general knowl
             if (done) break;
             controller.enqueue(value);
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Unknown error";
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ type: "error", message: err.message })}\n\n`
+              `data: ${JSON.stringify({ type: "error", message })}\n\n`
             )
           );
         }

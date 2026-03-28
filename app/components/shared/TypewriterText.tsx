@@ -23,6 +23,7 @@ export function TypewriterText({
   const completedRef = useRef(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDisplayedLength(0);
     completedRef.current = false;
   }, [text]);

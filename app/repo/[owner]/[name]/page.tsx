@@ -4,7 +4,6 @@ import { useParams } from "next/navigation";
 import { useAppStore } from "@/lib/store/app-store";
 import { GlowCard } from "@/app/components/shared/GlowCard";
 import { AnimatedCounter } from "@/app/components/shared/AnimatedCounter";
-import { PulseOrb } from "@/app/components/shared/PulseOrb";
 import { SyncStatusCard, SyncSettingsCard } from "@/app/components/repo/SyncPanel";
 import { motion } from "framer-motion";
 import {

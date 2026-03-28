@@ -49,7 +49,7 @@ export async function PATCH(request: Request) {
     const body = await request.json();
     const fullName = validateRepoFullName(body.repo_full_name);
     const [owner, name] = fullName.split("/");
-    const adminDb = createAdminClient();
+    const adminDb = await createAdminClient();
 
     // Build update object
     const updates: Record<string, unknown> = {};
@@ -89,10 +89,11 @@ export async function PATCH(request: Request) {
         try {
           const hookId = await registerWebhook(githubToken, owner, name, webhookUrl, WEBHOOK_SECRET);
           updates.webhook_id = hookId;
-        } catch (err: any) {
-          console.error("[sync-settings] Webhook registration error:", err.message);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          console.error("[sync-settings] Webhook registration error:", message);
           return NextResponse.json(
-            { error: `Failed to register webhook: ${err.message}` },
+            { error: `Failed to register webhook: ${message}` },
             { status: 500 }
           );
         }
@@ -108,8 +109,9 @@ export async function PATCH(request: Request) {
         if (repo?.webhook_id) {
           try {
             await deleteWebhook(githubToken, owner, name, repo.webhook_id);
-          } catch (err: any) {
-            console.warn("[sync-settings] Webhook deletion failed (may be already gone):", err.message);
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : "Unknown error";
+            console.warn("[sync-settings] Webhook deletion failed (may be already gone):", message);
           }
           updates.webhook_id = null;
         }

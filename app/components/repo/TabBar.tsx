@@ -11,6 +11,7 @@ import {
   Wand2,
   Server,
   Users,
+  Settings,
 } from "lucide-react";
 
 const tabs = [
@@ -21,6 +22,7 @@ const tabs = [
   { icon: Wand2, label: "Prompts", segment: "prompts" },
   { icon: Server, label: "MCP Server", segment: "mcp" },
   { icon: Users, label: "Team", segment: "team" },
+  { icon: Settings, label: "Settings", segment: "settings" },
 ];
 
 interface TabBarProps {

@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { useAppStore } from "@/lib/store/app-store";
+import { useCurrentRepo } from "@/hooks/use-current-repo";
 import {
   RefreshCw,
   CheckCircle2,
@@ -29,7 +30,8 @@ interface SyncCheckResult {
 }
 
 export function SyncStatusCard() {
-  const { activeRepo, apiKey, updateRepo } = useAppStore();
+  const activeRepo = useCurrentRepo();
+  const { apiKey, updateRepo } = useAppStore();
   const [checking, setChecking] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [checkResult, setCheckResult] = useState<SyncCheckResult | null>(null);
@@ -50,8 +52,8 @@ export function SyncStatusCard() {
       if (!res.ok) throw new Error("Failed to check for updates");
       const data: SyncCheckResult = await res.json();
       setCheckResult(data);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setChecking(false);
     }
@@ -104,8 +106,8 @@ export function SyncStatusCard() {
           }
         }
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setSyncing(false);
       setSyncProgress("");
@@ -246,7 +248,8 @@ const TIER_CONFIG = [
 ];
 
 export function SyncSettingsCard() {
-  const { activeRepo, apiKey, updateRepo } = useAppStore();
+  const activeRepo = useCurrentRepo();
+  const { apiKey, updateRepo } = useAppStore();
   const [saving, setSaving] = useState(false);
   const [autoSync, setAutoSync] = useState(activeRepo?.auto_sync_enabled || false);
   const [tier, setTier] = useState<number>(activeRepo?.understanding_tier || 2);
@@ -277,11 +280,12 @@ export function SyncSettingsCard() {
       }
 
       // Update local state
-      updateRepo(activeRepo.full_name, updates as any);
+      updateRepo(activeRepo.full_name, updates as Record<string, unknown>);
       setMessage("Settings saved!");
       setTimeout(() => setMessage(null), 2000);
-    } catch (err: any) {
-      setMessage(`Error: ${err.message}`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : "Unknown error";
+      setMessage(`Error: ${errMsg}`);
     } finally {
       setSaving(false);
     }

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/api/auth";
 import crypto from "crypto";
+import { logActivity } from "@/lib/api/activity";
+
 
 const WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || "";
 
@@ -38,7 +40,7 @@ export async function POST(request: Request) {
     }
 
     const payload = JSON.parse(body);
-    const adminDb = createAdminClient();
+    const adminDb = await createAdminClient();
 
     // ── Handle ping (webhook health check) ──
     if (event === "ping") {
@@ -47,103 +49,234 @@ export async function POST(request: Request) {
     }
 
     // ── Handle push events ──
-    if (event !== "push") {
-      return NextResponse.json({ ok: true, event, skipped: true });
-    }
+    if (event === "push") {
+      const repoFullName = payload.repository?.full_name;
+      const branch = payload.ref?.replace("refs/heads/", "") || "";
+      const headSHA = payload.after;
+      const commits = payload.commits || [];
+      const pusher = payload.pusher?.name || payload.sender?.login || "Unknown";
 
-    const repoFullName = payload.repository?.full_name;
-    const branch = payload.ref?.replace("refs/heads/", "") || "";
-    const headSHA = payload.after;
-
-    if (!repoFullName || !headSHA) {
-      return NextResponse.json({ error: "Invalid push payload" }, { status: 400 });
-    }
-
-    // ── Deduplicate by delivery ID ──
-    if (deliveryId) {
-      const { data: existing } = await adminDb
-        .from("webhook_events")
-        .select("id")
-        .eq("delivery_id", deliveryId)
-        .maybeSingle();
-
-      if (existing) {
-        console.log("[webhook] Duplicate delivery:", deliveryId);
-        return NextResponse.json({ ok: true, duplicate: true });
+      if (!repoFullName || !headSHA) {
+        return NextResponse.json({ error: "Invalid push payload" }, { status: 400 });
       }
 
-      // Log the event
-      await adminDb.from("webhook_events").insert({
-        delivery_id: deliveryId,
-        repo_full_name: repoFullName,
-        event_type: event,
-        payload: payload,
-      });
-    }
+      // Log activity for all users who have this repo
+      const { data: repos } = await adminDb
+        .from("repos")
+        .select("id, user_id, full_name, watched_branch, last_synced_sha, auto_sync_enabled")
+        .eq("full_name", repoFullName);
 
-    // ── Find matching repos with auto_sync_enabled ──
-    const { data: repos } = await adminDb
-      .from("repos")
-      .select("id, user_id, full_name, watched_branch, last_synced_sha, auto_sync_enabled")
-      .eq("full_name", repoFullName)
-      .eq("auto_sync_enabled", true);
+      if (repos) {
+        for (const repo of repos) {
+          // Log the push activity event
+          const commitCount = commits.length;
+          const latestMessage = commits[commits.length - 1]?.message || "";
+          logActivity({
+            userId: repo.user_id,
+            repoFullName: repoFullName,
+            source: "github",
+            eventType: "push",
+            title: `${commitCount} commit${commitCount !== 1 ? "s" : ""} pushed to ${branch}`,
+            description: latestMessage.split("\n")[0].slice(0, 120),
+            metadata: {
+              sha: headSHA,
+              branch,
+              commit_count: commitCount,
+              author: pusher,
+              avatar_url: payload.sender?.avatar_url,
+            },
+          });
 
-    if (!repos || repos.length === 0) {
-      console.log("[webhook] No auto-sync repos found for:", repoFullName);
-      // Mark as processed, no action needed
+          // Trigger auto-sync if enabled
+          if (repo.auto_sync_enabled) {
+            const watchedBranch = repo.watched_branch || "main";
+            if (branch === watchedBranch && repo.last_synced_sha !== headSHA) {
+              const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.VERCEL_URL || "http://localhost:3000";
+              fetch(`${baseUrl}/api/repos/sync`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  repo_full_name: repoFullName,
+                  user_id: repo.user_id,
+                  head_sha: headSHA,
+                  webhook_triggered: true,
+                }),
+              }).catch((err) => {
+                console.error("[webhook] Failed to trigger sync for", repoFullName, err.message);
+              });
+            }
+          }
+        }
+      }
+
+      // Mark webhook as processed
       if (deliveryId) {
         await adminDb
           .from("webhook_events")
           .update({ processed: true })
           .eq("delivery_id", deliveryId);
       }
-      return NextResponse.json({ ok: true, repos: 0 });
+
+      console.log(`[webhook] Push to ${repoFullName}/${branch} — ${commits.length} commits`);
+      return NextResponse.json({ ok: true, event: "push" });
     }
 
-    let triggered = 0;
-    for (const repo of repos) {
-      // Only trigger if push is to the watched branch
-      const watchedBranch = repo.watched_branch || "main";
-      if (branch !== watchedBranch) continue;
+    // ── Handle pull_request events ──
+    if (event === "pull_request") {
+      const pr = payload.pull_request;
+      const repoFullName = payload.repository?.full_name;
+      const action = payload.action; // opened, closed, merged, etc.
 
-      // Skip if we're already at this SHA
-      if (repo.last_synced_sha === headSHA) continue;
+      if (repoFullName && pr) {
+        const { data: repos } = await adminDb
+          .from("repos")
+          .select("user_id")
+          .eq("full_name", repoFullName);
 
-      // Trigger sync by calling our own sync API internally
-      // We use a fire-and-forget approach — the webhook returns 200 immediately
-      // The sync is triggered as a background fetch to our own endpoint
-      const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.VERCEL_URL || "http://localhost:3000";
-      const syncUrl = `${baseUrl}/api/repos/sync`;
+        if (repos) {
+          const isMerged = action === "closed" && pr.merged;
+          const verb = isMerged ? "merged" : action;
+          for (const repo of repos) {
+            logActivity({
+              userId: repo.user_id,
+              repoFullName,
+              source: "github",
+              eventType: "pull_request",
+              title: `PR #${pr.number} ${verb}`,
+              description: pr.title?.slice(0, 120),
+              metadata: {
+                pr_number: pr.number,
+                action,
+                merged: isMerged,
+                author: pr.user?.login,
+                avatar_url: pr.user?.avatar_url,
+              },
+            });
+          }
+        }
+      }
 
-      // Fire and forget — don't await
-      fetch(syncUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          repo_full_name: repoFullName,
-          user_id: repo.user_id,
-          head_sha: headSHA,
-          webhook_triggered: true,
-        }),
-      }).catch((err) => {
-        console.error("[webhook] Failed to trigger sync for", repoFullName, err.message);
-      });
-
-      triggered++;
+      if (deliveryId) {
+        await adminDb.from("webhook_events").update({ processed: true }).eq("delivery_id", deliveryId);
+      }
+      return NextResponse.json({ ok: true, event: "pull_request" });
     }
 
-    // Mark webhook as processed
+    // ── Handle issues events ──
+    if (event === "issues") {
+      const issue = payload.issue;
+      const repoFullName = payload.repository?.full_name;
+      const action = payload.action;
+
+      if (repoFullName && issue && ["opened", "closed", "reopened"].includes(action)) {
+        const { data: repos } = await adminDb
+          .from("repos")
+          .select("user_id")
+          .eq("full_name", repoFullName);
+
+        if (repos) {
+          for (const repo of repos) {
+            logActivity({
+              userId: repo.user_id,
+              repoFullName,
+              source: "github",
+              eventType: "issue",
+              title: `Issue #${issue.number} ${action}`,
+              description: issue.title?.slice(0, 120),
+              metadata: {
+                issue_number: issue.number,
+                action,
+                author: issue.user?.login,
+                avatar_url: issue.user?.avatar_url,
+              },
+            });
+          }
+        }
+      }
+
+      if (deliveryId) {
+        await adminDb.from("webhook_events").update({ processed: true }).eq("delivery_id", deliveryId);
+      }
+      return NextResponse.json({ ok: true, event: "issues" });
+    }
+
+    // ── Handle create events (branch/tag) ──
+    if (event === "create") {
+      const refType = payload.ref_type; // branch or tag
+      const ref = payload.ref;
+      const repoFullName = payload.repository?.full_name;
+
+      if (repoFullName && ref) {
+        const { data: repos } = await adminDb
+          .from("repos")
+          .select("user_id")
+          .eq("full_name", repoFullName);
+
+        if (repos) {
+          for (const repo of repos) {
+            logActivity({
+              userId: repo.user_id,
+              repoFullName,
+              source: "github",
+              eventType: "create",
+              title: `${refType} "${ref}" created`,
+              metadata: { ref_type: refType, ref, sender: payload.sender?.login },
+            });
+          }
+        }
+      }
+
+      if (deliveryId) {
+        await adminDb.from("webhook_events").update({ processed: true }).eq("delivery_id", deliveryId);
+      }
+      return NextResponse.json({ ok: true, event: "create" });
+    }
+
+    // ── Handle release events ──
+    if (event === "release" && payload.action === "published") {
+      const release = payload.release;
+      const repoFullName = payload.repository?.full_name;
+
+      if (repoFullName && release) {
+        const { data: repos } = await adminDb
+          .from("repos")
+          .select("user_id")
+          .eq("full_name", repoFullName);
+
+        if (repos) {
+          for (const repo of repos) {
+            logActivity({
+              userId: repo.user_id,
+              repoFullName,
+              source: "github",
+              eventType: "release",
+              title: `Release ${release.tag_name} published`,
+              description: release.name?.slice(0, 120),
+              metadata: {
+                tag: release.tag_name,
+                prerelease: release.prerelease,
+                author: release.author?.login,
+              },
+            });
+          }
+        }
+      }
+
+      if (deliveryId) {
+        await adminDb.from("webhook_events").update({ processed: true }).eq("delivery_id", deliveryId);
+      }
+      return NextResponse.json({ ok: true, event: "release" });
+    }
+
+    // ── Unhandled event type — skip ──
     if (deliveryId) {
-      await adminDb
-        .from("webhook_events")
-        .update({ processed: true })
-        .eq("delivery_id", deliveryId);
+      await adminDb.from("webhook_events").update({ processed: true }).eq("delivery_id", deliveryId);
     }
+    return NextResponse.json({ ok: true, event, skipped: true });
 
-    console.log(`[webhook] Push to ${repoFullName}/${branch} — triggered ${triggered} syncs`);
-    return NextResponse.json({ ok: true, triggered });
-  } catch (error: any) {
-    console.error("[webhook] Error:", error.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("[webhook] Error:", message);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }

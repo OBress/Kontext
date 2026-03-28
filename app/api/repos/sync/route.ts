@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     let userId: string;
     let githubToken: string;
     let apiKey: string;
-    const adminDb = createAdminClient();
+    const adminDb = await createAdminClient();
 
     if (isWebhookTriggered) {
       // Server-to-server call from webhook handler
@@ -203,7 +203,7 @@ export async function POST(request: Request) {
               if (content) {
                 const ext = file.filename.split(".").pop() || "";
                 const lines = content.split("\n").length;
-                const imports = extractImports(content, file.filename);
+                const imports = extractImports(content);
 
                 fileRecords.push({
                   user_id: userId,
@@ -312,7 +312,7 @@ export async function POST(request: Request) {
               committed_at: c.commit.author.date,
               files_changed: JSON.stringify(
                 changedFiles
-                  .filter((f) => true) // All files for this batch
+                  .filter(() => true) // All files for this batch
                   .map((f) => ({
                     path: f.filename,
                     status: f.status,
@@ -356,9 +356,10 @@ export async function POST(request: Request) {
             commitsTracked: newCommits.length,
             newChunkCount: chunkCount,
           });
-        } catch (err: any) {
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Unknown error";
           console.error("[sync] Error:", err);
-          send({ status: "error", message: err.message });
+          send({ status: "error", message });
         }
 
         controller.close();

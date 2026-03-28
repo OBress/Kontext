@@ -7,6 +7,10 @@ interface RepoCardGridProps {
   repos: Repo[];
 }
 
+/**
+ * Simple grid for use outside the dashboard (e.g. home page constellation fallback).
+ * The dashboard uses SortableRepoSection instead.
+ */
 export function RepoCardGrid({ repos }: RepoCardGridProps) {
   if (repos.length === 0) return null;
 

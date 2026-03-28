@@ -8,7 +8,10 @@ function Dots({ count = 1500 }: { count?: number }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
-  const particles = useMemo(() => {
+  // Particle positions are generated once and never change — intentional randomness for 3D visuals
+  /* eslint-disable react-hooks/purity */
+  const particlesRef = useRef<Array<{x: number; y: number; z: number; scale: number; speed: number; offset: number}> | null>(null);
+  if (!particlesRef.current) {
     const arr = [];
     for (let i = 0; i < count; i++) {
       arr.push({
@@ -20,8 +23,10 @@ function Dots({ count = 1500 }: { count?: number }) {
         offset: Math.random() * Math.PI * 2,
       });
     }
-    return arr;
-  }, [count]);
+    particlesRef.current = arr;
+  }
+  /* eslint-enable react-hooks/purity */
+  const particles = particlesRef.current;
 
   useFrame((state) => {
     if (!meshRef.current) return;

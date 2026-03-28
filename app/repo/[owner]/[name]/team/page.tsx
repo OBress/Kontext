@@ -3,8 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { GlowCard } from "@/app/components/shared/GlowCard";
-import { PulseOrb } from "@/app/components/shared/PulseOrb";
-import { Users, UserPlus, Mail, ChevronRight, ChevronLeft, Check, Shield, Eye, Edit, Crown, X, Send, PartyPopper, Loader2, type LucideIcon } from "lucide-react";
+import { Users, UserPlus, ChevronRight, ChevronLeft, Check, Shield, Eye, Edit, Crown, Send, PartyPopper, Loader2, type LucideIcon } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface TeamMember {
@@ -51,6 +50,7 @@ export default function TeamPage() {
   }, [repoFullName]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchTeam();
   }, [fetchTeam]);
 

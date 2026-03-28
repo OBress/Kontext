@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
-import { useAppStore } from "@/lib/store/app-store";
+import { useMemo, useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   LayoutDashboard,
@@ -14,11 +13,12 @@ import {
   Users,
   Settings,
   LogOut,
+  LogIn,
 } from "lucide-react";
 import { signOut } from "@/app/actions";
 
 const mainNavItems = [
-  { icon: LayoutDashboard, label: "Dashboard", href: "/", alwaysEnabled: true },
+  { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard", alwaysEnabled: true },
 ];
 
 const repoNavItems = [
@@ -35,12 +35,18 @@ const bottomNavItems = [
 
 export function IconRail() {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const pathname = usePathname();
-  const activeRepo = useAppStore((s) => s.activeRepo);
+  // Derive repo context from URL
+  const repoMatch = useMemo(() => pathname.match(/^\/repo\/([^/]+)\/([^/]+)/), [pathname]);
+  const repoBase = repoMatch ? `/repo/${repoMatch[1]}/${repoMatch[2]}` : null;
 
-  const repoBase = activeRepo
-    ? `/repo/${activeRepo.owner}/${activeRepo.name}`
-    : null;
+  // Lightweight auth check
+  useEffect(() => {
+    fetch("/api/repos")
+      .then((r) => setIsAuthenticated(r.ok))
+      .catch(() => setIsAuthenticated(false));
+  }, []);
 
   return (
     <motion.nav
@@ -57,7 +63,7 @@ export function IconRail() {
           return (
             <Link
               key={item.href}
-              href={item.href}
+              href={isAuthenticated === false ? "/login" : item.href}
               className={`
                 relative flex items-center gap-3 h-10 rounded-lg px-3 transition-colors duration-150 no-underline
                 ${isActive
@@ -92,7 +98,7 @@ export function IconRail() {
         {repoNavItems.map((item) => {
           const href = repoBase ? `${repoBase}/${item.segment}` : "#";
           const isActive = pathname === href;
-          const isDisabled = !activeRepo;
+          const isDisabled = !repoBase;
 
           return (
             <Link
@@ -136,7 +142,7 @@ export function IconRail() {
           return (
             <Link
               key={item.href}
-              href={item.href}
+              href={isAuthenticated === false ? "/login" : item.href}
               className={`
                 flex items-center gap-3 h-10 rounded-lg px-3 transition-colors duration-150 no-underline
                 ${isActive
@@ -157,23 +163,40 @@ export function IconRail() {
           );
         })}
 
-        {/* Sign out */}
-        <form action={signOut}>
-          <button
-            type="submit"
-            className="w-full flex items-center gap-3 h-10 rounded-lg px-3 transition-colors duration-150 text-[var(--gray-400)] hover:text-[var(--accent-red)] hover:bg-[var(--alpha-white-5)] bg-transparent border-none cursor-pointer"
+        {/* Sign in / Sign out — conditional */}
+        {isAuthenticated === false ? (
+          <Link
+            href="/login"
+            className="w-full flex items-center gap-3 h-10 rounded-lg px-3 transition-colors duration-150 text-[var(--accent-green)] hover:bg-[var(--alpha-white-5)] no-underline"
           >
-            <LogOut size={18} className="shrink-0" />
+            <LogIn size={18} className="shrink-0" />
             <motion.span
               animate={{ opacity: isExpanded ? 1 : 0 }}
               transition={{ duration: 0.15, delay: isExpanded ? 0.05 : 0 }}
               className="text-sm font-mono whitespace-nowrap overflow-hidden"
             >
-              Sign Out
+              Sign In
             </motion.span>
-          </button>
-        </form>
+          </Link>
+        ) : isAuthenticated === true ? (
+          <form action={signOut}>
+            <button
+              type="submit"
+              className="w-full flex items-center gap-3 h-10 rounded-lg px-3 transition-colors duration-150 text-[var(--gray-400)] hover:text-[var(--accent-red)] hover:bg-[var(--alpha-white-5)] bg-transparent border-none cursor-pointer"
+            >
+              <LogOut size={18} className="shrink-0" />
+              <motion.span
+                animate={{ opacity: isExpanded ? 1 : 0 }}
+                transition={{ duration: 0.15, delay: isExpanded ? 0.05 : 0 }}
+                className="text-sm font-mono whitespace-nowrap overflow-hidden"
+              >
+                Sign Out
+              </motion.span>
+            </button>
+          </form>
+        ) : null}
       </div>
     </motion.nav>
   );
 }
+

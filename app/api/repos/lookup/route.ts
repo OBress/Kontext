@@ -66,9 +66,10 @@ export async function GET(request: NextRequest) {
     let repo;
     try {
       repo = await fetchRepoByFullName(tokenToUse, owner, name);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errObj = err as { status?: number; message?: string };
       // Check for auth-specific failures
-      if (err.status === 401 || err.message?.includes("401")) {
+      if (errObj.status === 401 || errObj.message?.includes("401")) {
         throw new ApiError(
           401,
           "INVALID_TOKEN",
@@ -77,7 +78,7 @@ export async function GET(request: NextRequest) {
             : "Your GitHub session has expired. Please re-authenticate."
         );
       }
-      if (err.status === 403 || err.message?.includes("403")) {
+      if (errObj.status === 403 || errObj.message?.includes("403")) {
         throw new ApiError(
           403,
           "INSUFFICIENT_SCOPE",
@@ -86,7 +87,7 @@ export async function GET(request: NextRequest) {
             : "Your GitHub token doesn't have permission to access this repo."
         );
       }
-      if (err.status === 404 || err.message?.includes("404")) {
+      if (errObj.status === 404 || errObj.message?.includes("404")) {
         throw new ApiError(
           404,
           "NOT_FOUND",

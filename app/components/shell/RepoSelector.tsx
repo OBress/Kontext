@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useAppStore, Repo } from "@/lib/store/app-store";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, Search, GitBranch, Star, Loader2, Plus, Database } from "lucide-react";
-import { PulseOrb } from "../shared/PulseOrb";
 
 // Language color map for dots
 const langColors: Record<string, string> = {
@@ -27,9 +26,18 @@ const langColors: Record<string, string> = {
 export function RepoSelector() {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const { repos, activeRepo, setActiveRepo, setAddRepoModalOpen } = useAppStore();
+  const { repos, setAddRepoModalOpen } = useAppStore();
   const router = useRouter();
+  const pathname = usePathname();
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Derive active repo from URL pathname: /repo/owner/name/...
+  const currentRepo = useMemo(() => {
+    const match = pathname.match(/^\/repo\/([^/]+)\/([^/]+)/);
+    if (!match) return null;
+    const fullName = `${match[1]}/${match[2]}`;
+    return repos.find((r) => r.full_name === fullName) || null;
+  }, [pathname, repos]);
 
   // Close on outside click
   useEffect(() => {
@@ -50,8 +58,8 @@ export function RepoSelector() {
   const pending = filteredRepos.filter((r) => !r.indexed);
 
   const handleSelect = (repo: Repo) => {
-    setActiveRepo(repo);
     setIsOpen(false);
+    setSearch("");
     router.push(`/repo/${repo.owner}/${repo.name}`);
   };
 
@@ -64,8 +72,8 @@ export function RepoSelector() {
       >
         <div className="flex items-center gap-2 overflow-hidden">
           <GitBranch size={14} className="text-[var(--gray-500)] shrink-0" />
-          <span className="text-sm font-mono text-[var(--gray-200)] truncate">
-            {activeRepo ? activeRepo.full_name : "Select repository"}
+          <span className={`text-sm font-mono truncate ${currentRepo ? "text-[var(--gray-200)]" : "text-[var(--gray-500)]"}`}>
+            {currentRepo ? currentRepo.full_name : "Select repository"}
           </span>
         </div>
         <ChevronDown
@@ -125,7 +133,7 @@ export function RepoSelector() {
                     <RepoItem
                       key={repo.id}
                       repo={repo}
-                      isActive={activeRepo?.id === repo.id}
+                      isActive={currentRepo?.full_name === repo.full_name}
                       onSelect={handleSelect}
                     />
                   ))}
@@ -140,7 +148,7 @@ export function RepoSelector() {
                     <RepoItem
                       key={repo.id}
                       repo={repo}
-                      isActive={activeRepo?.id === repo.id}
+                      isActive={currentRepo?.full_name === repo.full_name}
                       onSelect={handleSelect}
                     />
                   ))}

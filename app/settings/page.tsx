@@ -86,6 +86,70 @@ export default function SettingsPage() {
     } catch {}
   };
 
+  // ── Activity Preferences ──
+  const DEFAULT_FILTERS: Record<string, boolean> = {
+    repo_added: true,
+    repo_indexed: true,
+    team_member_joined: true,
+    team_invite_sent: true,
+    chat_session: true,
+    prompt_generated: true,
+    push: true,
+    pull_request: true,
+    issue: true,
+    create: true,
+    release: true,
+  };
+
+  const [activityFilters, setActivityFilters] = useState<Record<string, boolean>>(DEFAULT_FILTERS);
+  const [filtersLoading, setFiltersLoading] = useState(true);
+  const [filtersSaving, setFiltersSaving] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/settings/preferences")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.preferences?.activity_filters) {
+          setActivityFilters({ ...DEFAULT_FILTERS, ...data.preferences.activity_filters });
+        }
+      })
+      .catch(() => {})
+      .finally(() => setFiltersLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleToggleFilter = async (eventType: string) => {
+    const updated = { ...activityFilters, [eventType]: !activityFilters[eventType] };
+    setActivityFilters(updated);
+    setFiltersSaving(true);
+    try {
+      await fetch("/api/settings/preferences", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activity_filters: updated }),
+      });
+    } catch {}
+    setFiltersSaving(false);
+  };
+
+  // Event type labels grouped by source
+  const KONTEXT_EVENTS = [
+    { key: "repo_added", label: "Repo added" },
+    { key: "repo_indexed", label: "Repo indexed" },
+    { key: "team_member_joined", label: "Team member joined" },
+    { key: "team_invite_sent", label: "Team invite sent" },
+    { key: "chat_session", label: "Chat session" },
+    { key: "prompt_generated", label: "Prompt generated" },
+  ];
+
+  const GITHUB_EVENTS = [
+    { key: "push", label: "Push / commits" },
+    { key: "pull_request", label: "Pull requests" },
+    { key: "issue", label: "Issues" },
+    { key: "create", label: "Branch / tag created" },
+    { key: "release", label: "Releases" },
+  ];
+
   const maskedKey = apiKey ? `${apiKey.slice(0, 6)}${"•".repeat(20)}${apiKey.slice(-4)}` : "";
 
   return (
@@ -210,6 +274,103 @@ export default function SettingsPage() {
           </div>
         </GlowCard>
 
+        {/* Activity Preferences */}
+        <GlowCard glowColor="green" className="p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--accent-green)]">
+              <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />
+            </svg>
+            <h3 className="font-mono text-sm font-medium text-[var(--gray-200)] m-0">Activity Feed</h3>
+            {filtersSaving && <Loader2 size={12} className="animate-spin text-[var(--gray-500)]" />}
+          </div>
+          <p className="font-mono text-xs text-[var(--gray-500)] mb-4 m-0">
+            Choose which events appear in your dashboard activity feed.
+          </p>
+
+          {filtersLoading ? (
+            <div className="space-y-2">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="h-8 rounded bg-[var(--alpha-white-5)] animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Kontext events */}
+              <div>
+                <div className="flex items-center gap-1.5 mb-2">
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/10">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-green)]" />
+                    Kontext
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  {KONTEXT_EVENTS.map(({ key, label }) => (
+                    <label
+                      key={key}
+                      className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-[var(--alpha-white-5)] transition-colors cursor-pointer"
+                    >
+                      <span className="font-mono text-xs text-[var(--gray-300)]">{label}</span>
+                      <button
+                        onClick={(e) => { e.preventDefault(); handleToggleFilter(key); }}
+                        className={`relative w-8 h-[18px] rounded-full transition-colors border-none cursor-pointer ${
+                          activityFilters[key]
+                            ? "bg-[var(--accent-green)]"
+                            : "bg-[var(--surface-3)]"
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full bg-white transition-transform ${
+                            activityFilters[key] ? "translate-x-[14px]" : ""
+                          }`}
+                        />
+                      </button>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div className="h-px bg-[var(--alpha-white-5)]" />
+
+              {/* GitHub events */}
+              <div>
+                <div className="flex items-center gap-1.5 mb-2">
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-white/8 text-[var(--gray-300)] border border-white/5">
+                    <svg viewBox="0 0 16 16" width="9" height="9" fill="currentColor" className="opacity-70">
+                      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+                    </svg>
+                    GitHub
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  {GITHUB_EVENTS.map(({ key, label }) => (
+                    <label
+                      key={key}
+                      className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-[var(--alpha-white-5)] transition-colors cursor-pointer"
+                    >
+                      <span className="font-mono text-xs text-[var(--gray-300)]">{label}</span>
+                      <button
+                        onClick={(e) => { e.preventDefault(); handleToggleFilter(key); }}
+                        className={`relative w-8 h-[18px] rounded-full transition-colors border-none cursor-pointer ${
+                          activityFilters[key]
+                            ? "bg-[var(--accent-green)]"
+                            : "bg-[var(--surface-3)]"
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full bg-white transition-transform ${
+                            activityFilters[key] ? "translate-x-[14px]" : ""
+                          }`}
+                        />
+                      </button>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </GlowCard>
+
         {/* Account */}
         <GlowCard glowColor="none" className="p-5">
           <h3 className="font-mono text-sm font-medium text-[var(--gray-200)] mb-4 m-0">Account</h3>
@@ -223,4 +384,3 @@ export default function SettingsPage() {
     </AppShell>
   );
 }
-

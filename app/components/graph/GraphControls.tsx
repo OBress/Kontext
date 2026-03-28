@@ -1,7 +1,7 @@
 "use client";
 
 import { useGraphStore, GraphLayout } from "@/lib/store/graph-store";
-import { Search, Maximize2, Minimize2, Camera, SlidersHorizontal } from "lucide-react";
+import { Search, Maximize2, Minimize2, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 
 const fileTypeColors: Record<string, { color: string; label: string }> = {

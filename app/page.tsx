@@ -3,11 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAppStore, Repo } from "@/lib/store/app-store";
 import { AppShell } from "./components/shell/AppShell";
-import { RepoCardGrid } from "./components/dashboard/RepoCardGrid";
-import { ActivityFeed } from "./components/dashboard/ActivityFeed";
-import { GlowCard } from "./components/shared/GlowCard";
-import { AnimatedCounter } from "./components/shared/AnimatedCounter";
-import { Database, Code2, Users, Plus, GitBranch, Sparkles } from "lucide-react";
+import { Database, Plus, GitBranch, Sparkles, LogIn } from "lucide-react";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { ConstellationNode } from "./components/dashboard/RepoConstellation";
 
@@ -24,28 +21,42 @@ const ParticleField = dynamic(
   { ssr: false }
 );
 
-export default function DashboardPage() {
+export default function HomePage() {
   const { repos, setRepos, setAddRepoModalOpen, setAddRepoDefaultUrl } = useAppStore();
   const [githubRepos, setGithubRepos] = useState<Repo[]>([]);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const router = useRouter();
 
-  // Fetch added repos on mount
+  // Check auth status + fetch repos on mount
   useEffect(() => {
     fetch("/api/repos")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.repos) setRepos(data.repos);
+      .then((r) => {
+        if (r.status === 401) {
+          setIsAuthenticated(false);
+          return null;
+        }
+        setIsAuthenticated(true);
+        return r.json();
       })
-      .catch(() => {});
+      .then((data) => {
+        if (data?.repos) setRepos(data.repos);
+      })
+      .catch(() => setIsAuthenticated(false));
   }, [setRepos]);
 
-  // Also fetch user's GitHub repos for constellation display
+  // Also fetch user's GitHub repos for constellation display (only if authed)
   useEffect(() => {
+    if (isAuthenticated !== true) return;
+
     fetch("/api/repos?source=github")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) return null;
+        return r.json();
+      })
       .then((data) => {
-        if (data.repos) {
+        if (data?.repos) {
           setGithubRepos(
-            data.repos.map((r: any) => ({
+            data.repos.map((r: { id: number; full_name: string; name: string; owner?: string; description?: string; language?: string; stargazers_count?: number; forks_count?: number; updated_at?: string }) => ({
               id: r.id,
               full_name: r.full_name,
               name: r.name,
@@ -63,7 +74,7 @@ export default function DashboardPage() {
         }
       })
       .catch(() => {});
-  }, []);
+  }, [isAuthenticated]);
 
   // Merge: added repos + GitHub repos (deduped) for the constellation
   const constellationRepos = (() => {
@@ -72,35 +83,46 @@ export default function DashboardPage() {
     return [...repos, ...ghOnly];
   })();
 
-  const indexedRepos = repos.filter((r) => r.indexed);
-  const totalChunks = repos.reduce((sum, r) => sum + r.chunk_count, 0);
-  const hasRepos = repos.length > 0;
+  // Gate interactive actions behind auth — redirect to login if not authenticated
+  const requireAuth = useCallback(
+    (action: () => void) => {
+      if (isAuthenticated) {
+        action();
+      } else {
+        router.push("/login");
+      }
+    },
+    [isAuthenticated, router]
+  );
 
   // When a constellation node is clicked, open the add-repo modal with the repo URL pre-filled
   const handleNodeClick = useCallback(
     (node: ConstellationNode) => {
-      setAddRepoDefaultUrl(`https://github.com/${node.owner}/${node.name}`);
-      setAddRepoModalOpen(true);
+      requireAuth(() => {
+        setAddRepoDefaultUrl(`https://github.com/${node.owner}/${node.name}`);
+        setAddRepoModalOpen(true);
+      });
     },
-    [setAddRepoModalOpen, setAddRepoDefaultUrl]
+    [requireAuth, setAddRepoModalOpen, setAddRepoDefaultUrl]
   );
 
   return (
     <AppShell>
       <ParticleField />
       <div className="relative z-10 mx-auto">
-        {!hasRepos ? (
-          /* ═══ Empty state — side-by-side hero ═══ */
-          <div className="-m-6 flex flex-col lg:flex-row items-center justify-center min-h-[calc(100vh-3rem)] gap-8 lg:gap-12 overflow-visible">
-            {/* Left — text + CTA */}
-            <div className="flex flex-col justify-center items-start lg:w-[480px] shrink-0 text-left px-10 lg:pl-12 lg:pr-6">
-              <h1 className="font-mono text-3xl md:text-5xl font-semibold text-gradient mb-4">
-                Welcome to Kontext
-              </h1>
-              <p className="font-mono text-sm md:text-base text-[var(--gray-400)] max-w-lg mb-10 leading-relaxed">
-                Add a repository to unlock AI-powered code intelligence,
-                3D architecture visualization, and team onboarding.
-              </p>
+        {/* Always show the constellation hero */}
+        <div className="-m-6 flex flex-col lg:flex-row items-center justify-center min-h-[calc(100vh-3rem)] gap-8 lg:gap-12 overflow-visible">
+          {/* Left — text + CTA */}
+          <div className="flex flex-col justify-center items-start lg:w-[480px] shrink-0 text-left px-10 lg:pl-12 lg:pr-6">
+            <h1 className="font-mono text-3xl md:text-5xl font-semibold text-gradient mb-4">
+              Welcome to Kontext
+            </h1>
+            <p className="font-mono text-sm md:text-base text-[var(--gray-400)] max-w-lg mb-10 leading-relaxed">
+              Add a repository to unlock AI-powered code intelligence,
+              3D architecture visualization, and team onboarding.
+            </p>
+
+            {isAuthenticated ? (
               <button
                 onClick={() => setAddRepoModalOpen(true)}
                 className="flex items-center gap-2 px-6 py-3 rounded-xl font-mono text-sm bg-[var(--accent-green)] text-black font-medium hover:opacity-90 transition-all cursor-pointer border-none hover:shadow-[0_0_30px_rgba(63,185,80,0.2)] active:scale-[0.98] mb-12"
@@ -108,127 +130,41 @@ export default function DashboardPage() {
                 <Plus size={16} />
                 Add Repository
               </button>
+            ) : (
+              <button
+                onClick={() => router.push("/login")}
+                className="flex items-center gap-2 px-6 py-3 rounded-xl font-mono text-sm bg-[var(--accent-green)] text-black font-medium hover:opacity-90 transition-all cursor-pointer border-none hover:shadow-[0_0_30px_rgba(63,185,80,0.2)] active:scale-[0.98] mb-12"
+              >
+                <LogIn size={16} />
+                Sign in with GitHub
+              </button>
+            )}
 
-              {/* Feature hints */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">
-                <FeatureHint
-                  icon={<Sparkles size={18} className="text-[var(--accent-green)]" />}
-                  title="AI Chat"
-                  description="Ask questions about any codebase"
-                />
-                <FeatureHint
-                  icon={<GitBranch size={18} className="text-[var(--accent-muted)]" />}
-                  title="3D Graph"
-                  description="Visualize architecture & dependencies"
-                />
-                <FeatureHint
-                  icon={<Database size={18} className="text-[var(--accent-green)]" />}
-                  title="RAG Engine"
-                  description="Embeddings-powered knowledge base"
-                />
-              </div>
-            </div>
-
-            {/* Right — constellation fills remaining space */}
-            <div className="flex-1 w-full min-w-0 h-[50vh] lg:h-[calc(100vh-3rem)] overflow-visible">
-              <RepoConstellation repos={constellationRepos} onNodeClick={handleNodeClick} fillContainer />
-            </div>
-          </div>
-        ) : (
-          /* ═══ Active dashboard ═══ */
-          <div className="space-y-8">
-            {/* Header row: title + constellation + add button */}
-            <div className="flex flex-col items-center gap-6">
-              {/* Constellation at the top of dashboard */}
-              <div className="w-full flex justify-center">
-                <RepoConstellation repos={constellationRepos} onNodeClick={handleNodeClick} />
-              </div>
-
-              <div className="flex items-center justify-between w-full">
-                <div>
-                  <h1 className="font-mono text-xl font-semibold text-[var(--gray-100)] mb-1 m-0">
-                    Dashboard
-                  </h1>
-                  <p className="font-mono text-sm text-[var(--gray-500)] m-0">
-                    Your repositories at a glance
-                  </p>
-                </div>
-                <button
-                  onClick={() => setAddRepoModalOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg font-mono text-sm bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20 hover:bg-[var(--accent-green)]/20 transition-colors cursor-pointer"
-                >
-                  <Plus size={14} />
-                  Add Repo
-                </button>
-              </div>
-            </div>
-
-            {/* Stats row */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <GlowCard glowColor="cyan" className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-[var(--accent-green)]/10">
-                    <Database size={18} className="text-[var(--accent-green)]" />
-                  </div>
-                  <div>
-                    <p className="font-mono text-[11px] uppercase text-[var(--gray-500)] m-0">
-                      Repos Added
-                    </p>
-                    <p className="font-mono text-2xl font-semibold text-[var(--gray-100)] m-0">
-                      <AnimatedCounter value={repos.length} />
-                    </p>
-                  </div>
-                </div>
-              </GlowCard>
-
-              <GlowCard glowColor="purple" className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-[var(--accent-muted)]/10">
-                    <Code2 size={18} className="text-[var(--accent-muted)]" />
-                  </div>
-                  <div>
-                    <p className="font-mono text-[11px] uppercase text-[var(--gray-500)] m-0">
-                      Total Chunks
-                    </p>
-                    <p className="font-mono text-2xl font-semibold text-[var(--gray-100)] m-0">
-                      <AnimatedCounter value={totalChunks} format="compact" />
-                    </p>
-                  </div>
-                </div>
-              </GlowCard>
-
-              <GlowCard glowColor="green" className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-[var(--accent-green)]/10">
-                    <Users size={18} className="text-[var(--accent-green)]" />
-                  </div>
-                  <div>
-                    <p className="font-mono text-[11px] uppercase text-[var(--gray-500)] m-0">
-                      Indexed
-                    </p>
-                    <p className="font-mono text-2xl font-semibold text-[var(--gray-100)] m-0">
-                      <AnimatedCounter value={indexedRepos.length} />
-                    </p>
-                  </div>
-                </div>
-              </GlowCard>
-            </div>
-
-            {/* Main content: grid + activity */}
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-8">
-              <div>
-                <h2 className="font-mono text-sm uppercase tracking-wider text-[var(--gray-500)] mb-4 m-0">
-                  Your Repositories
-                </h2>
-                <RepoCardGrid repos={repos} />
-              </div>
-
-              <div className="hidden lg:block">
-                <ActivityFeed />
-              </div>
+            {/* Feature hints */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">
+              <FeatureHint
+                icon={<Sparkles size={18} className="text-[var(--accent-green)]" />}
+                title="AI Chat"
+                description="Ask questions about any codebase"
+              />
+              <FeatureHint
+                icon={<GitBranch size={18} className="text-[var(--accent-muted)]" />}
+                title="3D Graph"
+                description="Visualize architecture & dependencies"
+              />
+              <FeatureHint
+                icon={<Database size={18} className="text-[var(--accent-green)]" />}
+                title="RAG Engine"
+                description="Embeddings-powered knowledge base"
+              />
             </div>
           </div>
-        )}
+
+          {/* Right — constellation fills remaining space */}
+          <div className="flex-1 w-full min-w-0 h-[50vh] lg:h-[calc(100vh-3rem)] overflow-visible">
+            <RepoConstellation repos={constellationRepos} onNodeClick={handleNodeClick} fillContainer />
+          </div>
+        </div>
       </div>
     </AppShell>
   );

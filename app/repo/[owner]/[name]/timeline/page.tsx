@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useAppStore } from "@/lib/store/app-store";
+import { useCurrentRepo } from "@/hooks/use-current-repo";
 import {
   GitCommit,
   FileText,
@@ -40,7 +41,8 @@ interface TimelineStats {
 }
 
 export default function TimelinePage() {
-  const { activeRepo, apiKey } = useAppStore();
+  const activeRepo = useCurrentRepo();
+  const { apiKey } = useAppStore();
   const [commits, setCommits] = useState<TimelineCommit[]>([]);
   const [stats, setStats] = useState<TimelineStats>({ totalCommits: 0, syncedCommits: 0 });
   const [loading, setLoading] = useState(true);

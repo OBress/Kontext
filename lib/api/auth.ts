@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { unauthorizedError, ApiError } from "./errors";
+import { unauthorizedError } from "./errors";
 import { decryptToken } from "./crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -121,8 +121,8 @@ export async function storeGitHubToken(
  * Create a Supabase admin client using the service role key.
  * Use sparingly — bypasses RLS.
  */
-export function createAdminClient(): SupabaseClient {
-  const { createClient } = require("@supabase/supabase-js");
+export async function createAdminClient(): Promise<SupabaseClient> {
+  const { createClient } = await import("@supabase/supabase-js");
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!

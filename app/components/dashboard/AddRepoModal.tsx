@@ -14,7 +14,6 @@ import {
   Loader2,
   Plus,
   ArrowRight,
-  CheckCircle2,
   AlertCircle,
   KeyRound,
 } from "lucide-react";
@@ -117,7 +116,7 @@ export function AddRepoModal() {
     }
   };
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     setAddRepoModalOpen(false);
     setSearch("");
     setUrlInput("");
@@ -126,7 +125,7 @@ export function AddRepoModal() {
     setAccessToken("");
     setShowTokenField(false);
     setAddRepoDefaultUrl(null);
-  };
+  }, [setAddRepoModalOpen, setAddRepoDefaultUrl]);
 
   const handleAddRepo = useCallback(
     async (repo: GitHubRepoPreview) => {
@@ -291,7 +290,8 @@ export function AddRepoModal() {
                 }
               }
             }
-          } catch (err: any) {
+          } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : "Ingestion failed";
             setIngestionStatus(repo.full_name, {
               status: "error",
               progress: 0,
@@ -299,8 +299,8 @@ export function AddRepoModal() {
               filesProcessed: 0,
               chunksCreated: 0,
               chunksTotal: 0,
-              error: err.message || "Ingestion failed",
-              message: err.message || "Ingestion failed",
+              error: errMsg,
+              message: errMsg,
             });
             updateRepo(repo.full_name, { indexing: false });
           }
@@ -314,7 +314,7 @@ export function AddRepoModal() {
         setAddingRepo(null);
       }
     },
-    [apiKey, addRepo, setIngestionStatus, updateRepo]
+    [apiKey, addRepo, setIngestionStatus, updateRepo, accessToken, handleClose]
   );
 
   const handleLookup = async () => {

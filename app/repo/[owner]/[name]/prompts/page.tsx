@@ -73,7 +73,7 @@ export default function PromptsPage() {
       setPrompt("Error generating prompt. Please try again.");
     }
     setIsGenerating(false);
-  }, []);
+  }, [apiKey, repoFullName, target, customInstructions]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(prompt);
@@ -238,6 +238,7 @@ export default function PromptsPage() {
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       code({ className, children, ...props }: any) {
                         const match = /language-(\w+)/.exec(className || "");
                         if (match) {
