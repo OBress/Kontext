@@ -11,7 +11,7 @@ const GraphScene = dynamic(
         <div className="text-center">
           <div
             className="w-16 h-16 border border-[var(--alpha-white-10)] rounded-lg animate-spin-slow mx-auto mb-4"
-            style={{ borderTopColor: "var(--accent-cyan)" }}
+            style={{ borderTopColor: "var(--accent-green)" }}
           />
           <p className="font-mono text-sm text-[var(--gray-500)]">
             Initializing graph engine...

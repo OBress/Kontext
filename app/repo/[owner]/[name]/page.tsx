@@ -51,11 +51,11 @@ export default function RepoOverviewPage() {
         >
           <GlowCard glowColor="cyan" className="p-6">
             <div className="flex items-center gap-3 mb-4">
-              <Loader2 size={18} className="text-[var(--accent-cyan)] animate-spin" />
+              <Loader2 size={18} className="text-[var(--accent-green)] animate-spin" />
               <h3 className="font-mono text-sm font-medium text-[var(--gray-200)] m-0">
                 Ingesting Repository...
               </h3>
-              <span className="ml-auto font-mono text-lg font-semibold text-[var(--accent-cyan)]">
+              <span className="ml-auto font-mono text-lg font-semibold text-[var(--accent-green)]">
                 {ingestionStatus.progress}%
               </span>
             </div>
@@ -65,7 +65,7 @@ export default function RepoOverviewPage() {
               <motion.div
                 className="h-full rounded-full"
                 style={{
-                  background: "linear-gradient(90deg, var(--accent-cyan), var(--accent-purple))",
+                  background: "linear-gradient(90deg, #238636, #3FB950)",
                 }}
                 initial={{ width: "0%" }}
                 animate={{ width: `${ingestionStatus.progress}%` }}
@@ -205,7 +205,7 @@ export default function RepoOverviewPage() {
           icon={MessageSquare}
           label="Chat"
           description="Ask questions about this codebase"
-          color="var(--accent-cyan)"
+          color="var(--accent-green)"
           disabled={!repo?.indexed}
         />
         <QuickLink
@@ -213,7 +213,7 @@ export default function RepoOverviewPage() {
           icon={Network}
           label="Architecture"
           description="3D dependency visualization"
-          color="var(--accent-purple)"
+          color="var(--accent-muted)"
           disabled={!repo?.indexed}
         />
         <QuickLink
@@ -221,7 +221,7 @@ export default function RepoOverviewPage() {
           icon={Wand2}
           label="Prompts"
           description="Generate AI system prompts"
-          color="var(--accent-amber)"
+          color="var(--accent-yellow)"
           disabled={!repo?.indexed}
         />
         <QuickLink
@@ -229,7 +229,7 @@ export default function RepoOverviewPage() {
           icon={Server}
           label="MCP Server"
           description="Model Context Protocol endpoint"
-          color="var(--accent-cyan)"
+          color="var(--accent-green)"
           disabled={!repo?.indexed}
         />
         <QuickLink

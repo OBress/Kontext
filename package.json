@@ -5,6 +5,7 @@
   "scripts": {
     "build": "next build",
     "dev": "next dev",
+    "dev:tunnel": "concurrently \"next dev\" \"cloudflared tunnel run --token eyJhIjoiNjgxYmJhYTI2OThlYjFiMWFiNGFhYmNmYWI5M2JmZDQiLCJ0IjoiNmExNDQ4NWMtZWQwNC00Y2NmLWI2MWQtOTJiOTFhOTY1Nzg2IiwicyI6Ik5UQXdNMkZoTWpNdFptRmhaaTAwTXpJNUxUazNNMkV0T0RBMk5HSmxPRGMwTnpKayJ9\"",
     "lint": "eslint",
     "start": "next start",
     "db:migration:new": "supabase migration new",
@@ -46,6 +47,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.2.1",
     "eslint": "^9",
     "eslint-config-next": "16.0.6",
     "postcss": "8.5.6",

@@ -5,10 +5,10 @@ import { Search, Maximize2, Minimize2, Camera, SlidersHorizontal } from "lucide-
 import { useState } from "react";
 
 const fileTypeColors: Record<string, { color: string; label: string }> = {
-  ts: { color: "#00E5FF", label: "TypeScript" },
+  ts: { color: "#3FB950", label: "TypeScript" },
   js: { color: "#FFD600", label: "JavaScript" },
   css: { color: "#FF4081", label: "CSS" },
-  json: { color: "#00E676", label: "JSON/YAML" },
+  json: { color: "#3FB950", label: "JSON/YAML" },
   md: { color: "#9E9E9E", label: "Markdown" },
   config: { color: "#FFB300", label: "Config" },
   other: { color: "#FFFFFF", label: "Other" },
@@ -52,7 +52,7 @@ export function GraphControls() {
                 value={filters.searchQuery}
                 onChange={(e) => setFilters({ searchQuery: e.target.value })}
                 placeholder="Find file..."
-                className="w-full pl-8 pr-3 py-1.5 rounded-md text-xs font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-cyan)]/40 transition-colors"
+                className="w-full pl-8 pr-3 py-1.5 rounded-md text-xs font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40 transition-colors"
               />
             </div>
 
@@ -119,7 +119,7 @@ export function GraphControls() {
                 }
                 className="w-full h-1 rounded-full appearance-none cursor-pointer"
                 style={{
-                  background: `linear-gradient(to right, var(--accent-cyan) ${
+                  background: `linear-gradient(to right, var(--accent-green) ${
                     (filters.minConnections / 5) * 100
                   }%, var(--alpha-white-10) ${
                     (filters.minConnections / 5) * 100
@@ -140,7 +140,7 @@ export function GraphControls() {
                     onClick={() => setLayout(l.value)}
                     className={`flex-1 py-1 rounded text-[10px] font-mono transition-colors border-none cursor-pointer ${
                       layout === l.value
-                        ? "bg-[var(--accent-cyan)]/15 text-[var(--accent-cyan)]"
+                        ? "bg-[var(--accent-green)]/15 text-[var(--accent-green)]"
                         : "bg-[var(--alpha-white-5)] text-[var(--gray-500)] hover:text-[var(--gray-300)]"
                     }`}
                   >

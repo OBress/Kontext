@@ -355,7 +355,7 @@ function GlowRings({ placements, hoveredId, spotlightIds }: GlowRingsProps) {
         <mesh key={i} visible={false}>
           <ringGeometry args={[0.8, 1, 32]} />
           <meshBasicMaterial
-            color="#00E5FF"
+            color="#3FB950"
             transparent
             opacity={0.3}
             side={THREE.DoubleSide}

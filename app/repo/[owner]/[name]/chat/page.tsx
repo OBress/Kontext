@@ -33,7 +33,7 @@ function SuggestedQuestions({ onSelect }: { onSelect: (q: string) => void }) {
         <button
           key={q}
           onClick={() => onSelect(q)}
-          className="px-3 py-1.5 rounded-lg text-xs font-mono bg-[var(--alpha-white-5)] text-[var(--gray-400)] border border-[var(--alpha-white-8)] hover:text-[var(--accent-cyan)] hover:border-[var(--accent-cyan)]/30 transition-colors cursor-pointer"
+          className="px-3 py-1.5 rounded-lg text-xs font-mono bg-[var(--alpha-white-5)] text-[var(--gray-400)] border border-[var(--alpha-white-8)] hover:text-[var(--accent-green)] hover:border-[var(--accent-green)]/30 transition-colors cursor-pointer"
         >
           {q}
         </button>
@@ -64,8 +64,8 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
   return (
     <div className="flex justify-start mb-4">
-      <div className="max-w-[85%] px-4 py-3 rounded-xl glass border-l-2 border-[var(--accent-cyan)]">
-        <div className="prose prose-invert prose-sm max-w-none font-mono text-sm text-[var(--gray-200)] [&_p]:m-0 [&_p]:mb-2 [&_h2]:text-[var(--gray-100)] [&_h2]:text-sm [&_h2]:mt-4 [&_h2]:mb-2 [&_h3]:text-[var(--gray-200)] [&_h3]:text-sm [&_ul]:my-1 [&_li]:my-0.5 [&_code]:text-[var(--accent-cyan)] [&_code]:bg-[var(--alpha-white-5)] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_strong]:text-[var(--gray-100)]">
+      <div className="max-w-[85%] px-4 py-3 rounded-xl glass border-l-2 border-[var(--accent-green)]">
+        <div className="prose prose-invert prose-sm max-w-none font-mono text-sm text-[var(--gray-200)] [&_p]:m-0 [&_p]:mb-2 [&_h2]:text-[var(--gray-100)] [&_h2]:text-sm [&_h2]:mt-4 [&_h2]:mb-2 [&_h3]:text-[var(--gray-200)] [&_h3]:text-sm [&_ul]:my-1 [&_li]:my-0.5 [&_code]:text-[var(--accent-green)] [&_code]:bg-[var(--alpha-white-5)] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_strong]:text-[var(--gray-100)]">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -124,15 +124,15 @@ function SourceChip({ source }: { source: ChatSource }) {
     <div className="animate-fade-in-up">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--alpha-white-5)] border border-[var(--alpha-white-8)] hover:border-[var(--accent-cyan)]/30 transition-colors cursor-pointer text-left"
+        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--alpha-white-5)] border border-[var(--alpha-white-8)] hover:border-[var(--accent-green)]/30 transition-colors cursor-pointer text-left"
       >
-        <FileCode size={14} className="text-[var(--accent-cyan)] shrink-0" />
+        <FileCode size={14} className="text-[var(--accent-green)] shrink-0" />
         <span className="font-mono text-xs text-[var(--gray-300)] truncate flex-1">
           {source.file_path}
         </span>
         <div className="shrink-0 w-12 h-1.5 rounded-full bg-[var(--alpha-white-8)] overflow-hidden">
           <div
-            className="h-full rounded-full bg-[var(--accent-cyan)]"
+            className="h-full rounded-full bg-[var(--accent-green)]"
             style={{ width: `${source.similarity * 100}%` }}
           />
         </div>
@@ -201,7 +201,7 @@ function ChatInput({
       <div
         className={`flex items-end gap-2 rounded-xl border transition-colors ${
           input
-            ? "border-[var(--accent-cyan)]/30"
+            ? "border-[var(--accent-green)]/30"
             : "border-[var(--alpha-white-8)]"
         } bg-[var(--surface-1)] px-4 py-3`}
       >
@@ -229,7 +229,7 @@ function ChatInput({
             disabled={!input.trim()}
             className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center border-none cursor-pointer transition-all ${
               input.trim()
-                ? "bg-[var(--accent-cyan)] text-black glow-cyan"
+                ? "bg-[var(--accent-green)] text-black glow-green"
                 : "bg-[var(--alpha-white-5)] text-[var(--gray-600)]"
             }`}
           >
@@ -366,9 +366,9 @@ export default function ChatPage() {
           {isStreaming && (
             <div className="flex items-center gap-2 ml-4 mb-4">
               <div className="flex gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-cyan)] animate-pulse" />
-                <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-cyan)] animate-pulse [animation-delay:0.15s]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-cyan)] animate-pulse [animation-delay:0.3s]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-green)] animate-pulse" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-green)] animate-pulse [animation-delay:0.15s]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-green)] animate-pulse [animation-delay:0.3s]" />
               </div>
             </div>
           )}
@@ -389,7 +389,7 @@ export default function ChatPage() {
           <h3 className="font-mono text-xs uppercase tracking-wider text-[var(--gray-500)] m-0">
             Referenced Files
             {currentSources.length > 0 && (
-              <span className="ml-2 text-[var(--accent-cyan)]">
+              <span className="ml-2 text-[var(--accent-green)]">
                 ({currentSources.length})
               </span>
             )}

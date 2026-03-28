@@ -1,41 +1,44 @@
 @import "tailwindcss";
 
 /* ═══════════════════════════════════════════════════
-   Kontext — Dark Design System
+   Kontext — GitHub Dark Design System
    ═══════════════════════════════════════════════════ */
 
 :root {
-  --background: #000000;
-  --foreground: #ededed;
+  --background: #010409;
+  --foreground: #C9D1D9;
 
   /* Surface layers (darkest → lightest) */
-  --surface-0: #000000;
-  --surface-1: #0A0A0F;
-  --surface-2: #111118;
-  --surface-3: #1A1A24;
-  --surface-4: #252530;
+  --surface-0: #010409;
+  --surface-1: #0D1117;
+  --surface-2: #161B22;
+  --surface-3: #21262D;
+  --surface-4: #30363D;
 
-  /* Accent palette */
-  --accent-cyan: #00E5FF;
-  --accent-purple: #7C4DFF;
-  --accent-green: #00E676;
-  --accent-amber: #FFB300;
-  --accent-red: #FF5252;
-  --accent-pink: #FF4081;
-  --accent-yellow: #FFD600;
+  /* Accent palette — GitHub */
+  --accent-green: #3FB950;
+  --accent-muted: #8B949E;
+  --accent-amber: #D29922;
+  --accent-red: #F85149;
+  --accent-yellow: #E3B341;
 
-  /* Grays */
-  --gray-50: #fafafa;
-  --gray-100: #f5f5f5;
-  --gray-200: #e5e5e5;
-  --gray-300: #d4d4d4;
-  --gray-400: #a3a3a3;
-  --gray-500: #737373;
-  --gray-600: #525252;
-  --gray-700: #404040;
-  --gray-800: #262626;
-  --gray-900: #171717;
-  --gray-950: #0a0a0a;
+  /* Legacy alias (components still using --accent-cyan) */
+  --accent-cyan: #3FB950;
+  --accent-purple: #8B949E;
+  --accent-pink: #F85149;
+
+  /* Grays — GitHub Dark scale */
+  --gray-50: #F0F6FC;
+  --gray-100: #C9D1D9;
+  --gray-200: #B1BAC4;
+  --gray-300: #8B949E;
+  --gray-400: #6E7681;
+  --gray-500: #484F58;
+  --gray-600: #30363D;
+  --gray-700: #21262D;
+  --gray-800: #161B22;
+  --gray-900: #0D1117;
+  --gray-950: #010409;
 
   /* Alpha overlays */
   --alpha-white-5: rgba(255, 255, 255, 0.05);
@@ -48,36 +51,36 @@
 
   /* Shadcn tokens (dark only) */
   --radius: 0.625rem;
-  --card: #111118;
-  --card-foreground: #ededed;
-  --popover: #111118;
-  --popover-foreground: #ededed;
-  --primary: #00E5FF;
-  --primary-foreground: #000000;
-  --secondary: #1A1A24;
-  --secondary-foreground: #ededed;
-  --muted: #1A1A24;
-  --muted-foreground: #737373;
-  --accent: #1A1A24;
-  --accent-foreground: #ededed;
-  --destructive: #FF5252;
-  --destructive-foreground: #ededed;
-  --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.08);
-  --ring: #00E5FF;
-  --chart-1: #00E5FF;
-  --chart-2: #7C4DFF;
-  --chart-3: #00E676;
-  --chart-4: #FFB300;
-  --chart-5: #FF4081;
-  --sidebar: #0A0A0F;
-  --sidebar-foreground: #ededed;
-  --sidebar-primary: #00E5FF;
-  --sidebar-primary-foreground: #000000;
-  --sidebar-accent: #1A1A24;
-  --sidebar-accent-foreground: #ededed;
-  --sidebar-border: rgba(255, 255, 255, 0.06);
-  --sidebar-ring: #00E5FF;
+  --card: #0D1117;
+  --card-foreground: #C9D1D9;
+  --popover: #0D1117;
+  --popover-foreground: #C9D1D9;
+  --primary: #3FB950;
+  --primary-foreground: #010409;
+  --secondary: #21262D;
+  --secondary-foreground: #C9D1D9;
+  --muted: #21262D;
+  --muted-foreground: #484F58;
+  --accent: #21262D;
+  --accent-foreground: #C9D1D9;
+  --destructive: #F85149;
+  --destructive-foreground: #C9D1D9;
+  --border: #30363D;
+  --input: #30363D;
+  --ring: #3FB950;
+  --chart-1: #3FB950;
+  --chart-2: #8B949E;
+  --chart-3: #3FB950;
+  --chart-4: #D29922;
+  --chart-5: #F85149;
+  --sidebar: #0D1117;
+  --sidebar-foreground: #C9D1D9;
+  --sidebar-primary: #3FB950;
+  --sidebar-primary-foreground: #010409;
+  --sidebar-accent: #21262D;
+  --sidebar-accent-foreground: #C9D1D9;
+  --sidebar-border: #30363D;
+  --sidebar-ring: #3FB950;
 }
 
 @theme inline {
@@ -136,17 +139,17 @@
 /* ═══ Glass / Surface utilities ═══ */
 
 .glass {
-  background: rgba(17, 17, 24, 0.7);
+  background: rgba(13, 17, 23, 0.7);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid #30363D;
 }
 
 .glass-strong {
-  background: rgba(17, 17, 24, 0.85);
+  background: rgba(13, 17, 23, 0.85);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid #30363D;
 }
 
 .surface-1 { background: var(--surface-1); }
@@ -156,26 +159,26 @@
 
 /* ═══ Glow effects ═══ */
 
+.glow-green {
+  box-shadow: 0 0 20px rgba(63, 185, 80, 0.15), 0 0 60px rgba(63, 185, 80, 0.05);
+}
+
 .glow-cyan {
-  box-shadow: 0 0 20px rgba(0, 229, 255, 0.15), 0 0 60px rgba(0, 229, 255, 0.05);
+  box-shadow: 0 0 20px rgba(63, 185, 80, 0.15), 0 0 60px rgba(63, 185, 80, 0.05);
 }
 
 .glow-purple {
-  box-shadow: 0 0 20px rgba(124, 77, 255, 0.15), 0 0 60px rgba(124, 77, 255, 0.05);
-}
-
-.glow-green {
-  box-shadow: 0 0 20px rgba(0, 230, 118, 0.15);
+  box-shadow: 0 0 20px rgba(139, 148, 158, 0.12), 0 0 60px rgba(139, 148, 158, 0.04);
 }
 
 .glow-red {
-  box-shadow: 0 0 15px rgba(255, 82, 82, 0.2);
+  box-shadow: 0 0 15px rgba(248, 81, 73, 0.2);
 }
 
 /* ═══ Text gradient ═══ */
 
 .text-gradient {
-  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+  background: linear-gradient(135deg, #3FB950, #C9D1D9);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;

@@ -117,7 +117,7 @@ export default function PromptsPage() {
                 onClick={() => setTarget(opt.value)}
                 className={`py-2 px-3 rounded-lg text-xs font-mono transition-colors border cursor-pointer ${
                   target === opt.value
-                    ? "bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)] border-[var(--accent-cyan)]/30"
+                    ? "bg-[var(--accent-green)]/10 text-[var(--accent-green)] border-[var(--accent-green)]/30"
                     : "bg-[var(--alpha-white-5)] text-[var(--gray-400)] border-[var(--alpha-white-8)] hover:text-[var(--gray-200)]"
                 }`}
               >
@@ -151,7 +151,7 @@ export default function PromptsPage() {
                         }
                         className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono transition-colors border cursor-pointer ${
                           enabledTech[item.name]
-                            ? "bg-[var(--accent-cyan)]/8 text-[var(--gray-200)] border-[var(--accent-cyan)]/20"
+                            ? "bg-[var(--accent-green)]/8 text-[var(--gray-200)] border-[var(--accent-green)]/20"
                             : "bg-transparent text-[var(--gray-600)] border-[var(--alpha-white-8)] line-through"
                         }`}
                       >
@@ -178,7 +178,7 @@ export default function PromptsPage() {
             onChange={(e) => setCustomInstructions(e.target.value)}
             placeholder="Add custom rules or context..."
             rows={4}
-            className="w-full px-3 py-2 rounded-lg text-xs font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-cyan)]/40 transition-colors resize-none"
+            className="w-full px-3 py-2 rounded-lg text-xs font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40 transition-colors resize-none"
           />
         </GlowCard>
 
@@ -186,7 +186,7 @@ export default function PromptsPage() {
         <button
           onClick={handleGenerate}
           disabled={isGenerating}
-          className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-mono text-sm bg-[var(--accent-cyan)] text-black font-medium hover:opacity-90 disabled:opacity-50 transition-opacity cursor-pointer border-none"
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-mono text-sm bg-[var(--accent-green)] text-black font-medium hover:opacity-90 disabled:opacity-50 transition-opacity cursor-pointer border-none"
         >
           {isGenerating ? (
             <Loader2 size={16} className="animate-spin" />
@@ -234,7 +234,7 @@ export default function PromptsPage() {
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-4">
               {showPreview ? (
-                <div className="prose prose-invert prose-sm max-w-none font-mono text-sm text-[var(--gray-200)] [&_h1]:text-lg [&_h1]:text-[var(--gray-100)] [&_h2]:text-sm [&_h2]:text-[var(--gray-200)] [&_h3]:text-sm [&_h3]:text-[var(--gray-300)] [&_code]:text-[var(--accent-cyan)] [&_code]:bg-[var(--alpha-white-5)] [&_code]:px-1 [&_code]:rounded [&_strong]:text-[var(--gray-100)] [&_li]:text-[var(--gray-300)]">
+                <div className="prose prose-invert prose-sm max-w-none font-mono text-sm text-[var(--gray-200)] [&_h1]:text-lg [&_h1]:text-[var(--gray-100)] [&_h2]:text-sm [&_h2]:text-[var(--gray-200)] [&_h3]:text-sm [&_h3]:text-[var(--gray-300)] [&_code]:text-[var(--accent-green)] [&_code]:bg-[var(--alpha-white-5)] [&_code]:px-1 [&_code]:rounded [&_strong]:text-[var(--gray-100)] [&_li]:text-[var(--gray-300)]">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{

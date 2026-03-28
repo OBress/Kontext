@@ -7,10 +7,10 @@ interface PulseOrbProps {
 }
 
 const colorMap = {
-  cyan: { bg: "bg-[#00E5FF]", ring: "rgba(0,229,255,0.4)" },
-  green: { bg: "bg-[#00E676]", ring: "rgba(0,230,118,0.4)" },
-  amber: { bg: "bg-[#FFB300]", ring: "rgba(255,179,0,0.4)" },
-  red: { bg: "bg-[#FF5252]", ring: "rgba(255,82,82,0.4)" },
+  cyan: { bg: "bg-[#3FB950]", ring: "rgba(63,185,80,0.4)" },
+  green: { bg: "bg-[#3FB950]", ring: "rgba(63,185,80,0.4)" },
+  amber: { bg: "bg-[#D29922]", ring: "rgba(210,153,34,0.4)" },
+  red: { bg: "bg-[#F85149]", ring: "rgba(248,81,73,0.4)" },
 };
 
 const sizeMap = {

@@ -45,7 +45,7 @@ export function TabBar({ basePath }: TabBarProps) {
             href={href}
             className={`
               relative flex items-center gap-2 px-4 py-3 text-sm font-mono whitespace-nowrap transition-colors no-underline
-              ${isActive ? "text-[var(--accent-cyan)]" : "text-[var(--gray-500)] hover:text-[var(--gray-300)]"}
+              ${isActive ? "text-[var(--accent-green)]" : "text-[var(--gray-500)] hover:text-[var(--gray-300)]"}
             `}
           >
             <tab.icon size={15} />
@@ -53,7 +53,7 @@ export function TabBar({ basePath }: TabBarProps) {
             {isActive && (
               <motion.div
                 layoutId="tab-underline"
-                className="absolute bottom-0 left-0 right-0 h-[2px] bg-[var(--accent-cyan)]"
+                className="absolute bottom-0 left-0 right-0 h-[2px] bg-[var(--accent-green)]"
                 transition={{ duration: 0.2 }}
               />
             )}

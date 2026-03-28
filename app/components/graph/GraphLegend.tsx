@@ -1,10 +1,10 @@
 "use client";
 
 const fileTypeColors: Record<string, { color: string; label: string }> = {
-  ts: { color: "#00E5FF", label: "TypeScript" },
+  ts: { color: "#3FB950", label: "TypeScript" },
   js: { color: "#FFD600", label: "JavaScript" },
   css: { color: "#FF4081", label: "CSS/SCSS" },
-  json: { color: "#00E676", label: "JSON/YAML" },
+  json: { color: "#3FB950", label: "JSON/YAML" },
   md: { color: "#9E9E9E", label: "Markdown" },
   config: { color: "#FFB300", label: "Config" },
   other: { color: "#FFFFFF", label: "Other" },

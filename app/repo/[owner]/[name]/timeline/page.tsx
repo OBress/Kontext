@@ -139,7 +139,7 @@ export default function TimelinePage() {
       {/* Header + Stats */}
       <div className="mb-6">
         <h2 className="text-lg font-mono font-bold text-white flex items-center gap-2">
-          <History size={18} className="text-[var(--accent-cyan)]" />
+          <History size={18} className="text-[var(--accent-green)]" />
           Development Timeline
         </h2>
         <p className="text-xs font-mono text-[var(--gray-500)] mt-1">
@@ -149,7 +149,7 @@ export default function TimelinePage() {
         {stats.totalCommits > 0 && (
           <div className="flex gap-4 mt-4">
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--alpha-white-3)] border border-[var(--alpha-white-5)]">
-              <BarChart3 size={13} className="text-[var(--accent-cyan)]" />
+              <BarChart3 size={13} className="text-[var(--accent-green)]" />
               <span className="text-xs font-mono text-[var(--gray-300)]">
                 <span className="text-white font-semibold">{stats.totalCommits}</span> commits tracked
               </span>
@@ -167,7 +167,7 @@ export default function TimelinePage() {
       {/* Timeline */}
       {loading && commits.length === 0 ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 size={20} className="animate-spin text-[var(--accent-cyan)]" />
+          <Loader2 size={20} className="animate-spin text-[var(--accent-green)]" />
         </div>
       ) : commits.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -179,7 +179,7 @@ export default function TimelinePage() {
       ) : (
         <div className="relative">
           {/* Timeline line */}
-          <div className="absolute left-4 top-0 bottom-0 w-px bg-gradient-to-b from-[var(--accent-cyan)]/50 via-[var(--alpha-white-10)] to-transparent" />
+          <div className="absolute left-4 top-0 bottom-0 w-px bg-gradient-to-b from-[var(--accent-green)]/50 via-[var(--alpha-white-10)] to-transparent" />
 
           <div className="space-y-0">
             <AnimatePresence>
@@ -198,7 +198,7 @@ export default function TimelinePage() {
                     {/* Timeline dot */}
                     <div className={`absolute left-2.5 top-5 w-3 h-3 rounded-full border-2 ${
                       commit.sync_triggered
-                        ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)]/30"
+                        ? "border-[var(--accent-green)] bg-[var(--accent-green)]/30"
                         : "border-[var(--gray-600)] bg-[var(--gray-900)]"
                     }`} />
 
@@ -245,7 +245,7 @@ export default function TimelinePage() {
                               {commit.sha.slice(0, 7)}
                             </span>
                             {commit.sync_triggered && (
-                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)]">
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-green)]/10 text-[var(--accent-green)]">
                                 ⚡ Synced
                               </span>
                             )}

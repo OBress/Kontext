@@ -13,19 +13,19 @@ const activities = [
     icon: MessageSquare,
     text: "Chat session with acme/api-gateway",
     time: "5 hours ago",
-    color: "var(--accent-cyan)",
+    color: "var(--accent-green)",
   },
   {
     icon: Wand2,
     text: "System prompt generated for ml-pipeline",
     time: "1 day ago",
-    color: "var(--accent-purple)",
+    color: "var(--accent-muted)",
   },
   {
     icon: Users,
     text: "Sarah joined acme/web-platform",
     time: "2 days ago",
-    color: "var(--accent-amber)",
+    color: "var(--accent-yellow)",
   },
   {
     icon: Database,

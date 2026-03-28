@@ -103,7 +103,7 @@ export default function DashboardPage() {
               </p>
               <button
                 onClick={() => setAddRepoModalOpen(true)}
-                className="flex items-center gap-2 px-6 py-3 rounded-xl font-mono text-sm bg-[var(--accent-cyan)] text-black font-medium hover:opacity-90 transition-all cursor-pointer border-none hover:shadow-[0_0_30px_rgba(0,229,255,0.2)] active:scale-[0.98] mb-12"
+                className="flex items-center gap-2 px-6 py-3 rounded-xl font-mono text-sm bg-[var(--accent-green)] text-black font-medium hover:opacity-90 transition-all cursor-pointer border-none hover:shadow-[0_0_30px_rgba(63,185,80,0.2)] active:scale-[0.98] mb-12"
               >
                 <Plus size={16} />
                 Add Repository
@@ -112,12 +112,12 @@ export default function DashboardPage() {
               {/* Feature hints */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">
                 <FeatureHint
-                  icon={<Sparkles size={18} className="text-[var(--accent-cyan)]" />}
+                  icon={<Sparkles size={18} className="text-[var(--accent-green)]" />}
                   title="AI Chat"
                   description="Ask questions about any codebase"
                 />
                 <FeatureHint
-                  icon={<GitBranch size={18} className="text-[var(--accent-purple)]" />}
+                  icon={<GitBranch size={18} className="text-[var(--accent-muted)]" />}
                   title="3D Graph"
                   description="Visualize architecture & dependencies"
                 />
@@ -155,7 +155,7 @@ export default function DashboardPage() {
                 </div>
                 <button
                   onClick={() => setAddRepoModalOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg font-mono text-sm bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)] border border-[var(--accent-cyan)]/20 hover:bg-[var(--accent-cyan)]/20 transition-colors cursor-pointer"
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg font-mono text-sm bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20 hover:bg-[var(--accent-green)]/20 transition-colors cursor-pointer"
                 >
                   <Plus size={14} />
                   Add Repo
@@ -167,8 +167,8 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <GlowCard glowColor="cyan" className="p-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-[var(--accent-cyan)]/10">
-                    <Database size={18} className="text-[var(--accent-cyan)]" />
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-[var(--accent-green)]/10">
+                    <Database size={18} className="text-[var(--accent-green)]" />
                   </div>
                   <div>
                     <p className="font-mono text-[11px] uppercase text-[var(--gray-500)] m-0">
@@ -183,8 +183,8 @@ export default function DashboardPage() {
 
               <GlowCard glowColor="purple" className="p-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-[var(--accent-purple)]/10">
-                    <Code2 size={18} className="text-[var(--accent-purple)]" />
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-[var(--accent-muted)]/10">
+                    <Code2 size={18} className="text-[var(--accent-muted)]" />
                   </div>
                   <div>
                     <p className="font-mono text-[11px] uppercase text-[var(--gray-500)] m-0">

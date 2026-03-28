@@ -13,7 +13,7 @@ export function TopBar() {
     <header className="fixed top-0 left-0 right-0 h-12 z-50 flex items-center justify-between px-4 border-b border-[var(--alpha-white-5)] bg-[var(--surface-0)]/90 backdrop-blur-md">
       {/* Left: Logo */}
       <div className="flex items-center gap-2.5 min-w-[180px]">
-        <span className="text-[var(--accent-cyan)] text-lg leading-none">◆</span>
+        <span className="text-[var(--accent-green)] text-lg leading-none">◆</span>
         <span className="font-mono text-sm font-semibold tracking-tight text-gradient">
           Kontext
         </span>
@@ -24,7 +24,7 @@ export function TopBar() {
         <RepoSelector />
         <button
           onClick={() => setAddRepoModalOpen(true)}
-          className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center border border-[var(--alpha-white-8)] bg-transparent hover:bg-[var(--accent-cyan)]/10 hover:border-[var(--accent-cyan)]/30 transition-colors cursor-pointer text-[var(--gray-400)] hover:text-[var(--accent-cyan)]"
+          className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center border border-[var(--alpha-white-8)] bg-transparent hover:bg-[var(--accent-green)]/10 hover:border-[var(--accent-green)]/30 transition-colors cursor-pointer text-[var(--gray-400)] hover:text-[var(--accent-green)]"
           title="Add repository"
         >
           <Plus size={16} />

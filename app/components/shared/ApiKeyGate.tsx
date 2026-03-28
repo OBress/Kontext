@@ -71,7 +71,7 @@ export function ApiKeyGate() {
                 className="w-14 h-14 rounded-full flex items-center justify-center"
                 style={{ background: "var(--alpha-white-5)" }}
               >
-                <Lock size={24} className="text-[var(--accent-cyan)]" />
+                <Lock size={24} className="text-[var(--accent-green)]" />
               </motion.div>
             </div>
 
@@ -93,7 +93,7 @@ export function ApiKeyGate() {
                   setTestStatus("idle");
                 }}
                 placeholder="AIza..."
-                className="w-full px-4 py-3 pr-12 rounded-lg font-mono text-sm bg-[var(--surface-1)] border border-[var(--alpha-white-8)] text-[var(--gray-100)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-cyan)] focus:ring-1 focus:ring-[var(--accent-cyan)]/30 transition-colors"
+                className="w-full px-4 py-3 pr-12 rounded-lg font-mono text-sm bg-[var(--surface-1)] border border-[var(--alpha-white-8)] text-[var(--gray-100)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)] focus:ring-1 focus:ring-[var(--accent-green)]/30 transition-colors"
               />
               <button
                 onClick={() => setShowKey(!showKey)}
@@ -127,7 +127,7 @@ export function ApiKeyGate() {
               <button
                 onClick={handleSave}
                 disabled={!inputValue}
-                className="flex-1 px-4 py-2.5 rounded-lg font-mono text-sm bg-[var(--accent-cyan)] text-black font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity cursor-pointer"
+                className="flex-1 px-4 py-2.5 rounded-lg font-mono text-sm bg-[var(--accent-green)] text-black font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity cursor-pointer"
               >
                 Save Key
               </button>

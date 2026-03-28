@@ -97,9 +97,9 @@ export default function SettingsPage() {
         </div>
 
         {/* Google AI API Key */}
-        <GlowCard glowColor="cyan" className="p-5">
+        <GlowCard glowColor="green" className="p-5">
           <div className="flex items-center gap-2 mb-4">
-            <Key size={16} className="text-[var(--accent-cyan)]" />
+            <Key size={16} className="text-[var(--accent-green)]" />
             <h3 className="font-mono text-sm font-medium text-[var(--gray-200)] m-0">Google AI API Key</h3>
             {apiKey && <PulseOrb color="green" size="sm" />}
           </div>
@@ -122,13 +122,13 @@ export default function SettingsPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              <input type="password" value={keyInput} onChange={(e) => { setKeyInput(e.target.value); setTestStatus("idle"); }} placeholder="AIza..." className="w-full px-3 py-2 rounded-lg font-mono text-sm bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-cyan)]/40" />
+              <input type="password" value={keyInput} onChange={(e) => { setKeyInput(e.target.value); setTestStatus("idle"); }} placeholder="AIza..." className="w-full px-3 py-2 rounded-lg font-mono text-sm bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40" />
               <div className="flex gap-2">
                 <button onClick={handleTest} disabled={!keyInput || testStatus === "testing"} className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-mono bg-[var(--alpha-white-5)] text-[var(--gray-300)] border border-[var(--alpha-white-8)] cursor-pointer disabled:opacity-40">
                   {testStatus === "testing" ? <Loader2 size={14} className="animate-spin" /> : testStatus === "success" ? <Check size={14} className="text-[var(--accent-green)]" /> : null}
                   Test
                 </button>
-                <button onClick={handleSaveKey} className="px-4 py-2 rounded-lg text-sm font-mono bg-[var(--accent-cyan)] text-black font-medium cursor-pointer border-none hover:opacity-90">Save</button>
+                <button onClick={handleSaveKey} className="px-4 py-2 rounded-lg text-sm font-mono bg-[var(--accent-green)] text-black font-medium cursor-pointer border-none hover:opacity-90">Save</button>
                 <button onClick={() => setEditingKey(false)} className="px-4 py-2 rounded-lg text-sm font-mono bg-transparent text-[var(--gray-500)] cursor-pointer border border-[var(--alpha-white-8)]">Cancel</button>
               </div>
             </div>
@@ -137,9 +137,9 @@ export default function SettingsPage() {
         </GlowCard>
 
         {/* MCP API Keys */}
-        <GlowCard glowColor="purple" className="p-5">
+        <GlowCard glowColor="green" className="p-5">
           <div className="flex items-center gap-2 mb-4">
-            <Server size={16} className="text-[var(--accent-purple)]" />
+            <Server size={16} className="text-[var(--accent-green)]" />
             <h3 className="font-mono text-sm font-medium text-[var(--gray-200)] m-0">MCP API Keys</h3>
           </div>
 
@@ -172,12 +172,12 @@ export default function SettingsPage() {
               value={newKeyName}
               onChange={(e) => setNewKeyName(e.target.value)}
               placeholder="Key name (e.g. Claude Desktop)"
-              className="flex-1 px-3 py-2 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-purple)]/40"
+              className="flex-1 px-3 py-2 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40"
             />
             <button
               onClick={handleCreateMcpKey}
               disabled={!newKeyName.trim() || creatingKey}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-mono bg-[var(--accent-purple)] text-white border-none cursor-pointer hover:opacity-90 disabled:opacity-40"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-mono bg-[var(--accent-green)] text-black border-none cursor-pointer hover:opacity-90 disabled:opacity-40"
             >
               {creatingKey ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
               Create

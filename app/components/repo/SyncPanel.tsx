@@ -120,7 +120,7 @@ export function SyncStatusCard() {
     <div className="rounded-xl border border-[var(--alpha-white-5)] bg-[var(--alpha-white-3)] p-5">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-mono font-semibold text-[var(--gray-200)] flex items-center gap-2">
-          <Radio size={15} className="text-[var(--accent-cyan)]" />
+          <Radio size={15} className="text-[var(--accent-green)]" />
           Sync Status
         </h3>
         {activeRepo.auto_sync_enabled && (
@@ -136,7 +136,7 @@ export function SyncStatusCard() {
           Last synced: <span className="text-[var(--gray-400)]">{activeRepo.last_synced_sha?.slice(0, 7)}</span>
           {activeRepo.watched_branch && (
             <span className="ml-2">
-              on <span className="text-[var(--accent-cyan)]">{activeRepo.watched_branch}</span>
+              on <span className="text-[var(--accent-green)]">{activeRepo.watched_branch}</span>
             </span>
           )}
         </div>
@@ -203,8 +203,8 @@ export function SyncStatusCard() {
             onClick={runSync}
             disabled={syncing}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono rounded-lg
-              bg-[var(--accent-cyan)]/10 border border-[var(--accent-cyan)]/30
-              text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/20
+              bg-[var(--accent-green)]/10 border border-[var(--accent-green)]/30
+              text-[var(--accent-green)] hover:bg-[var(--accent-green)]/20
               disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
             {syncing ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
@@ -292,7 +292,7 @@ export function SyncSettingsCard() {
   return (
     <div className="rounded-xl border border-[var(--alpha-white-5)] bg-[var(--alpha-white-3)] p-5">
       <div className="flex items-center gap-2 mb-4">
-        <Settings2 size={15} className="text-[var(--accent-cyan)]" />
+        <Settings2 size={15} className="text-[var(--accent-green)]" />
         <h3 className="text-sm font-mono font-semibold text-[var(--gray-200)]">Sync Settings</h3>
       </div>
 
@@ -334,7 +334,7 @@ export function SyncSettingsCard() {
             className="flex-1 px-3 py-1.5 text-xs font-mono rounded-lg
               bg-[var(--alpha-white-5)] border border-[var(--alpha-white-10)]
               text-[var(--gray-200)] placeholder:text-[var(--gray-600)]
-              focus:outline-none focus:border-[var(--accent-cyan)]/50"
+              focus:outline-none focus:border-[var(--accent-green)]/50"
             placeholder="main"
           />
           <button
@@ -364,7 +364,7 @@ export function SyncSettingsCard() {
               disabled={saving}
               className={`w-full flex items-start gap-3 p-3 rounded-lg text-left transition-all ${
                 tier === t.value
-                  ? "bg-[var(--accent-cyan)]/10 border border-[var(--accent-cyan)]/30"
+                  ? "bg-[var(--accent-green)]/10 border border-[var(--accent-green)]/30"
                   : "bg-[var(--alpha-white-3)] border border-[var(--alpha-white-5)] hover:border-[var(--alpha-white-10)]"
               }`}
             >

@@ -23,8 +23,8 @@ export function RepoTooltip({ node, position, visible }: RepoTooltipProps) {
 
   const badge = node.isUserRepo
     ? node.indexed
-      ? { label: "Indexed", color: "var(--accent-cyan)" }
-      : { label: "Your Repo", color: "var(--accent-purple)" }
+      ? { label: "Indexed", color: "var(--accent-green)" }
+      : { label: "Your Repo", color: "var(--accent-muted)" }
     : { label: "Public", color: "var(--accent-green)" };
 
   return (
@@ -70,7 +70,7 @@ export function RepoTooltip({ node, position, visible }: RepoTooltipProps) {
 
         {/* Footer: stars + language + badge */}
         <div className="flex items-center gap-3 font-mono text-xs">
-          <span className="text-[var(--accent-amber)] flex items-center gap-1">
+          <span className="text-[var(--accent-yellow)] flex items-center gap-1">
             ★ {formatStars(node.stars)}
           </span>
           {node.language && (

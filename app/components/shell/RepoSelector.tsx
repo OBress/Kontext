@@ -97,7 +97,7 @@ export function RepoSelector() {
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search added repositories..."
                   autoFocus
-                  className="w-full pl-9 pr-3 py-2 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-cyan)]/40 transition-colors"
+                  className="w-full pl-9 pr-3 py-2 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40 transition-colors"
                 />
               </div>
             </div>
@@ -160,7 +160,7 @@ export function RepoSelector() {
                   setIsOpen(false);
                   setAddRepoModalOpen(true);
                 }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors cursor-pointer bg-transparent border-none hover:bg-[var(--alpha-white-5)] text-[var(--accent-cyan)]"
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors cursor-pointer bg-transparent border-none hover:bg-[var(--alpha-white-5)] text-[var(--accent-green)]"
               >
                 <Plus size={14} />
                 <span className="text-sm font-mono">Add New Repository</span>
@@ -212,7 +212,7 @@ function RepoItem({
             </span>
           )}
           {isIngesting && (
-            <span className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)]">
+            <span className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)]">
               <Loader2 size={10} className="animate-spin" />
               {ingestionStatus.progress}%
             </span>

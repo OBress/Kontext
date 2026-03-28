@@ -110,7 +110,7 @@ export function GraphScene() {
       <div className="w-full h-full flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border border-[var(--alpha-white-10)] rounded-lg animate-spin-slow mx-auto mb-4"
-            style={{ borderTopColor: "var(--accent-cyan)" }}
+            style={{ borderTopColor: "var(--accent-green)" }}
           />
           <p className="font-mono text-sm text-[var(--gray-500)]">Loading 3D engine...</p>
         </div>
@@ -136,7 +136,7 @@ export function GraphScene() {
         linkDirectionalParticles={2}
         linkDirectionalParticleWidth={1}
         linkDirectionalParticleSpeed={0.005}
-        linkDirectionalParticleColor={() => "rgba(0,229,255,0.4)"}
+        linkDirectionalParticleColor={() => "rgba(63,185,80,0.4)"}
         linkDirectionalArrowLength={3}
         linkDirectionalArrowRelPos={1}
         linkDirectionalArrowColor={() => "rgba(255,255,255,0.15)"}

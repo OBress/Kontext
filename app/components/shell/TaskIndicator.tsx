@@ -46,7 +46,7 @@ export function TaskIndicator() {
         onClick={() => setIsOpen(!isOpen)}
         className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono transition-colors bg-transparent border cursor-pointer ${
           hasActive
-            ? "border-[var(--accent-cyan)]/30 text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/10"
+            ? "border-[var(--accent-green)]/30 text-[var(--accent-green)] hover:bg-[var(--accent-green)]/10"
             : "border-[var(--alpha-white-8)] text-[var(--gray-400)] hover:bg-[var(--alpha-white-5)]"
         }`}
       >
@@ -57,7 +57,7 @@ export function TaskIndicator() {
         )}
         <span>{activeTasks.length > 0 ? activeTasks.length : tasks.length}</span>
         {hasActive && (
-          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[var(--accent-cyan)] animate-pulse" />
+          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[var(--accent-green)] animate-pulse" />
         )}
       </button>
 
@@ -139,7 +139,7 @@ function TaskItem({
         {isActive && (
           <Loader2
             size={13}
-            className="text-[var(--accent-cyan)] animate-spin shrink-0"
+            className="text-[var(--accent-green)] animate-spin shrink-0"
           />
         )}
         <span className="font-mono text-xs text-[var(--gray-200)] truncate">
@@ -155,7 +155,7 @@ function TaskItem({
               className="h-full rounded-full"
               style={{
                 background:
-                  "linear-gradient(90deg, var(--accent-cyan), var(--accent-purple))",
+                  "linear-gradient(90deg, #238636, #3FB950)",
               }}
               initial={{ width: "0%" }}
               animate={{ width: `${status.progress}%` }}

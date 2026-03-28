@@ -69,7 +69,7 @@ export default function McpPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-sm text-[var(--gray-200)]">{tool.name}</span>
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)]">{tool.usage} calls</span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)]">{tool.usage} calls</span>
                   </div>
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); setToolStates((p) => ({ ...p, [tool.name]: !p[tool.name] })); }} className="p-0 bg-transparent border-none cursor-pointer">
@@ -84,7 +84,7 @@ export default function McpPage() {
                     <span className="font-mono text-[10px] uppercase text-[var(--gray-500)] block mb-2">Parameters</span>
                     {Object.entries(tool.params).map(([key, type]) => (
                       <div key={key} className="flex gap-2 font-mono text-xs mb-1">
-                        <span className="text-[var(--accent-cyan)]">{key}</span>
+                        <span className="text-[var(--accent-green)]">{key}</span>
                         <span className="text-[var(--gray-500)]">→ {String(type)}</span>
                       </div>
                     ))}
@@ -114,7 +114,7 @@ export default function McpPage() {
               <div key={i} className="flex items-start gap-2 px-2 py-1.5 rounded hover:bg-[var(--alpha-white-5)]">
                 <span className="w-1.5 h-1.5 rounded-full mt-1 shrink-0" style={{ backgroundColor: statusColors[log.status] || "var(--gray-500)" }} />
                 <span className="text-[var(--gray-600)] shrink-0">{log.time}</span>
-                <span className="text-[var(--accent-cyan)] shrink-0">{log.tool}</span>
+                <span className="text-[var(--accent-green)] shrink-0">{log.tool}</span>
                 <span className="text-[var(--gray-400)] truncate">{log.message}</span>
               </div>
             ))}

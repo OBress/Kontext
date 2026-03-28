@@ -61,7 +61,7 @@ export function IconRail() {
               className={`
                 relative flex items-center gap-3 h-10 rounded-lg px-3 transition-colors duration-150 no-underline
                 ${isActive
-                  ? "bg-[var(--alpha-white-8)] text-[var(--accent-cyan)]"
+                  ? "bg-[var(--alpha-white-8)] text-[var(--accent-green)]"
                   : "text-[var(--gray-400)] hover:text-[var(--gray-200)] hover:bg-[var(--alpha-white-5)]"
                 }
               `}
@@ -69,7 +69,7 @@ export function IconRail() {
               {isActive && (
                 <motion.div
                   layoutId="rail-active"
-                  className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-5 bg-[var(--accent-cyan)] rounded-full"
+                  className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-5 bg-[var(--accent-green)] rounded-full"
                   transition={{ duration: 0.2 }}
                 />
               )}
@@ -104,7 +104,7 @@ export function IconRail() {
                 ${isDisabled
                   ? "text-[var(--gray-700)] cursor-not-allowed"
                   : isActive
-                    ? "bg-[var(--alpha-white-8)] text-[var(--accent-cyan)]"
+                    ? "bg-[var(--alpha-white-8)] text-[var(--accent-green)]"
                     : "text-[var(--gray-400)] hover:text-[var(--gray-200)] hover:bg-[var(--alpha-white-5)]"
                 }
               `}
@@ -112,7 +112,7 @@ export function IconRail() {
               {isActive && !isDisabled && (
                 <motion.div
                   layoutId="rail-active"
-                  className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-5 bg-[var(--accent-cyan)] rounded-full"
+                  className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-5 bg-[var(--accent-green)] rounded-full"
                   transition={{ duration: 0.2 }}
                 />
               )}
@@ -140,7 +140,7 @@ export function IconRail() {
               className={`
                 flex items-center gap-3 h-10 rounded-lg px-3 transition-colors duration-150 no-underline
                 ${isActive
-                  ? "bg-[var(--alpha-white-8)] text-[var(--accent-cyan)]"
+                  ? "bg-[var(--alpha-white-8)] text-[var(--accent-green)]"
                   : "text-[var(--gray-400)] hover:text-[var(--gray-200)] hover:bg-[var(--alpha-white-5)]"
                 }
               `}

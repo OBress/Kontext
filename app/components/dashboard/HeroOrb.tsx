@@ -21,7 +21,7 @@ function Particles({ count = 1200 }: { count?: number }) {
         z: r * Math.cos(phi),
         scale: 0.01 + Math.random() * 0.025,
         speed: 0.1 + Math.random() * 0.3,
-        isCyan: Math.random() > 0.75,
+        isGreen: Math.random() > 0.75,
       });
     }
     return arr;
@@ -49,12 +49,12 @@ function Particles({ count = 1200 }: { count?: number }) {
   });
 
   // Create two colors for variety
-  const cyanColor = new THREE.Color("#00E5FF");
-  const purpleColor = new THREE.Color("#7C4DFF");
+  const greenColor = new THREE.Color("#3FB950");
+  const mutedColor = new THREE.Color("#8B949E");
   const colors = useMemo(() => {
     const arr = new Float32Array(count * 3);
     particles.forEach((p, i) => {
-      const color = p.isCyan ? cyanColor : purpleColor;
+      const color = p.isGreen ? greenColor : mutedColor;
       arr[i * 3] = color.r;
       arr[i * 3 + 1] = color.g;
       arr[i * 3 + 2] = color.b;

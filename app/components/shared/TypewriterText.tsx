@@ -49,7 +49,7 @@ export function TypewriterText({
     <span className={className}>
       {text.slice(0, displayedLength)}
       {showCursor && !isComplete && (
-        <span className="inline-block w-[2px] h-[1em] bg-[var(--accent-cyan)] ml-0.5 align-middle animate-blink" />
+        <span className="inline-block w-[2px] h-[1em] bg-[var(--accent-green)] ml-0.5 align-middle animate-blink" />
       )}
     </span>
   );

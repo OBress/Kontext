@@ -47,7 +47,7 @@ export function RepoCard3D({ repo, index }: RepoCard3DProps) {
     <Tilt3D maxTilt={6} scale={1.01}>
       <div
         onClick={() => router.push(`/repo/${repo.owner}/${repo.name}`)}
-        className="relative group rounded-xl overflow-hidden cursor-pointer transition-all duration-300 border border-[var(--alpha-white-5)] hover:border-[rgba(0,229,255,0.15)]"
+        className="relative group rounded-xl overflow-hidden cursor-pointer transition-all duration-300 border border-[var(--alpha-white-5)] hover:border-[rgba(63,185,80,0.15)]"
         style={{
           background: "rgba(17, 17, 24, 0.6)",
           backdropFilter: "blur(12px)",
@@ -79,7 +79,7 @@ export function RepoCard3D({ repo, index }: RepoCard3DProps) {
               </span>
             )}
             {isIngesting && (
-              <span className="shrink-0 ml-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)] border border-[var(--accent-cyan)]/20">
+              <span className="shrink-0 ml-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20">
                 <Loader2 size={10} className="animate-spin" />
                 {ingestionStatus.progress}%
               </span>
@@ -105,7 +105,7 @@ export function RepoCard3D({ repo, index }: RepoCard3DProps) {
                   className="h-full rounded-full"
                   style={{
                     background:
-                      "linear-gradient(90deg, var(--accent-cyan), var(--accent-purple))",
+                      "linear-gradient(90deg, #238636, #3FB950)",
                   }}
                   initial={{ width: "0%" }}
                   animate={{ width: `${ingestionStatus.progress}%` }}
@@ -156,7 +156,7 @@ export function RepoCard3D({ repo, index }: RepoCard3DProps) {
         {/* Hover glow effect */}
         <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
           style={{
-            boxShadow: "inset 0 0 30px rgba(0,229,255,0.03), 0 0 20px rgba(0,229,255,0.05)",
+            boxShadow: "inset 0 0 30px rgba(63,185,80,0.03), 0 0 20px rgba(63,185,80,0.05)",
           }}
         />
       </div>

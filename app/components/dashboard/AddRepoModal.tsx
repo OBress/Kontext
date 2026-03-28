@@ -340,7 +340,7 @@ export function AddRepoModal() {
                 backdropFilter: "blur(24px)",
                 border: "1px solid rgba(255, 255, 255, 0.08)",
                 boxShadow:
-                  "0 0 80px rgba(0, 229, 255, 0.06), 0 25px 50px rgba(0, 0, 0, 0.6)",
+                  "0 0 80px rgba(63, 185, 80, 0.06), 0 25px 50px rgba(0, 0, 0, 0.6)",
               }}
             >
               {/* Header */}
@@ -348,7 +348,7 @@ export function AddRepoModal() {
                 <div className="flex items-center gap-2">
                   <Plus
                     size={18}
-                    className="text-[var(--accent-cyan)]"
+                    className="text-[var(--accent-green)]"
                   />
                   <h2 className="font-mono text-base font-semibold text-[var(--gray-100)] m-0">
                     Add Repository
@@ -368,13 +368,13 @@ export function AddRepoModal() {
                   onClick={() => setTab("browse")}
                   className={`flex-1 px-4 py-3 text-sm font-mono transition-colors bg-transparent border-none cursor-pointer ${
                     tab === "browse"
-                      ? "text-[var(--accent-cyan)] border-b-2 border-[var(--accent-cyan)]"
+                      ? "text-[var(--accent-green)] border-b-2 border-[var(--accent-green)]"
                       : "text-[var(--gray-400)] hover:text-[var(--gray-200)]"
                   }`}
                   style={{
                     borderBottom:
                       tab === "browse"
-                        ? "2px solid var(--accent-cyan)"
+                        ? "2px solid var(--accent-green)"
                         : "2px solid transparent",
                   }}
                 >
@@ -384,13 +384,13 @@ export function AddRepoModal() {
                   onClick={() => setTab("url")}
                   className={`flex-1 px-4 py-3 text-sm font-mono transition-colors bg-transparent border-none cursor-pointer ${
                     tab === "url"
-                      ? "text-[var(--accent-cyan)]"
+                      ? "text-[var(--accent-green)]"
                       : "text-[var(--gray-400)] hover:text-[var(--gray-200)]"
                   }`}
                   style={{
                     borderBottom:
                       tab === "url"
-                        ? "2px solid var(--accent-cyan)"
+                        ? "2px solid var(--accent-green)"
                         : "2px solid transparent",
                   }}
                 >
@@ -416,7 +416,7 @@ export function AddRepoModal() {
                           value={search}
                           onChange={(e) => setSearch(e.target.value)}
                           placeholder="Search your repositories..."
-                          className="w-full pl-9 pr-3 py-2.5 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-cyan)]/40 transition-colors"
+                          className="w-full pl-9 pr-3 py-2.5 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40 transition-colors"
                         />
                       </div>
                     </div>
@@ -459,7 +459,7 @@ export function AddRepoModal() {
                   /* URL Tab */
                   <div className="p-6 flex-1 flex flex-col">
                     <p className="font-mono text-xs text-[var(--gray-400)] mb-4 m-0">
-                      Paste a GitHub repository URL or enter <code className="text-[var(--accent-cyan)]">owner/repo</code> format
+                      Paste a GitHub repository URL or enter <code className="text-[var(--accent-green)]">owner/repo</code> format
                     </p>
 
                     <div className="flex gap-2 mb-4">
@@ -479,13 +479,13 @@ export function AddRepoModal() {
                             e.key === "Enter" && handleLookup()
                           }
                           placeholder="https://github.com/owner/repo"
-                          className="w-full pl-9 pr-3 py-2.5 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-cyan)]/40 transition-colors"
+                          className="w-full pl-9 pr-3 py-2.5 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40 transition-colors"
                         />
                       </div>
                       <button
                         onClick={handleLookup}
                         disabled={lookupLoading || !urlInput.trim()}
-                        className="px-4 py-2.5 rounded-lg text-sm font-mono bg-[var(--accent-cyan)] text-black font-medium hover:opacity-90 transition-opacity cursor-pointer border-none disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                        className="px-4 py-2.5 rounded-lg text-sm font-mono bg-[var(--accent-green)] text-black font-medium hover:opacity-90 transition-opacity cursor-pointer border-none disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
                       >
                         {lookupLoading ? (
                           <Loader2 size={14} className="animate-spin" />
@@ -571,7 +571,7 @@ export function AddRepoModal() {
                         <button
                           onClick={() => handleAddRepo(lookupResult)}
                           disabled={addingRepo === lookupResult.full_name}
-                          className="w-full py-2.5 rounded-lg text-sm font-mono bg-[var(--accent-cyan)] text-black font-medium hover:opacity-90 transition-opacity cursor-pointer border-none disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                          className="w-full py-2.5 rounded-lg text-sm font-mono bg-[var(--accent-green)] text-black font-medium hover:opacity-90 transition-opacity cursor-pointer border-none disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
                           {addingRepo === lookupResult.full_name ? (
                             <>
@@ -670,7 +670,7 @@ function BrowseRepoItem({
           onAdd();
         }}
         disabled={isAdding}
-        className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-mono bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)] border border-[var(--accent-cyan)]/20 hover:bg-[var(--accent-cyan)]/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+        className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20 hover:bg-[var(--accent-green)]/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
       >
         {isAdding ? (
           <>
