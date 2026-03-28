@@ -62,6 +62,8 @@ interface AppState {
   setApiKeyModalOpen: (open: boolean) => void;
   addRepoModalOpen: boolean;
   setAddRepoModalOpen: (open: boolean) => void;
+  addRepoDefaultUrl: string | null;
+  setAddRepoDefaultUrl: (url: string | null) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -110,6 +112,8 @@ export const useAppStore = create<AppState>()(
       setApiKeyModalOpen: (open) => set({ apiKeyModalOpen: open }),
       addRepoModalOpen: false,
       setAddRepoModalOpen: (open) => set({ addRepoModalOpen: open }),
+      addRepoDefaultUrl: null,
+      setAddRepoDefaultUrl: (url) => set({ addRepoDefaultUrl: url }),
     }),
     {
       name: "kontext-app-store",

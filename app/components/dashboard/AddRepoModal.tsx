@@ -51,7 +51,7 @@ interface GitHubRepoPreview {
 }
 
 export function AddRepoModal() {
-  const { addRepoModalOpen, setAddRepoModalOpen, addRepo, apiKey, setIngestionStatus, updateRepo } =
+  const { addRepoModalOpen, setAddRepoModalOpen, addRepo, apiKey, setIngestionStatus, updateRepo, addRepoDefaultUrl, setAddRepoDefaultUrl } =
     useAppStore();
   const [tab, setTab] = useState<"browse" | "url">("browse");
   const [search, setSearch] = useState("");
@@ -75,6 +75,35 @@ export function AddRepoModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addRepoModalOpen, tab]);
 
+  // If a default URL was set (e.g. from constellation click), pre-fill and auto-lookup
+  useEffect(() => {
+    if (addRepoModalOpen && addRepoDefaultUrl) {
+      setTab("url");
+      setUrlInput(addRepoDefaultUrl);
+      setAddRepoDefaultUrl(null);
+
+      // Auto-trigger lookup after a tick
+      setTimeout(async () => {
+        setLookupLoading(true);
+        setLookupResult(null);
+        setLookupError(null);
+        try {
+          const res = await fetch(`/api/repos/lookup?url=${encodeURIComponent(addRepoDefaultUrl)}`);
+          const data = await res.json();
+          if (!res.ok) {
+            setLookupError(data.error?.message || "Failed to look up repository");
+          } else {
+            setLookupResult(data.repo);
+          }
+        } catch {
+          setLookupError("Failed to look up repository");
+        } finally {
+          setLookupLoading(false);
+        }
+      }, 100);
+    }
+  }, [addRepoModalOpen, addRepoDefaultUrl, setAddRepoDefaultUrl]);
+
   const loadGitHubRepos = async () => {
     setLoading(true);
     try {
@@ -96,6 +125,7 @@ export function AddRepoModal() {
     setLookupError(null);
     setAccessToken("");
     setShowTokenField(false);
+    setAddRepoDefaultUrl(null);
   };
 
   const handleAddRepo = useCallback(
@@ -596,7 +626,7 @@ export function AddRepoModal() {
                             </span>
                           )}
                           <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
-                            <Star size={10} />
+                            <Star size={10} className="text-yellow-400" />
                             {lookupResult.stargazers_count}
                           </span>
                           <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
@@ -696,7 +726,7 @@ function BrowseRepoItem({
             </span>
           )}
           <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
-            <Star size={10} />
+            <Star size={10} className="text-yellow-400" />
             {repo.stargazers_count}
           </span>
         </div>

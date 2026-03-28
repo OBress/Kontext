@@ -172,8 +172,7 @@ function RepoNodes({
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const { camera, gl } = useThree();
-  const raycaster = useMemo(() => new THREE.Raycaster(), []);
-  const pointer = useMemo(() => new THREE.Vector2(), []);
+
 
   const animatedScales = useRef<Float32Array>(
     new Float32Array(placements.length).fill(1)
@@ -197,62 +196,99 @@ function RepoNodes({
     return arr;
   }, [placements]);
 
-  // Pointer move → raycast
+  const HIT_RADIUS_PX = 30; // generous pixel-based hit radius
+
+  // Find closest node to screen position within hit radius
+  const findClosestNode = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = gl.domElement.getBoundingClientRect();
+      let closestIdx = -1;
+      let closestDist = Infinity;
+
+      for (let i = 0; i < placements.length; i++) {
+        const p = placements[i];
+        const pos = new THREE.Vector3(p.x, p.y, p.z);
+        pos.project(camera);
+        const sx = ((pos.x + 1) / 2) * rect.width + rect.left;
+        const sy = ((-pos.y + 1) / 2) * rect.height + rect.top;
+        const dx = clientX - sx;
+        const dy = clientY - sy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        // Only consider nodes in front of the camera (z < 1 in NDC)
+        if (dist < closestDist && dist < HIT_RADIUS_PX && pos.z < 1) {
+          closestDist = dist;
+          closestIdx = i;
+        }
+      }
+      return closestIdx;
+    },
+    [camera, gl, placements]
+  );
+
+  // Pointer move → screen-space distance check
   const handlePointerMove = useCallback(
     (e: PointerEvent) => {
-      if (!meshRef.current) return;
       const rect = gl.domElement.getBoundingClientRect();
-      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      const idx = findClosestNode(e.clientX, e.clientY);
 
-      raycaster.setFromCamera(pointer, camera);
-      const intersects = raycaster.intersectObject(meshRef.current);
-
-      if (intersects.length > 0 && intersects[0].instanceId !== undefined) {
-        const idx = intersects[0].instanceId;
+      if (idx >= 0) {
         const node = placements[idx];
-        if (node) {
-          const pos = new THREE.Vector3(node.x, node.y, node.z);
-          pos.project(camera);
-          const screenX = ((pos.x + 1) / 2) * rect.width + rect.left;
-          const screenY = ((-pos.y + 1) / 2) * rect.height + rect.top;
-          onHover(node.id, { x: screenX, y: screenY });
-        }
+        const pos = new THREE.Vector3(node.x, node.y, node.z);
+        pos.project(camera);
+        const screenX = ((pos.x + 1) / 2) * rect.width + rect.left;
+        const screenY = ((-pos.y + 1) / 2) * rect.height + rect.top;
+        onHover(node.id, { x: screenX, y: screenY });
       } else {
         onHover(null, null);
       }
     },
-    [camera, gl, placements, onHover, raycaster, pointer]
+    [camera, gl, placements, onHover, findClosestNode]
   );
 
   const handleClick = useCallback(
     (e: MouseEvent) => {
-      if (!meshRef.current) return;
-      const rect = gl.domElement.getBoundingClientRect();
-      pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-
-      raycaster.setFromCamera(pointer, camera);
-      const intersects = raycaster.intersectObject(meshRef.current);
-
-      if (intersects.length > 0 && intersects[0].instanceId !== undefined) {
-        const idx = intersects[0].instanceId;
-        const node = placements[idx];
-        if (node) onClick(node);
+      const idx = findClosestNode(e.clientX, e.clientY);
+      if (idx >= 0) {
+        onClick(placements[idx]);
       }
     },
-    [camera, gl, placements, onClick, raycaster, pointer]
+    [placements, onClick, findClosestNode]
+  );
+
+  // Track drag distance to distinguish click from drag
+  const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
+  const DRAG_THRESHOLD = 5; // px
+
+  const handleMouseDown = useCallback((e: MouseEvent) => {
+    mouseDownPos.current = { x: e.clientX, y: e.clientY };
+  }, []);
+
+  const handleMouseUp = useCallback(
+    (e: MouseEvent) => {
+      if (!mouseDownPos.current) return;
+      const dx = e.clientX - mouseDownPos.current.x;
+      const dy = e.clientY - mouseDownPos.current.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < DRAG_THRESHOLD) {
+        handleClick(e);
+      }
+      mouseDownPos.current = null;
+    },
+    [handleClick]
   );
 
   useEffect(() => {
     const el = gl.domElement;
     el.addEventListener("pointermove", handlePointerMove);
-    el.addEventListener("click", handleClick);
+    el.addEventListener("mousedown", handleMouseDown);
+    el.addEventListener("mouseup", handleMouseUp);
     return () => {
       el.removeEventListener("pointermove", handlePointerMove);
-      el.removeEventListener("click", handleClick);
+      el.removeEventListener("mousedown", handleMouseDown);
+      el.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [gl, handlePointerMove, handleClick]);
+  }, [gl, handlePointerMove, handleMouseDown, handleMouseUp]);
 
   // Frame loop: animate scales + project spotlight position
   useFrame((state) => {

@@ -25,7 +25,7 @@ const ParticleField = dynamic(
 );
 
 export default function DashboardPage() {
-  const { repos, setRepos, setAddRepoModalOpen } = useAppStore();
+  const { repos, setRepos, setAddRepoModalOpen, setAddRepoDefaultUrl } = useAppStore();
   const [githubRepos, setGithubRepos] = useState<Repo[]>([]);
 
   // Fetch added repos on mount
@@ -76,13 +76,13 @@ export default function DashboardPage() {
   const totalChunks = repos.reduce((sum, r) => sum + r.chunk_count, 0);
   const hasRepos = repos.length > 0;
 
-  // When a constellation node is clicked, open the add-repo modal
+  // When a constellation node is clicked, open the add-repo modal with the repo URL pre-filled
   const handleNodeClick = useCallback(
     (node: ConstellationNode) => {
-      // For any repo, open the add modal so the user can add/ingest it
+      setAddRepoDefaultUrl(`https://github.com/${node.owner}/${node.name}`);
       setAddRepoModalOpen(true);
     },
-    [setAddRepoModalOpen]
+    [setAddRepoModalOpen, setAddRepoDefaultUrl]
   );
 
   return (
