@@ -280,6 +280,9 @@ export type Database = {
           auto_sync_enabled: boolean | null
           chunk_count: number | null
           created_at: string | null
+          custom_github_token: string | null
+          custom_token_iv: string | null
+          custom_token_tag: string | null
           default_branch: string | null
           description: string | null
           forks_count: number | null
@@ -304,6 +307,9 @@ export type Database = {
           auto_sync_enabled?: boolean | null
           chunk_count?: number | null
           created_at?: string | null
+          custom_github_token?: string | null
+          custom_token_iv?: string | null
+          custom_token_tag?: string | null
           default_branch?: string | null
           description?: string | null
           forks_count?: number | null
@@ -328,6 +334,9 @@ export type Database = {
           auto_sync_enabled?: boolean | null
           chunk_count?: number | null
           created_at?: string | null
+          custom_github_token?: string | null
+          custom_token_iv?: string | null
+          custom_token_tag?: string | null
           default_branch?: string | null
           description?: string | null
           forks_count?: number | null

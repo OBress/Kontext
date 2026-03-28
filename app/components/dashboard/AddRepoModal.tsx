@@ -16,6 +16,7 @@ import {
   ArrowRight,
   CheckCircle2,
   AlertCircle,
+  KeyRound,
 } from "lucide-react";
 
 // Language color map
@@ -63,6 +64,8 @@ export function AddRepoModal() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupResult, setLookupResult] = useState<GitHubRepoPreview | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState("");
+  const [showTokenField, setShowTokenField] = useState(false);
 
   // Fetch GitHub repos when browse tab opens
   useEffect(() => {
@@ -91,6 +94,8 @@ export function AddRepoModal() {
     setUrlInput("");
     setLookupResult(null);
     setLookupError(null);
+    setAccessToken("");
+    setShowTokenField(false);
   };
 
   const handleAddRepo = useCallback(
@@ -110,6 +115,7 @@ export function AddRepoModal() {
             stargazers_count: repo.stargazers_count,
             forks_count: repo.forks_count,
             default_branch: repo.default_branch || "main",
+            custom_access_token: accessToken.trim() || undefined,
           }),
         });
 
@@ -288,9 +294,11 @@ export function AddRepoModal() {
     setLookupError(null);
 
     try {
-      const res = await fetch(
-        `/api/repos/lookup?url=${encodeURIComponent(urlInput.trim())}`
-      );
+      let lookupUrl = `/api/repos/lookup?url=${encodeURIComponent(urlInput.trim())}`;
+      if (accessToken.trim()) {
+        lookupUrl += `&access_token=${encodeURIComponent(accessToken.trim())}`;
+      }
+      const res = await fetch(lookupUrl);
       const data = await res.json();
 
       if (!res.ok) {
@@ -494,6 +502,35 @@ export function AddRepoModal() {
                         )}
                         Lookup
                       </button>
+                    </div>
+
+                    {/* Access Token (collapsible) */}
+                    <div className="mb-4">
+                      <button
+                        onClick={() => setShowTokenField(!showTokenField)}
+                        className="flex items-center gap-1.5 text-[11px] font-mono text-[var(--gray-500)] hover:text-[var(--gray-300)] transition-colors bg-transparent border-none cursor-pointer p-0 mb-2"
+                      >
+                        <KeyRound size={12} />
+                        {showTokenField ? "Hide" : "Add"} access token for private repos
+                      </button>
+                      {showTokenField && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                        >
+                          <input
+                            type="password"
+                            value={accessToken}
+                            onChange={(e) => setAccessToken(e.target.value)}
+                            placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                            className="w-full px-3 py-2 rounded-lg text-xs font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40 transition-colors"
+                          />
+                          <p className="font-mono text-[10px] text-[var(--gray-600)] mt-1 m-0">
+                            Personal Access Token with <code className="text-[var(--gray-400)]">repo</code> scope for private repos you have access to
+                          </p>
+                        </motion.div>
+                      )}
                     </div>
 
                     {/* Lookup error */}

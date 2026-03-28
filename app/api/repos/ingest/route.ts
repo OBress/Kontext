@@ -29,18 +29,33 @@ export async function POST(request: Request) {
     const apiKey = validateApiKey(request);
     const [owner, name] = fullName.split("/");
 
-    // Get understanding tier from repo settings (default: 2 = Standard)
+    // Get understanding tier and custom token from repo settings
     const { data: repoSettings } = await supabase
       .from("repos")
-      .select("understanding_tier, default_branch")
+      .select("understanding_tier, default_branch, custom_github_token, custom_token_iv, custom_token_tag")
       .eq("user_id", user.id)
       .eq("full_name", fullName)
       .single();
     const understandingTier = repoSettings?.understanding_tier || 2;
     const defaultBranch = repoSettings?.default_branch || "main";
 
-    if (!githubToken) {
-      throw new ApiError(401, "GITHUB_TOKEN_REQUIRED", "GitHub token not available. Please re-authenticate.");
+    // Use custom PAT if stored, otherwise fall back to OAuth token
+    let effectiveToken = githubToken;
+    if (repoSettings?.custom_github_token && repoSettings?.custom_token_iv && repoSettings?.custom_token_tag) {
+      const { decryptToken } = await import("@/lib/api/crypto");
+      try {
+        effectiveToken = decryptToken({
+          ciphertext: repoSettings.custom_github_token,
+          iv: repoSettings.custom_token_iv,
+          tag: repoSettings.custom_token_tag,
+        });
+      } catch {
+        // Fall back to OAuth token if decryption fails
+      }
+    }
+
+    if (!effectiveToken) {
+      throw new ApiError(401, "GITHUB_TOKEN_REQUIRED", "GitHub token not available. Please re-authenticate or provide an access token.");
     }
 
     const adminDb = createAdminClient();
@@ -75,7 +90,7 @@ export async function POST(request: Request) {
         try {
           // 1. Fetch file tree
           send({ status: "fetching", message: "Fetching repository tree..." });
-          const tree = await fetchRepoTree(githubToken!, owner, name);
+          const tree = await fetchRepoTree(effectiveToken, owner, name);
           const filesTotal = tree.length;
 
           await supabase
@@ -107,7 +122,7 @@ export async function POST(request: Request) {
 
           for (let i = 0; i < tree.length; i++) {
             const file = tree[i];
-            const content = await fetchFileContent(githubToken!, owner, name, file.path);
+            const content = await fetchFileContent(effectiveToken, owner, name, file.path);
 
             if (content) {
               const ext = file.path.split(".").pop() || "";
@@ -209,7 +224,7 @@ export async function POST(request: Request) {
 
           let headSHA: string | null = null;
           try {
-            const latestCommit = await fetchLatestCommit(githubToken!, owner, name, defaultBranch);
+            const latestCommit = await fetchLatestCommit(effectiveToken, owner, name, defaultBranch);
             headSHA = latestCommit.sha;
           } catch {
             // Non-fatal — sync tracking just won't work
@@ -233,7 +248,7 @@ export async function POST(request: Request) {
             try {
               send({ status: "timeline", message: "Backfilling commit history..." });
               const commits = await fetchCommitsSince(
-                githubToken!, owner, name, defaultBranch, headSHA, 50
+                effectiveToken, owner, name, defaultBranch, headSHA, 50
               ).catch(() => []);
 
               // Also get the HEAD commit itself

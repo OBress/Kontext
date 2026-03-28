@@ -2,7 +2,7 @@
 
 import { useRef, useMemo, useState, useCallback, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
+import { TrackballControls } from "@react-three/drei";
 import * as THREE from "three";
 import { FEATURED_REPOS, getLanguageColor } from "@/lib/data/featured-repos";
 import { Repo } from "@/lib/store/app-store";
@@ -390,16 +390,31 @@ function Scene({
   isUserHovering,
 }: SceneProps) {
   const controlsRef = useRef<any>(null);
+  const { camera } = useThree();
   const [isDragging, setIsDragging] = useState(false);
   const dragTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const autoRotateSpeedRef = useRef(0.5);
+  const autoRotateStrength = useRef(1);
 
-  // Smooth ramp: lerp actual autoRotateSpeed toward target each frame
-  useFrame(() => {
-    if (!controlsRef.current) return;
-    const target = (isDragging || isUserHovering) ? 0 : 0.5;
-    autoRotateSpeedRef.current += (target - autoRotateSpeedRef.current) * 0.08;
-    controlsRef.current.autoRotateSpeed = autoRotateSpeedRef.current;
+  // Manual auto-rotation: rotate camera around the Y axis each frame
+  useFrame((_, delta) => {
+    const shouldRotate = !isDragging && !isUserHovering;
+    const target = shouldRotate ? 1 : 0;
+    autoRotateStrength.current += (target - autoRotateStrength.current) * 0.08;
+
+    if (autoRotateStrength.current > 0.001) {
+      const speed = 0.15 * autoRotateStrength.current * delta;
+      // Rotate camera position around the origin on the Y axis
+      const x = camera.position.x;
+      const z = camera.position.z;
+      camera.position.x = x * Math.cos(speed) - z * Math.sin(speed);
+      camera.position.z = x * Math.sin(speed) + z * Math.cos(speed);
+      camera.lookAt(0, 0, 0);
+
+      // Sync TrackballControls target
+      if (controlsRef.current) {
+        controlsRef.current.target.set(0, 0, 0);
+      }
+    }
   });
 
   const handleStart = useCallback(() => {
@@ -417,16 +432,12 @@ function Scene({
   return (
     <>
       <ambientLight intensity={0.5} />
-      <OrbitControls
+      <TrackballControls
         ref={controlsRef}
-        autoRotate
-        autoRotateSpeed={0.5}
-        enableZoom={false}
-        enablePan={false}
-        dampingFactor={0.1}
-        rotateSpeed={0.5}
-        minPolarAngle={0}
-        maxPolarAngle={Math.PI}
+        noZoom
+        noPan
+        rotateSpeed={3}
+        dynamicDampingFactor={0.15}
         onStart={handleStart}
         onEnd={handleEnd}
       />

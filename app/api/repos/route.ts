@@ -4,6 +4,7 @@ import { rateLimit } from "@/lib/api/rate-limit";
 import { handleApiError } from "@/lib/api/errors";
 import { validateRepoFullName } from "@/lib/api/validate";
 import { fetchUserRepos } from "@/lib/api/github";
+import { encryptToken } from "@/lib/api/crypto";
 
 /**
  * GET /api/repos — Returns repos based on source:
@@ -100,6 +101,17 @@ export async function POST(request: Request) {
     const fullName = validateRepoFullName(body.repo_full_name);
     const [owner, name] = fullName.split("/");
 
+    // Encrypt custom GitHub PAT if provided
+    let tokenFields: Record<string, string | null> = {};
+    if (body.custom_access_token) {
+      const encrypted = encryptToken(body.custom_access_token);
+      tokenFields = {
+        custom_github_token: encrypted.ciphertext,
+        custom_token_iv: encrypted.iv,
+        custom_token_tag: encrypted.tag,
+      };
+    }
+
     // Upsert the repo record
     const { data: repo, error } = await supabase
       .from("repos")
@@ -116,6 +128,7 @@ export async function POST(request: Request) {
           forks_count: body.forks_count || 0,
           default_branch: body.default_branch || "main",
           updated_at: new Date().toISOString(),
+          ...tokenFields,
         },
         { onConflict: "user_id,full_name" }
       )
@@ -134,7 +147,7 @@ export async function POST(request: Request) {
       { onConflict: "repo_full_name,user_id" }
     );
 
-    return NextResponse.json({ repo });
+    return NextResponse.json({ repo, hasCustomToken: !!body.custom_access_token });
   } catch (error) {
     return handleApiError(error);
   }
