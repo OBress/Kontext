@@ -16,8 +16,12 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files
+# env files (keep .env.example tracked)
 .env*
+!.env.example
+
+# supabase local data
+.temp/
 
 # vercel
 .vercel

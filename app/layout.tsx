@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Vercel BFCM 2025",
-  description: "A recreation of Vercel's Black Friday - Cyber Monday 2025 dashboard",
-    generator: 'v0.app'
+  title: "Kontext — AI Repository Intelligence",
+  description:
+    "AI-powered repository analysis, 3D architecture visualization, RAG chatbot, and team onboarding for your codebase.",
 };
 
 export default function RootLayout({
@@ -24,7 +24,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
