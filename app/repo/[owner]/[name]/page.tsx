@@ -34,10 +34,19 @@ export default function RepoOverviewPage() {
     ingestionStatus &&
     ingestionStatus.status !== "done" &&
     ingestionStatus.status !== "error" &&
+    ingestionStatus.status !== "blocked_quota" &&
+    ingestionStatus.status !== "blocked_billing" &&
+    ingestionStatus.status !== "blocked_model" &&
+    ingestionStatus.status !== "pending_user_key_sync" &&
     ingestionStatus.status !== "idle";
 
   const isDone = ingestionStatus?.status === "done";
-  const isError = ingestionStatus?.status === "error";
+  const isError =
+    ingestionStatus?.status === "error" ||
+    ingestionStatus?.status === "blocked_quota" ||
+    ingestionStatus?.status === "blocked_billing" ||
+    ingestionStatus?.status === "blocked_model" ||
+    ingestionStatus?.status === "pending_user_key_sync";
 
   return (
     <div className="space-y-6">
@@ -192,7 +201,7 @@ export default function RepoOverviewPage() {
                 )}
               </p>
               <p className="font-mono text-xs text-[var(--gray-400)] m-0">
-                768-dim vectors
+                1536-dim Gemini embeddings
               </p>
             </div>
           </div>

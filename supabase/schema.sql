@@ -82,6 +82,220 @@ $$;
 ALTER FUNCTION "public"."match_chunks"("query_embedding" "extensions"."vector", "match_count" integer, "filter_repo" "text", "filter_user_id" "uuid") OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."match_timeline"("query_embedding" "extensions"."vector", "match_count" integer DEFAULT 5, "filter_repo" "text" DEFAULT NULL::"text", "filter_user_id" "uuid" DEFAULT NULL::"uuid") RETURNS TABLE("id" bigint, "sha" "text", "message" "text", "ai_summary" "text", "author_name" "text", "author_avatar_url" "text", "committed_at" timestamp with time zone, "push_group_id" "text", "files_changed" "jsonb", "similarity" double precision)
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    rc.id, rc.sha, rc.message, rc.ai_summary,
+    rc.author_name, rc.author_avatar_url,
+    rc.committed_at, rc.push_group_id,
+    rc.files_changed,
+    1 - (rc.ai_summary_embedding <=> query_embedding) AS similarity
+  FROM public.repo_commits rc
+  WHERE
+    rc.ai_summary_embedding IS NOT NULL
+    AND (filter_user_id IS NULL OR rc.user_id = filter_user_id)
+    AND (filter_repo IS NULL OR rc.repo_full_name = filter_repo)
+  ORDER BY rc.ai_summary_embedding <=> query_embedding
+  LIMIT match_count;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."match_timeline"("query_embedding" "extensions"."vector", "match_count" integer, "filter_repo" "text", "filter_user_id" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."replace_repo_index"("p_user_id" "uuid", "p_repo_full_name" "text", "p_files" "jsonb", "p_chunks" "jsonb", "p_chunk_count" integer, "p_last_indexed_at" timestamp with time zone, "p_last_synced_sha" "text" DEFAULT NULL::"text", "p_watched_branch" "text" DEFAULT NULL::"text", "p_indexed" boolean DEFAULT true, "p_indexing" boolean DEFAULT false, "p_sync_blocked_reason" "text" DEFAULT NULL::"text", "p_pending_sync_head_sha" "text" DEFAULT NULL::"text") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'extensions'
+    AS $$
+BEGIN
+  DELETE FROM public.repo_chunks
+  WHERE user_id = p_user_id
+    AND repo_full_name = p_repo_full_name;
+
+  DELETE FROM public.repo_files
+  WHERE user_id = p_user_id
+    AND repo_full_name = p_repo_full_name;
+
+  IF p_files IS NOT NULL AND jsonb_typeof(p_files) = 'array' THEN
+    INSERT INTO public.repo_files (
+      user_id,
+      repo_full_name,
+      file_path,
+      file_name,
+      extension,
+      line_count,
+      size_bytes,
+      content_hash,
+      imports
+    )
+    SELECT
+      p_user_id,
+      p_repo_full_name,
+      file->>'file_path',
+      file->>'file_name',
+      NULLIF(file->>'extension', ''),
+      COALESCE((file->>'line_count')::integer, 0),
+      COALESCE((file->>'size_bytes')::integer, 0),
+      NULLIF(file->>'content_hash', ''),
+      COALESCE(
+        ARRAY(
+          SELECT jsonb_array_elements_text(COALESCE(file->'imports', '[]'::jsonb))
+        ),
+        ARRAY[]::text[]
+      )
+    FROM jsonb_array_elements(p_files) AS file;
+  END IF;
+
+  IF p_chunks IS NOT NULL AND jsonb_typeof(p_chunks) = 'array' THEN
+    INSERT INTO public.repo_chunks (
+      user_id,
+      repo_full_name,
+      file_path,
+      chunk_index,
+      content,
+      token_count,
+      embedding,
+      metadata
+    )
+    SELECT
+      p_user_id,
+      p_repo_full_name,
+      chunk->>'file_path',
+      COALESCE((chunk->>'chunk_index')::integer, 0),
+      chunk->>'content',
+      COALESCE((chunk->>'token_count')::integer, 0),
+      (chunk->>'embedding')::extensions.vector,
+      COALESCE(chunk->'metadata', '{}'::jsonb)
+    FROM jsonb_array_elements(p_chunks) AS chunk;
+  END IF;
+
+  UPDATE public.repos
+  SET
+    indexed = p_indexed,
+    indexing = p_indexing,
+    chunk_count = COALESCE(
+      p_chunk_count,
+      (
+        SELECT COUNT(*)
+        FROM public.repo_chunks
+        WHERE user_id = p_user_id
+          AND repo_full_name = p_repo_full_name
+      )
+    ),
+    last_indexed_at = p_last_indexed_at,
+    last_synced_sha = COALESCE(p_last_synced_sha, last_synced_sha),
+    watched_branch = COALESCE(p_watched_branch, watched_branch),
+    sync_blocked_reason = p_sync_blocked_reason,
+    pending_sync_head_sha = p_pending_sync_head_sha,
+    updated_at = now()
+  WHERE user_id = p_user_id
+    AND full_name = p_repo_full_name;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."replace_repo_index"("p_user_id" "uuid", "p_repo_full_name" "text", "p_files" "jsonb", "p_chunks" "jsonb", "p_chunk_count" integer, "p_last_indexed_at" timestamp with time zone, "p_last_synced_sha" "text", "p_watched_branch" "text", "p_indexed" boolean, "p_indexing" boolean, "p_sync_blocked_reason" "text", "p_pending_sync_head_sha" "text") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."replace_repo_paths"("p_user_id" "uuid", "p_repo_full_name" "text", "p_remove_paths" "text"[], "p_files" "jsonb", "p_chunks" "jsonb", "p_last_synced_sha" "text", "p_last_indexed_at" timestamp with time zone, "p_chunk_count" integer, "p_sync_blocked_reason" "text" DEFAULT NULL::"text", "p_pending_sync_head_sha" "text" DEFAULT NULL::"text") RETURNS "void"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public', 'extensions'
+    AS $$
+BEGIN
+  IF p_remove_paths IS NOT NULL AND array_length(p_remove_paths, 1) IS NOT NULL THEN
+    DELETE FROM public.repo_chunks
+    WHERE user_id = p_user_id
+      AND repo_full_name = p_repo_full_name
+      AND file_path = ANY(p_remove_paths);
+
+    DELETE FROM public.repo_files
+    WHERE user_id = p_user_id
+      AND repo_full_name = p_repo_full_name
+      AND file_path = ANY(p_remove_paths);
+  END IF;
+
+  IF p_files IS NOT NULL AND jsonb_typeof(p_files) = 'array' THEN
+    INSERT INTO public.repo_files (
+      user_id,
+      repo_full_name,
+      file_path,
+      file_name,
+      extension,
+      line_count,
+      size_bytes,
+      content_hash,
+      imports
+    )
+    SELECT
+      p_user_id,
+      p_repo_full_name,
+      file->>'file_path',
+      file->>'file_name',
+      NULLIF(file->>'extension', ''),
+      COALESCE((file->>'line_count')::integer, 0),
+      COALESCE((file->>'size_bytes')::integer, 0),
+      NULLIF(file->>'content_hash', ''),
+      COALESCE(
+        ARRAY(
+          SELECT jsonb_array_elements_text(COALESCE(file->'imports', '[]'::jsonb))
+        ),
+        ARRAY[]::text[]
+      )
+    FROM jsonb_array_elements(p_files) AS file;
+  END IF;
+
+  IF p_chunks IS NOT NULL AND jsonb_typeof(p_chunks) = 'array' THEN
+    INSERT INTO public.repo_chunks (
+      user_id,
+      repo_full_name,
+      file_path,
+      chunk_index,
+      content,
+      token_count,
+      embedding,
+      metadata
+    )
+    SELECT
+      p_user_id,
+      p_repo_full_name,
+      chunk->>'file_path',
+      COALESCE((chunk->>'chunk_index')::integer, 0),
+      chunk->>'content',
+      COALESCE((chunk->>'token_count')::integer, 0),
+      (chunk->>'embedding')::extensions.vector,
+      COALESCE(chunk->'metadata', '{}'::jsonb)
+    FROM jsonb_array_elements(p_chunks) AS chunk;
+  END IF;
+
+  UPDATE public.repos
+  SET
+    last_synced_sha = p_last_synced_sha,
+    chunk_count = COALESCE(
+      p_chunk_count,
+      (
+        SELECT COUNT(*)
+        FROM public.repo_chunks
+        WHERE user_id = p_user_id
+          AND repo_full_name = p_repo_full_name
+      )
+    ),
+    last_indexed_at = p_last_indexed_at,
+    sync_blocked_reason = p_sync_blocked_reason,
+    pending_sync_head_sha = p_pending_sync_head_sha,
+    updated_at = now()
+  WHERE user_id = p_user_id
+    AND full_name = p_repo_full_name;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."replace_repo_paths"("p_user_id" "uuid", "p_repo_full_name" "text", "p_remove_paths" "text"[], "p_files" "jsonb", "p_chunks" "jsonb", "p_last_synced_sha" "text", "p_last_indexed_at" timestamp with time zone, "p_chunk_count" integer, "p_sync_blocked_reason" "text", "p_pending_sync_head_sha" "text") OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."rls_auto_enable"() RETURNS "event_trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'pg_catalog'
@@ -116,6 +330,35 @@ ALTER FUNCTION "public"."rls_auto_enable"() OWNER TO "postgres";
 SET default_tablespace = '';
 
 SET default_table_access_method = "heap";
+
+
+CREATE TABLE IF NOT EXISTS "public"."activity_events" (
+    "id" bigint NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "repo_full_name" "text",
+    "source" "text" DEFAULT 'kontext'::"text" NOT NULL,
+    "event_type" "text" NOT NULL,
+    "title" "text" NOT NULL,
+    "description" "text",
+    "metadata" "jsonb" DEFAULT '{}'::"jsonb",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    CONSTRAINT "activity_events_source_check" CHECK (("source" = ANY (ARRAY['kontext'::"text", 'github'::"text"]))),
+    CONSTRAINT "activity_events_type_check" CHECK (("event_type" = ANY (ARRAY['repo_added'::"text", 'repo_indexed'::"text", 'team_member_joined'::"text", 'team_invite_sent'::"text", 'chat_session'::"text", 'prompt_generated'::"text", 'push'::"text", 'pull_request'::"text", 'issue'::"text", 'create'::"text", 'release'::"text"])))
+);
+
+
+ALTER TABLE "public"."activity_events" OWNER TO "postgres";
+
+
+ALTER TABLE "public"."activity_events" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME "public"."activity_events_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
 
 
 CREATE TABLE IF NOT EXISTS "public"."chat_sessions" (
@@ -188,7 +431,7 @@ CREATE TABLE IF NOT EXISTS "public"."ingestion_jobs" (
     "started_at" timestamp with time zone,
     "completed_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"(),
-    CONSTRAINT "ingestion_jobs_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'fetching'::"text", 'chunking'::"text", 'embedding'::"text", 'done'::"text", 'error'::"text"])))
+    CONSTRAINT "ingestion_jobs_status_check" CHECK (("status" = ANY (ARRAY['pending'::"text", 'fetching'::"text", 'chunking'::"text", 'embedding'::"text", 'finalizing'::"text", 'timeline'::"text", 'done'::"text", 'blocked_quota'::"text", 'blocked_billing'::"text", 'blocked_model'::"text", 'error'::"text"])))
 );
 
 
@@ -249,7 +492,7 @@ CREATE TABLE IF NOT EXISTS "public"."repo_chunks" (
     "chunk_index" integer NOT NULL,
     "content" "text" NOT NULL,
     "token_count" integer DEFAULT 0 NOT NULL,
-    "embedding" "extensions"."vector"(768),
+    "embedding" "extensions"."vector"(1536),
     "metadata" "jsonb" DEFAULT '{}'::"jsonb",
     "created_at" timestamp with time zone DEFAULT "now"()
 );
@@ -270,6 +513,38 @@ ALTER SEQUENCE "public"."repo_chunks_id_seq" OWNER TO "postgres";
 
 
 ALTER SEQUENCE "public"."repo_chunks_id_seq" OWNED BY "public"."repo_chunks"."id";
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."repo_commits" (
+    "id" bigint NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "repo_full_name" "text" NOT NULL,
+    "sha" "text" NOT NULL,
+    "message" "text" NOT NULL,
+    "author_name" "text",
+    "author_avatar_url" "text",
+    "committed_at" timestamp with time zone NOT NULL,
+    "files_changed" "jsonb" DEFAULT '[]'::"jsonb",
+    "sync_triggered" boolean DEFAULT false,
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "ai_summary" "text",
+    "ai_summary_embedding" "extensions"."vector"(1536),
+    "push_group_id" "text"
+);
+
+
+ALTER TABLE "public"."repo_commits" OWNER TO "postgres";
+
+
+ALTER TABLE "public"."repo_commits" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME "public"."repo_commits_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
 
 
 
@@ -323,11 +598,31 @@ CREATE TABLE IF NOT EXISTS "public"."repos" (
     "chunk_count" integer DEFAULT 0,
     "last_indexed_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"(),
-    "updated_at" timestamp with time zone DEFAULT "now"()
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "last_synced_sha" "text",
+    "watched_branch" "text",
+    "auto_sync_enabled" boolean DEFAULT false,
+    "understanding_tier" smallint DEFAULT 2,
+    "webhook_id" bigint,
+    "custom_github_token" "text",
+    "custom_token_iv" "text",
+    "custom_token_tag" "text",
+    "sync_blocked_reason" "text",
+    "pending_sync_head_sha" "text",
+    "architecture_analysis" "jsonb",
+    "architecture_analyzed_at" timestamp with time zone
 );
 
 
 ALTER TABLE "public"."repos" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."repos"."architecture_analysis" IS 'Cached AI architectural analysis (components, connections, descriptions)';
+
+
+
+COMMENT ON COLUMN "public"."repos"."architecture_analyzed_at" IS 'Timestamp of last AI architecture analysis';
+
 
 
 CREATE SEQUENCE IF NOT EXISTS "public"."repos_id_seq"
@@ -408,6 +703,29 @@ ALTER SEQUENCE "public"."team_members_id_seq" OWNED BY "public"."team_members"."
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."user_preferences" (
+    "id" bigint NOT NULL,
+    "user_id" "uuid" NOT NULL,
+    "activity_filters" "jsonb" DEFAULT '{"push": true, "issue": true, "create": true, "release": true, "repo_added": true, "chat_session": true, "pull_request": true, "repo_indexed": true, "prompt_generated": true, "team_invite_sent": true, "team_member_joined": true}'::"jsonb",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."user_preferences" OWNER TO "postgres";
+
+
+ALTER TABLE "public"."user_preferences" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME "public"."user_preferences_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+
 CREATE TABLE IF NOT EXISTS "public"."user_tokens" (
     "id" bigint NOT NULL,
     "user_id" "uuid" NOT NULL,
@@ -418,7 +736,10 @@ CREATE TABLE IF NOT EXISTS "public"."user_tokens" (
     "refresh_token" "text",
     "expires_at" timestamp with time zone,
     "created_at" timestamp with time zone DEFAULT "now"(),
-    "updated_at" timestamp with time zone DEFAULT "now"()
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "encrypted_ai_key" "text",
+    "ai_key_iv" "text",
+    "ai_key_tag" "text"
 );
 
 
@@ -437,6 +758,31 @@ ALTER SEQUENCE "public"."user_tokens_id_seq" OWNER TO "postgres";
 
 
 ALTER SEQUENCE "public"."user_tokens_id_seq" OWNED BY "public"."user_tokens"."id";
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."webhook_events" (
+    "id" bigint NOT NULL,
+    "delivery_id" "text" NOT NULL,
+    "repo_full_name" "text" NOT NULL,
+    "event_type" "text" NOT NULL,
+    "payload" "jsonb" NOT NULL,
+    "processed" boolean DEFAULT false,
+    "created_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."webhook_events" OWNER TO "postgres";
+
+
+ALTER TABLE "public"."webhook_events" ALTER COLUMN "id" ADD GENERATED BY DEFAULT AS IDENTITY (
+    SEQUENCE NAME "public"."webhook_events_id_seq"
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
 
 
 
@@ -480,6 +826,11 @@ ALTER TABLE ONLY "public"."user_tokens" ALTER COLUMN "id" SET DEFAULT "nextval"(
 
 
 
+ALTER TABLE ONLY "public"."activity_events"
+    ADD CONSTRAINT "activity_events_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."chat_sessions"
     ADD CONSTRAINT "chat_sessions_pkey" PRIMARY KEY ("id");
 
@@ -507,6 +858,16 @@ ALTER TABLE ONLY "public"."mcp_api_keys"
 
 ALTER TABLE ONLY "public"."repo_chunks"
     ADD CONSTRAINT "repo_chunks_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."repo_commits"
+    ADD CONSTRAINT "repo_commits_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."repo_commits"
+    ADD CONSTRAINT "repo_commits_user_id_repo_full_name_sha_key" UNIQUE ("user_id", "repo_full_name", "sha");
 
 
 
@@ -545,6 +906,16 @@ ALTER TABLE ONLY "public"."team_members"
 
 
 
+ALTER TABLE ONLY "public"."user_preferences"
+    ADD CONSTRAINT "user_preferences_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."user_preferences"
+    ADD CONSTRAINT "user_preferences_user_id_key" UNIQUE ("user_id");
+
+
+
 ALTER TABLE ONLY "public"."user_tokens"
     ADD CONSTRAINT "user_tokens_pkey" PRIMARY KEY ("id");
 
@@ -552,6 +923,24 @@ ALTER TABLE ONLY "public"."user_tokens"
 
 ALTER TABLE ONLY "public"."user_tokens"
     ADD CONSTRAINT "user_tokens_user_id_key" UNIQUE ("user_id");
+
+
+
+ALTER TABLE ONLY "public"."webhook_events"
+    ADD CONSTRAINT "webhook_events_delivery_id_key" UNIQUE ("delivery_id");
+
+
+
+ALTER TABLE ONLY "public"."webhook_events"
+    ADD CONSTRAINT "webhook_events_pkey" PRIMARY KEY ("id");
+
+
+
+CREATE INDEX "idx_activity_events_user_created" ON "public"."activity_events" USING "btree" ("user_id", "created_at" DESC);
+
+
+
+CREATE INDEX "idx_activity_events_user_source" ON "public"."activity_events" USING "btree" ("user_id", "source");
 
 
 
@@ -575,11 +964,23 @@ CREATE INDEX "idx_mcp_keys_user" ON "public"."mcp_api_keys" USING "btree" ("user
 
 
 
-CREATE INDEX "idx_repo_chunks_embedding" ON "public"."repo_chunks" USING "ivfflat" ("embedding" "extensions"."vector_cosine_ops") WITH ("lists"='100');
+CREATE INDEX "idx_repo_chunks_embedding" ON "public"."repo_chunks" USING "hnsw" ("embedding" "extensions"."vector_cosine_ops") WITH ("m"='16', "ef_construction"='64');
 
 
 
 CREATE INDEX "idx_repo_chunks_user_repo" ON "public"."repo_chunks" USING "btree" ("user_id", "repo_full_name");
+
+
+
+CREATE INDEX "idx_repo_commits_lookup" ON "public"."repo_commits" USING "btree" ("user_id", "repo_full_name", "committed_at" DESC);
+
+
+
+CREATE INDEX "idx_repo_commits_push_group" ON "public"."repo_commits" USING "btree" ("user_id", "repo_full_name", "push_group_id");
+
+
+
+CREATE INDEX "idx_repo_commits_summary_embedding" ON "public"."repo_commits" USING "ivfflat" ("ai_summary_embedding" "extensions"."vector_cosine_ops") WITH ("lists"='50');
 
 
 
@@ -600,6 +1001,11 @@ CREATE INDEX "idx_team_members_repo" ON "public"."team_members" USING "btree" ("
 
 
 CREATE INDEX "idx_user_tokens_user" ON "public"."user_tokens" USING "btree" ("user_id");
+
+
+
+ALTER TABLE ONLY "public"."activity_events"
+    ADD CONSTRAINT "activity_events_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
 
 
 
@@ -628,6 +1034,11 @@ ALTER TABLE ONLY "public"."repo_chunks"
 
 
 
+ALTER TABLE ONLY "public"."repo_commits"
+    ADD CONSTRAINT "repo_commits_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."repo_files"
     ADD CONSTRAINT "repo_files_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
 
@@ -650,6 +1061,11 @@ ALTER TABLE ONLY "public"."team_members"
 
 ALTER TABLE ONLY "public"."team_members"
     ADD CONSTRAINT "team_members_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."user_preferences"
+    ADD CONSTRAINT "user_preferences_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
 
 
 
@@ -696,7 +1112,15 @@ CREATE POLICY "Users can view their own chunks" ON "public"."repo_chunks" FOR SE
 
 
 
+CREATE POLICY "Users manage own activity" ON "public"."activity_events" USING (("auth"."uid"() = "user_id")) WITH CHECK (("auth"."uid"() = "user_id"));
+
+
+
 CREATE POLICY "Users manage own chats" ON "public"."chat_sessions" USING (("auth"."uid"() = "user_id")) WITH CHECK (("auth"."uid"() = "user_id"));
+
+
+
+CREATE POLICY "Users manage own commits" ON "public"."repo_commits" USING (("auth"."uid"() = "user_id")) WITH CHECK (("auth"."uid"() = "user_id"));
 
 
 
@@ -705,6 +1129,10 @@ CREATE POLICY "Users manage own ingestion_jobs" ON "public"."ingestion_jobs" USI
 
 
 CREATE POLICY "Users manage own mcp keys" ON "public"."mcp_api_keys" USING (("auth"."uid"() = "user_id")) WITH CHECK (("auth"."uid"() = "user_id"));
+
+
+
+CREATE POLICY "Users manage own preferences" ON "public"."user_preferences" USING (("auth"."uid"() = "user_id")) WITH CHECK (("auth"."uid"() = "user_id"));
 
 
 
@@ -734,6 +1162,9 @@ CREATE POLICY "Users see own memberships" ON "public"."team_members" FOR SELECT 
 
 
 
+ALTER TABLE "public"."activity_events" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."chat_sessions" ENABLE ROW LEVEL SECURITY;
 
 
@@ -749,6 +1180,9 @@ ALTER TABLE "public"."mcp_api_keys" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."repo_chunks" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."repo_commits" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."repo_files" ENABLE ROW LEVEL SECURITY;
 
 
@@ -761,12 +1195,26 @@ ALTER TABLE "public"."team_invites" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "public"."team_members" ENABLE ROW LEVEL SECURITY;
 
 
+ALTER TABLE "public"."user_preferences" ENABLE ROW LEVEL SECURITY;
+
+
 ALTER TABLE "public"."user_tokens" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."webhook_events" ENABLE ROW LEVEL SECURITY;
 
 
 
 
 ALTER PUBLICATION "supabase_realtime" OWNER TO "postgres";
+
+
+
+
+
+
+ALTER PUBLICATION "supabase_realtime" ADD TABLE ONLY "public"."activity_events";
+
 
 
 GRANT USAGE ON SCHEMA "public" TO "postgres";
@@ -1271,6 +1719,21 @@ GRANT USAGE ON SCHEMA "public" TO "service_role";
 
 
 
+
+
+
+GRANT ALL ON FUNCTION "public"."replace_repo_index"("p_user_id" "uuid", "p_repo_full_name" "text", "p_files" "jsonb", "p_chunks" "jsonb", "p_chunk_count" integer, "p_last_indexed_at" timestamp with time zone, "p_last_synced_sha" "text", "p_watched_branch" "text", "p_indexed" boolean, "p_indexing" boolean, "p_sync_blocked_reason" "text", "p_pending_sync_head_sha" "text") TO "anon";
+GRANT ALL ON FUNCTION "public"."replace_repo_index"("p_user_id" "uuid", "p_repo_full_name" "text", "p_files" "jsonb", "p_chunks" "jsonb", "p_chunk_count" integer, "p_last_indexed_at" timestamp with time zone, "p_last_synced_sha" "text", "p_watched_branch" "text", "p_indexed" boolean, "p_indexing" boolean, "p_sync_blocked_reason" "text", "p_pending_sync_head_sha" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."replace_repo_index"("p_user_id" "uuid", "p_repo_full_name" "text", "p_files" "jsonb", "p_chunks" "jsonb", "p_chunk_count" integer, "p_last_indexed_at" timestamp with time zone, "p_last_synced_sha" "text", "p_watched_branch" "text", "p_indexed" boolean, "p_indexing" boolean, "p_sync_blocked_reason" "text", "p_pending_sync_head_sha" "text") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."replace_repo_paths"("p_user_id" "uuid", "p_repo_full_name" "text", "p_remove_paths" "text"[], "p_files" "jsonb", "p_chunks" "jsonb", "p_last_synced_sha" "text", "p_last_indexed_at" timestamp with time zone, "p_chunk_count" integer, "p_sync_blocked_reason" "text", "p_pending_sync_head_sha" "text") TO "anon";
+GRANT ALL ON FUNCTION "public"."replace_repo_paths"("p_user_id" "uuid", "p_repo_full_name" "text", "p_remove_paths" "text"[], "p_files" "jsonb", "p_chunks" "jsonb", "p_last_synced_sha" "text", "p_last_indexed_at" timestamp with time zone, "p_chunk_count" integer, "p_sync_blocked_reason" "text", "p_pending_sync_head_sha" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."replace_repo_paths"("p_user_id" "uuid", "p_repo_full_name" "text", "p_remove_paths" "text"[], "p_files" "jsonb", "p_chunks" "jsonb", "p_last_synced_sha" "text", "p_last_indexed_at" timestamp with time zone, "p_chunk_count" integer, "p_sync_blocked_reason" "text", "p_pending_sync_head_sha" "text") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "anon";
 GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "service_role";
@@ -1301,6 +1764,18 @@ GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "service_role";
 
 
 
+
+
+
+GRANT ALL ON TABLE "public"."activity_events" TO "anon";
+GRANT ALL ON TABLE "public"."activity_events" TO "authenticated";
+GRANT ALL ON TABLE "public"."activity_events" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."activity_events_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."activity_events_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."activity_events_id_seq" TO "service_role";
 
 
 
@@ -1364,6 +1839,18 @@ GRANT ALL ON SEQUENCE "public"."repo_chunks_id_seq" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."repo_commits" TO "anon";
+GRANT ALL ON TABLE "public"."repo_commits" TO "authenticated";
+GRANT ALL ON TABLE "public"."repo_commits" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."repo_commits_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."repo_commits_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."repo_commits_id_seq" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."repo_files" TO "anon";
 GRANT ALL ON TABLE "public"."repo_files" TO "authenticated";
 GRANT ALL ON TABLE "public"."repo_files" TO "service_role";
@@ -1412,6 +1899,18 @@ GRANT ALL ON SEQUENCE "public"."team_members_id_seq" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."user_preferences" TO "anon";
+GRANT ALL ON TABLE "public"."user_preferences" TO "authenticated";
+GRANT ALL ON TABLE "public"."user_preferences" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."user_preferences_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."user_preferences_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."user_preferences_id_seq" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."user_tokens" TO "anon";
 GRANT ALL ON TABLE "public"."user_tokens" TO "authenticated";
 GRANT ALL ON TABLE "public"."user_tokens" TO "service_role";
@@ -1421,6 +1920,18 @@ GRANT ALL ON TABLE "public"."user_tokens" TO "service_role";
 GRANT ALL ON SEQUENCE "public"."user_tokens_id_seq" TO "anon";
 GRANT ALL ON SEQUENCE "public"."user_tokens_id_seq" TO "authenticated";
 GRANT ALL ON SEQUENCE "public"."user_tokens_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."webhook_events" TO "anon";
+GRANT ALL ON TABLE "public"."webhook_events" TO "authenticated";
+GRANT ALL ON TABLE "public"."webhook_events" TO "service_role";
+
+
+
+GRANT ALL ON SEQUENCE "public"."webhook_events_id_seq" TO "anon";
+GRANT ALL ON SEQUENCE "public"."webhook_events_id_seq" TO "authenticated";
+GRANT ALL ON SEQUENCE "public"."webhook_events_id_seq" TO "service_role";
 
 
 

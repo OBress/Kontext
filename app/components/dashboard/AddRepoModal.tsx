@@ -14,9 +14,16 @@ import {
   Loader2,
   Plus,
   ArrowRight,
+  ArrowLeft,
   AlertCircle,
   KeyRound,
+  Settings2,
 } from "lucide-react";
+import {
+  IngestionConfigPanel,
+  DEFAULT_INGESTION_CONFIG,
+} from "./IngestionConfigPanel";
+import type { IngestionConfig } from "./IngestionConfigPanel";
 
 // Language color map
 const langColors: Record<string, string> = {
@@ -66,6 +73,13 @@ export function AddRepoModal() {
   const [accessToken, setAccessToken] = useState("");
   const [showTokenField, setShowTokenField] = useState(false);
 
+  // Step 2: Configuration state
+  const [step, setStep] = useState<"select" | "configure">("select");
+  const [selectedRepo, setSelectedRepo] = useState<GitHubRepoPreview | null>(null);
+  const [config, setConfig] = useState<IngestionConfig>({ ...DEFAULT_INGESTION_CONFIG });
+  const [branches, setBranches] = useState<string[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+
   // Fetch GitHub repos when browse tab opens
   useEffect(() => {
     if (addRepoModalOpen && tab === "browse" && ghRepos.length === 0) {
@@ -87,7 +101,11 @@ export function AddRepoModal() {
         setLookupResult(null);
         setLookupError(null);
         try {
-          const res = await fetch(`/api/repos/lookup?url=${encodeURIComponent(addRepoDefaultUrl)}`);
+          const res = await fetch("/api/repos/lookup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: addRepoDefaultUrl }),
+          });
           const data = await res.json();
           if (!res.ok) {
             setLookupError(data.error?.message || "Failed to look up repository");
@@ -125,14 +143,51 @@ export function AddRepoModal() {
     setAccessToken("");
     setShowTokenField(false);
     setAddRepoDefaultUrl(null);
+    // Reset step 2
+    setStep("select");
+    setSelectedRepo(null);
+    setConfig({ ...DEFAULT_INGESTION_CONFIG });
   }, [setAddRepoModalOpen, setAddRepoDefaultUrl]);
+
+  // Step 1 → Step 2 transition
+  const handleSelectRepo = useCallback((repo: GitHubRepoPreview) => {
+    setSelectedRepo(repo);
+    // Pre-populate branch from the repo's default_branch
+    setConfig((prev) => ({
+      ...prev,
+      watched_branch: repo.default_branch || "main",
+    }));
+    setStep("configure");
+
+    // Fetch available branches
+    setBranches([]);
+    setBranchesLoading(true);
+    fetch(`/api/repos/branches?repo=${encodeURIComponent(repo.full_name)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.branches) {
+          setBranches(data.branches.map((b: { name: string }) => b.name));
+        }
+      })
+      .catch(() => {
+        // If fetch fails, just show the default branch
+        setBranches([repo.default_branch || "main"]);
+      })
+      .finally(() => setBranchesLoading(false));
+  }, []);
+
+  // Step 2 back button
+  const handleBackToSelect = useCallback(() => {
+    setStep("select");
+    // Don't clear selectedRepo so state is preserved if user goes back
+  }, []);
 
   const handleAddRepo = useCallback(
     async (repo: GitHubRepoPreview) => {
       setAddingRepo(repo.full_name);
 
       try {
-        // Step 1: Add to Supabase
+        // Step 1: Add to Supabase — pass config fields
         const addRes = await fetch("/api/repos", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -145,6 +200,10 @@ export function AddRepoModal() {
             forks_count: repo.forks_count,
             default_branch: repo.default_branch || "main",
             custom_access_token: accessToken.trim() || undefined,
+            // ── New config fields ──
+            understanding_tier: config.understanding_tier,
+            auto_sync_enabled: config.auto_sync_enabled,
+            watched_branch: config.watched_branch || repo.default_branch || "main",
           }),
         });
 
@@ -164,6 +223,10 @@ export function AddRepoModal() {
           indexed: false,
           indexing: true,
           chunk_count: 0,
+          sync_blocked_reason: null,
+          pending_sync_head_sha: null,
+          understanding_tier: config.understanding_tier,
+          auto_sync_enabled: config.auto_sync_enabled,
         });
 
         // Remove from GitHub browse list
@@ -171,6 +234,20 @@ export function AddRepoModal() {
 
         // Close modal
         handleClose();
+
+        // Register webhook if auto-sync was enabled
+        if (config.auto_sync_enabled) {
+          fetch("/api/repos/sync/settings", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              repo_full_name: repo.full_name,
+              auto_sync_enabled: true,
+            }),
+          }).catch((err) => {
+            console.warn("[AddRepoModal] Webhook registration failed:", err.message);
+          });
+        }
 
         // Step 2: Auto-trigger ingestion if API key is available
         if (apiKey) {
@@ -191,7 +268,12 @@ export function AddRepoModal() {
                 "Content-Type": "application/json",
                 "x-google-api-key": apiKey,
               },
-              body: JSON.stringify({ repo_full_name: repo.full_name }),
+              body: JSON.stringify({
+                repo_full_name: repo.full_name,
+                // ── New config fields ──
+                backfill_timeline: config.backfill_timeline,
+                timeline_commit_depth: config.timeline_commit_depth,
+              }),
             });
 
             if (!ingestRes.ok || !ingestRes.body) {
@@ -253,6 +335,32 @@ export function AddRepoModal() {
                       chunksTotal: event.chunksTotal || 0,
                       message: `Embedding chunks (${event.chunksEmbedded || 0}/${event.chunksTotal || 0})...`,
                     });
+                  } else if (event.status === "finalizing" || event.status === "timeline") {
+                    setIngestionStatus(repo.full_name, {
+                      status: event.status,
+                      progress: event.status === "finalizing" ? 95 : 98,
+                      filesTotal: event.filesTotal || 0,
+                      filesProcessed: event.filesProcessed || 0,
+                      chunksCreated: event.chunksCreated || 0,
+                      chunksTotal: event.chunksTotal || 0,
+                      message: event.message || "Finalizing index...",
+                    });
+                  } else if (
+                    event.status === "blocked_quota" ||
+                    event.status === "blocked_billing" ||
+                    event.status === "blocked_model"
+                  ) {
+                    setIngestionStatus(repo.full_name, {
+                      status: event.status,
+                      progress: 0,
+                      filesTotal: event.filesTotal || 0,
+                      filesProcessed: event.filesProcessed || 0,
+                      chunksCreated: event.chunksCreated || 0,
+                      chunksTotal: event.chunksTotal || 0,
+                      error: event.message,
+                      message: event.message,
+                    });
+                    updateRepo(repo.full_name, { indexing: false });
                   } else if (event.status === "done") {
                     setIngestionStatus(repo.full_name, {
                       status: "done",
@@ -267,6 +375,9 @@ export function AddRepoModal() {
                       indexed: true,
                       indexing: false,
                       chunk_count: event.chunksCreated || 0,
+                      last_synced_sha: event.lastSyncedSha || null,
+                      sync_blocked_reason: null,
+                      pending_sync_head_sha: null,
                     });
                     // Auto-clear status after 5 seconds
                     setTimeout(() => {
@@ -314,7 +425,7 @@ export function AddRepoModal() {
         setAddingRepo(null);
       }
     },
-    [apiKey, addRepo, setIngestionStatus, updateRepo, accessToken, handleClose]
+    [apiKey, addRepo, setIngestionStatus, updateRepo, accessToken, handleClose, config]
   );
 
   const handleLookup = async () => {
@@ -324,11 +435,14 @@ export function AddRepoModal() {
     setLookupError(null);
 
     try {
-      let lookupUrl = `/api/repos/lookup?url=${encodeURIComponent(urlInput.trim())}`;
-      if (accessToken.trim()) {
-        lookupUrl += `&access_token=${encodeURIComponent(accessToken.trim())}`;
-      }
-      const res = await fetch(lookupUrl);
+      const res = await fetch("/api/repos/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: urlInput.trim(),
+          access_token: accessToken.trim() || null,
+        }),
+      });
       const data = await res.json();
 
       if (!res.ok) {
@@ -348,7 +462,6 @@ export function AddRepoModal() {
     r.full_name.toLowerCase().includes(search.toLowerCase())
   );
 
-  if (!addRepoModalOpen) return null;
 
   return (
     <AnimatePresence>
@@ -359,6 +472,7 @@ export function AddRepoModal() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.25, ease: "easeInOut" }}
             onClick={handleClose}
             className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm"
           />
@@ -367,11 +481,13 @@ export function AddRepoModal() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
+            exit={{ opacity: 0, scale: 0.97, y: 10 }}
+            transition={{ duration: 0.25, ease: "easeInOut" }}
             className="fixed inset-0 z-[61] flex items-center justify-center p-4"
+            onClick={handleClose}
           >
             <div
+              onClick={(e) => e.stopPropagation()}
               className="w-full max-w-xl rounded-2xl overflow-hidden"
               style={{
                 background: "rgba(10, 10, 15, 0.95)",
@@ -384,13 +500,33 @@ export function AddRepoModal() {
               {/* Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--alpha-white-5)]">
                 <div className="flex items-center gap-2">
-                  <Plus
-                    size={18}
-                    className="text-[var(--accent-green)]"
-                  />
-                  <h2 className="font-mono text-base font-semibold text-[var(--gray-100)] m-0">
-                    Add Repository
-                  </h2>
+                  {step === "configure" ? (
+                    <>
+                      <button
+                        onClick={handleBackToSelect}
+                        className="p-1 rounded-lg hover:bg-[var(--alpha-white-8)] transition-colors bg-transparent border-none cursor-pointer text-[var(--gray-400)] hover:text-[var(--gray-200)]"
+                      >
+                        <ArrowLeft size={16} />
+                      </button>
+                      <Settings2
+                        size={18}
+                        className="text-[var(--accent-green)]"
+                      />
+                      <h2 className="font-mono text-base font-semibold text-[var(--gray-100)] m-0">
+                        Configure Ingestion
+                      </h2>
+                    </>
+                  ) : (
+                    <>
+                      <Plus
+                        size={18}
+                        className="text-[var(--accent-green)]"
+                      />
+                      <h2 className="font-mono text-base font-semibold text-[var(--gray-100)] m-0">
+                        Add Repository
+                      </h2>
+                    </>
+                  )}
                 </div>
                 <button
                   onClick={handleClose}
@@ -400,282 +536,311 @@ export function AddRepoModal() {
                 </button>
               </div>
 
-              {/* Tabs */}
-              <div className="flex border-b border-[var(--alpha-white-5)]">
-                <button
-                  onClick={() => setTab("browse")}
-                  className={`flex-1 px-4 py-3 text-sm font-mono transition-colors bg-transparent border-none cursor-pointer ${
-                    tab === "browse"
-                      ? "text-[var(--accent-green)] border-b-2 border-[var(--accent-green)]"
-                      : "text-[var(--gray-400)] hover:text-[var(--gray-200)]"
-                  }`}
-                  style={{
-                    borderBottom:
-                      tab === "browse"
-                        ? "2px solid var(--accent-green)"
-                        : "2px solid transparent",
-                  }}
-                >
-                  My Repositories
-                </button>
-                <button
-                  onClick={() => setTab("url")}
-                  className={`flex-1 px-4 py-3 text-sm font-mono transition-colors bg-transparent border-none cursor-pointer ${
-                    tab === "url"
-                      ? "text-[var(--accent-green)]"
-                      : "text-[var(--gray-400)] hover:text-[var(--gray-200)]"
-                  }`}
-                  style={{
-                    borderBottom:
-                      tab === "url"
-                        ? "2px solid var(--accent-green)"
-                        : "2px solid transparent",
-                  }}
-                >
-                  <span className="flex items-center justify-center gap-1.5">
-                    <Link2 size={14} />
-                    From URL
-                  </span>
-                </button>
-              </div>
+              {/* ── STEP 2: CONFIGURE ──────────────────────────────── */}
+              {step === "configure" && selectedRepo ? (
+                <div className="max-h-[60vh] flex flex-col overflow-hidden">
+                  <IngestionConfigPanel
+                    config={config}
+                    onChange={setConfig}
+                    repoName={selectedRepo.full_name}
+                    defaultBranch={selectedRepo.default_branch || "main"}
+                    branches={branches}
+                    branchesLoading={branchesLoading}
+                  />
 
-              {/* Content */}
-              <div className="min-h-[400px] max-h-[60vh] flex flex-col">
-                {tab === "browse" ? (
-                  <>
-                    {/* Search */}
-                    <div className="p-4 border-b border-[var(--alpha-white-5)]">
-                      <div className="relative">
-                        <Search
-                          size={14}
-                          className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--gray-500)]"
-                        />
-                        <input
-                          value={search}
-                          onChange={(e) => setSearch(e.target.value)}
-                          placeholder="Search your repositories..."
-                          className="w-full pl-9 pr-3 py-2.5 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40 transition-colors"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Repo list */}
-                    <div className="flex-1 overflow-y-auto">
-                      {loading ? (
-                        <div className="flex flex-col items-center justify-center py-16 text-[var(--gray-500)]">
-                          <Loader2
-                            size={24}
-                            className="animate-spin mb-3"
-                          />
-                          <span className="text-sm font-mono">
-                            Loading your repos from GitHub...
-                          </span>
-                        </div>
-                      ) : filteredRepos.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-16 text-[var(--gray-500)]">
-                          <span className="text-sm font-mono">
-                            {search
-                              ? "No matching repositories"
-                              : "No more repositories to add"}
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="divide-y divide-[var(--alpha-white-5)]">
-                          {filteredRepos.map((repo) => (
-                            <BrowseRepoItem
-                              key={repo.id}
-                              repo={repo}
-                              isAdding={addingRepo === repo.full_name}
-                              onAdd={() => handleAddRepo(repo)}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  /* URL Tab */
-                  <div className="p-6 flex-1 flex flex-col">
-                    <p className="font-mono text-xs text-[var(--gray-400)] mb-4 m-0">
-                      Paste a GitHub repository URL or enter <code className="text-[var(--accent-green)]">owner/repo</code> format
-                    </p>
-
-                    <div className="flex gap-2 mb-4">
-                      <div className="relative flex-1">
-                        <Link2
-                          size={14}
-                          className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--gray-500)]"
-                        />
-                        <input
-                          value={urlInput}
-                          onChange={(e) => {
-                            setUrlInput(e.target.value);
-                            setLookupResult(null);
-                            setLookupError(null);
-                          }}
-                          onKeyDown={(e) =>
-                            e.key === "Enter" && handleLookup()
-                          }
-                          placeholder="https://github.com/owner/repo"
-                          className="w-full pl-9 pr-3 py-2.5 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40 transition-colors"
-                        />
-                      </div>
-                      <button
-                        onClick={handleLookup}
-                        disabled={lookupLoading || !urlInput.trim()}
-                        className="px-4 py-2.5 rounded-lg text-sm font-mono bg-[var(--accent-green)] text-black font-medium hover:opacity-90 transition-opacity cursor-pointer border-none disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-                      >
-                        {lookupLoading ? (
+                  {/* Action footer */}
+                  <div className="px-6 py-4 border-t border-[var(--alpha-white-5)]">
+                    <button
+                      onClick={() => handleAddRepo(selectedRepo)}
+                      disabled={addingRepo === selectedRepo.full_name}
+                      className="w-full py-2.5 rounded-lg text-sm font-mono bg-[var(--accent-green)] text-black font-medium hover:opacity-90 transition-opacity cursor-pointer border-none disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {addingRepo === selectedRepo.full_name ? (
+                        <>
                           <Loader2 size={14} className="animate-spin" />
-                        ) : (
-                          <ArrowRight size={14} />
-                        )}
-                        Lookup
-                      </button>
-                    </div>
-
-                    {/* Access Token (collapsible) */}
-                    <div className="mb-4">
-                      <button
-                        onClick={() => setShowTokenField(!showTokenField)}
-                        className="flex items-center gap-1.5 text-[11px] font-mono text-[var(--gray-500)] hover:text-[var(--gray-300)] transition-colors bg-transparent border-none cursor-pointer p-0 mb-2"
-                      >
-                        <KeyRound size={12} />
-                        {showTokenField ? "Hide" : "Add"} access token for private repos
-                      </button>
-                      {showTokenField && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                        >
-                          <input
-                            type="password"
-                            value={accessToken}
-                            onChange={(e) => setAccessToken(e.target.value)}
-                            placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                            className="w-full px-3 py-2 rounded-lg text-xs font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40 transition-colors"
-                          />
-                          <p className="font-mono text-[10px] text-[var(--gray-600)] mt-1 m-0">
-                            Personal Access Token with <code className="text-[var(--gray-400)]">repo</code> scope for private repos you have access to
-                          </p>
-                        </motion.div>
+                          Adding & Ingesting...
+                        </>
+                      ) : (
+                        <>
+                          <Plus size={14} />
+                          Add & Ingest Repository
+                        </>
                       )}
-                    </div>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* ── STEP 1: SELECT ──────────────────────────────── */}
+                  {/* Tabs */}
+                  <div className="flex border-b border-[var(--alpha-white-5)]">
+                    <button
+                      onClick={() => setTab("browse")}
+                      className={`flex-1 px-4 py-3 text-sm font-mono transition-colors bg-transparent border-none cursor-pointer ${
+                        tab === "browse"
+                          ? "text-[var(--accent-green)] border-b-2 border-[var(--accent-green)]"
+                          : "text-[var(--gray-400)] hover:text-[var(--gray-200)]"
+                      }`}
+                      style={{
+                        borderBottom:
+                          tab === "browse"
+                            ? "2px solid var(--accent-green)"
+                            : "2px solid transparent",
+                      }}
+                    >
+                      My Repositories
+                    </button>
+                    <button
+                      onClick={() => setTab("url")}
+                      className={`flex-1 px-4 py-3 text-sm font-mono transition-colors bg-transparent border-none cursor-pointer ${
+                        tab === "url"
+                          ? "text-[var(--accent-green)]"
+                          : "text-[var(--gray-400)] hover:text-[var(--gray-200)]"
+                      }`}
+                      style={{
+                        borderBottom:
+                          tab === "url"
+                            ? "2px solid var(--accent-green)"
+                            : "2px solid transparent",
+                      }}
+                    >
+                      <span className="flex items-center justify-center gap-1.5">
+                        <Link2 size={14} />
+                        From URL
+                      </span>
+                    </button>
+                  </div>
 
-                    {/* Lookup error */}
-                    {lookupError && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="flex items-center gap-2 p-3 rounded-lg bg-[var(--accent-red)]/10 border border-[var(--accent-red)]/20 mb-4"
-                      >
-                        <AlertCircle
-                          size={14}
-                          className="text-[var(--accent-red)] shrink-0"
-                        />
-                        <span className="font-mono text-xs text-[var(--accent-red)]">
-                          {lookupError}
-                        </span>
-                      </motion.div>
-                    )}
-
-                    {/* Lookup result */}
-                    {lookupResult && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="p-4 rounded-xl border border-[var(--alpha-white-8)] bg-[var(--surface-1)]"
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono text-sm font-semibold text-[var(--gray-100)]">
-                                {lookupResult.full_name}
-                              </span>
-                              {lookupResult.private ? (
-                                <Lock
-                                  size={12}
-                                  className="text-[var(--gray-500)]"
-                                />
-                              ) : (
-                                <Globe
-                                  size={12}
-                                  className="text-[var(--gray-500)]"
-                                />
-                              )}
-                            </div>
-                            <p className="font-mono text-xs text-[var(--gray-400)] mt-1 m-0">
-                              {lookupResult.description || "No description"}
-                            </p>
+                  {/* Content */}
+                  <div className="min-h-[400px] max-h-[60vh] flex flex-col">
+                    {tab === "browse" ? (
+                      <>
+                        {/* Search */}
+                        <div className="p-4 border-b border-[var(--alpha-white-5)]">
+                          <div className="relative">
+                            <Search
+                              size={14}
+                              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--gray-500)]"
+                            />
+                            <input
+                              value={search}
+                              onChange={(e) => setSearch(e.target.value)}
+                              placeholder="Search your repositories..."
+                              className="w-full pl-9 pr-3 py-2.5 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40 transition-colors"
+                            />
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-4 mt-3 mb-4">
-                          {lookupResult.language && (
-                            <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
-                              <span
-                                className="w-2 h-2 rounded-full"
-                                style={{
-                                  backgroundColor:
-                                    langColors[lookupResult.language] ||
-                                    "var(--gray-500)",
-                                }}
+                        {/* Repo list */}
+                        <div className="flex-1 overflow-y-auto">
+                          {loading ? (
+                            <div className="flex flex-col items-center justify-center py-16 text-[var(--gray-500)]">
+                              <Loader2
+                                size={24}
+                                className="animate-spin mb-3"
                               />
-                              {lookupResult.language}
-                            </span>
-                          )}
-                          <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
-                            <Star size={10} className="text-yellow-400" />
-                            {lookupResult.stargazers_count}
-                          </span>
-                          <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
-                            <GitFork size={10} />
-                            {lookupResult.forks_count}
-                          </span>
-                        </div>
-
-                        <button
-                          onClick={() => handleAddRepo(lookupResult)}
-                          disabled={addingRepo === lookupResult.full_name}
-                          className="w-full py-2.5 rounded-lg text-sm font-mono bg-[var(--accent-green)] text-black font-medium hover:opacity-90 transition-opacity cursor-pointer border-none disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                        >
-                          {addingRepo === lookupResult.full_name ? (
-                            <>
-                              <Loader2 size={14} className="animate-spin" />
-                              Adding & Ingesting...
-                            </>
+                              <span className="text-sm font-mono">
+                                Loading your repos from GitHub...
+                              </span>
+                            </div>
+                          ) : filteredRepos.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-16 text-[var(--gray-500)]">
+                              <span className="text-sm font-mono">
+                                {search
+                                  ? "No matching repositories"
+                                  : "No more repositories to add"}
+                              </span>
+                            </div>
                           ) : (
-                            <>
-                              <Plus size={14} />
-                              Add & Ingest Repository
-                            </>
+                            <div className="divide-y divide-[var(--alpha-white-5)]">
+                              {filteredRepos.map((repo) => (
+                                <BrowseRepoItem
+                                  key={repo.id}
+                                  repo={repo}
+                                  isAdding={addingRepo === repo.full_name}
+                                  onAdd={() => handleSelectRepo(repo)}
+                                />
+                              ))}
+                            </div>
                           )}
-                        </button>
-                      </motion.div>
-                    )}
-
-                    {/* Empty illustration */}
-                    {!lookupResult && !lookupError && (
-                      <div className="flex-1 flex flex-col items-center justify-center text-center py-8">
-                        <div className="w-16 h-16 rounded-2xl bg-[var(--surface-2)] border border-[var(--alpha-white-5)] flex items-center justify-center mb-4">
-                          <Link2
-                            size={24}
-                            className="text-[var(--gray-600)]"
-                          />
                         </div>
-                        <p className="font-mono text-xs text-[var(--gray-500)] max-w-[280px]">
-                          Enter a repository URL above to look it up and add it
-                          to your workspace
+                      </>
+                    ) : (
+                      /* URL Tab */
+                      <div className="p-6 flex-1 flex flex-col">
+                        <p className="font-mono text-xs text-[var(--gray-400)] mb-4 m-0">
+                          Paste a GitHub repository URL or enter <code className="text-[var(--accent-green)]">owner/repo</code> format
                         </p>
+
+                        <div className="flex gap-2 mb-4">
+                          <div className="relative flex-1">
+                            <Link2
+                              size={14}
+                              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--gray-500)]"
+                            />
+                            <input
+                              value={urlInput}
+                              onChange={(e) => {
+                                setUrlInput(e.target.value);
+                                setLookupResult(null);
+                                setLookupError(null);
+                              }}
+                              onKeyDown={(e) =>
+                                e.key === "Enter" && handleLookup()
+                              }
+                              placeholder="https://github.com/owner/repo"
+                              className="w-full pl-9 pr-3 py-2.5 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40 transition-colors"
+                            />
+                          </div>
+                          <button
+                            onClick={handleLookup}
+                            disabled={lookupLoading || !urlInput.trim()}
+                            className="px-4 py-2.5 rounded-lg text-sm font-mono bg-[var(--accent-green)] text-black font-medium hover:opacity-90 transition-opacity cursor-pointer border-none disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                          >
+                            {lookupLoading ? (
+                              <Loader2 size={14} className="animate-spin" />
+                            ) : (
+                              <ArrowRight size={14} />
+                            )}
+                            Lookup
+                          </button>
+                        </div>
+
+                        {/* Access Token (collapsible) */}
+                        <div className="mb-4">
+                          <button
+                            onClick={() => setShowTokenField(!showTokenField)}
+                            className="flex items-center gap-1.5 text-[11px] font-mono text-[var(--gray-500)] hover:text-[var(--gray-300)] transition-colors bg-transparent border-none cursor-pointer p-0 mb-2"
+                          >
+                            <KeyRound size={12} />
+                            {showTokenField ? "Hide" : "Add"} access token for private repos
+                          </button>
+                          {showTokenField && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                            >
+                              <input
+                                type="password"
+                                value={accessToken}
+                                onChange={(e) => setAccessToken(e.target.value)}
+                                placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                                className="w-full px-3 py-2 rounded-lg text-xs font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40 transition-colors"
+                              />
+                              <p className="font-mono text-[10px] text-[var(--gray-600)] mt-1 m-0">
+                                Personal Access Token with <code className="text-[var(--gray-400)]">repo</code> scope for private repos you have access to
+                              </p>
+                            </motion.div>
+                          )}
+                        </div>
+
+                        {/* Lookup error */}
+                        {lookupError && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="flex items-center gap-2 p-3 rounded-lg bg-[var(--accent-red)]/10 border border-[var(--accent-red)]/20 mb-4"
+                          >
+                            <AlertCircle
+                              size={14}
+                              className="text-[var(--accent-red)] shrink-0"
+                            />
+                            <span className="font-mono text-xs text-[var(--accent-red)]">
+                              {lookupError}
+                            </span>
+                          </motion.div>
+                        )}
+
+                        {/* Lookup result */}
+                        {lookupResult && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="p-4 rounded-xl border border-[var(--alpha-white-8)] bg-[var(--surface-1)]"
+                          >
+                            <div className="flex items-start justify-between mb-2">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono text-sm font-semibold text-[var(--gray-100)]">
+                                    {lookupResult.full_name}
+                                  </span>
+                                  {lookupResult.private ? (
+                                    <Lock
+                                      size={12}
+                                      className="text-[var(--gray-500)]"
+                                    />
+                                  ) : (
+                                    <Globe
+                                      size={12}
+                                      className="text-[var(--gray-500)]"
+                                    />
+                                  )}
+                                </div>
+                                <p className="font-mono text-xs text-[var(--gray-400)] mt-1 m-0">
+                                  {lookupResult.description || "No description"}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-4 mt-3 mb-4">
+                              {lookupResult.language && (
+                                <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
+                                  <span
+                                    className="w-2 h-2 rounded-full"
+                                    style={{
+                                      backgroundColor:
+                                        langColors[lookupResult.language] ||
+                                        "var(--gray-500)",
+                                    }}
+                                  />
+                                  {lookupResult.language}
+                                </span>
+                              )}
+                              <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
+                                <Star size={10} className="text-yellow-400" />
+                                {lookupResult.stargazers_count}
+                              </span>
+                              <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
+                                <GitFork size={10} />
+                                {lookupResult.forks_count}
+                              </span>
+                            </div>
+
+                            <button
+                              onClick={() => handleSelectRepo(lookupResult)}
+                              disabled={addingRepo === lookupResult.full_name}
+                              className="w-full py-2.5 rounded-lg text-sm font-mono bg-[var(--accent-green)] text-black font-medium hover:opacity-90 transition-opacity cursor-pointer border-none disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                            >
+                              <Settings2 size={14} />
+                              Configure & Add
+                            </button>
+                          </motion.div>
+                        )}
+
+                        {/* Empty illustration */}
+                        {!lookupResult && !lookupError && (
+                          <div className="flex-1 flex flex-col items-center justify-center text-center py-8">
+                            <div className="w-16 h-16 rounded-2xl bg-[var(--surface-2)] border border-[var(--alpha-white-5)] flex items-center justify-center mb-4">
+                              <Link2
+                                size={24}
+                                className="text-[var(--gray-600)]"
+                              />
+                            </div>
+                            <p className="font-mono text-xs text-[var(--gray-500)] max-w-[280px]">
+                              Enter a repository URL above to look it up and add it
+                              to your workspace
+                            </p>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
-                )}
-              </div>
+                </>
+              )}
 
-              {/* Footer hint */}
-              {!apiKey && (
+              {/* Footer hint (only on step 1) */}
+              {step === "select" && !apiKey && (
                 <div className="px-6 py-3 border-t border-[var(--alpha-white-5)] bg-[var(--accent-amber)]/5">
                   <p className="font-mono text-[11px] text-[var(--accent-amber)] m-0">
                     ⚠ Set your Google AI API key first to auto-ingest repos on

@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import type { ArchitectureAnalysis } from "@/types/architecture";
 
 export interface GraphNode {
   id: string;
@@ -29,6 +30,11 @@ export interface GraphFilters {
   searchQuery: string;
 }
 
+interface SelectedElement {
+  type: "node" | "edge";
+  id: string;
+}
+
 interface GraphState {
   graphData: { nodes: GraphNode[]; links: GraphLink[] };
   setGraphData: (data: { nodes: GraphNode[]; links: GraphLink[] }) => void;
@@ -47,6 +53,25 @@ interface GraphState {
 
   isFullscreen: boolean;
   setIsFullscreen: (fullscreen: boolean) => void;
+
+  // Architecture-specific state
+  architectureData: ArchitectureAnalysis | null;
+  setArchitectureData: (data: ArchitectureAnalysis | null) => void;
+
+  expandedGroups: Set<string>;
+  toggleGroup: (id: string) => void;
+
+  selectedElement: SelectedElement | null;
+  setSelectedElement: (el: SelectedElement | null) => void;
+
+  isAnalyzing: boolean;
+  setIsAnalyzing: (v: boolean) => void;
+
+  analyzedAt: string | null;
+  setAnalyzedAt: (v: string | null) => void;
+
+  collapsedNodes: Set<string>;
+  toggleCollapsed: (id: string) => void;
 }
 
 const defaultFilters: GraphFilters = {
@@ -82,4 +107,41 @@ export const useGraphStore = create<GraphState>((set) => ({
 
   isFullscreen: false,
   setIsFullscreen: (fullscreen) => set({ isFullscreen: fullscreen }),
+
+  // Architecture state
+  architectureData: null,
+  setArchitectureData: (data) => set({ architectureData: data }),
+
+  expandedGroups: new Set<string>(),
+  toggleGroup: (id) =>
+    set((state) => {
+      const next = new Set(state.expandedGroups);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return { expandedGroups: next };
+    }),
+
+  selectedElement: null,
+  setSelectedElement: (el) => set({ selectedElement: el }),
+
+  isAnalyzing: false,
+  setIsAnalyzing: (v) => set({ isAnalyzing: v }),
+
+  analyzedAt: null,
+  setAnalyzedAt: (v) => set({ analyzedAt: v }),
+
+  collapsedNodes: new Set<string>(),
+  toggleCollapsed: (id) =>
+    set((state) => {
+      const next = new Set(state.collapsedNodes);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return { collapsedNodes: next };
+    }),
 }));

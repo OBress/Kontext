@@ -73,6 +73,13 @@ export interface GitHubChangedFile {
   previous_filename?: string;
 }
 
+function encodeGitHubPath(path: string): string {
+  return path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
 // ─── Existing Functions ────────────────────────────────────────────
 
 export async function fetchUserRepos(
@@ -88,6 +95,30 @@ export async function fetchUserRepos(
   if (!res.ok) {
     if (res.status === 401) throw githubError("GitHub token expired. Please re-authenticate.");
     throw githubError(`GitHub API error: ${res.status} ${res.statusText}`);
+  }
+
+  return res.json();
+}
+
+export interface GitHubBranch {
+  name: string;
+  protected: boolean;
+}
+
+export async function fetchRepoBranches(
+  token: string,
+  owner: string,
+  name: string,
+  perPage = 100
+): Promise<GitHubBranch[]> {
+  const res = await fetch(
+    `${GITHUB_API}/repos/${owner}/${name}/branches?per_page=${perPage}`,
+    { headers: headers(token) }
+  );
+
+  if (!res.ok) {
+    if (res.status === 401) throw githubError("GitHub token expired. Please re-authenticate.");
+    throw githubError(`Failed to fetch branches: ${res.status}`);
   }
 
   return res.json();
@@ -138,10 +169,12 @@ export async function fetchFileContent(
   token: string,
   owner: string,
   name: string,
-  path: string
+  path: string,
+  ref?: string
 ): Promise<string | null> {
+  const query = ref ? `?ref=${encodeURIComponent(ref)}` : "";
   const res = await fetch(
-    `${GITHUB_API}/repos/${owner}/${name}/contents/${encodeURIComponent(path)}`,
+    `${GITHUB_API}/repos/${owner}/${name}/contents/${encodeGitHubPath(path)}${query}`,
     { headers: headers(token) }
   );
 

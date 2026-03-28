@@ -3,6 +3,7 @@ import { getAuthenticatedUser, createAdminClient } from "@/lib/api/auth";
 import { handleApiError } from "@/lib/api/errors";
 import { validateRepoFullName } from "@/lib/api/validate";
 import { registerWebhook, deleteWebhook } from "@/lib/api/github";
+import { resolveRepoGitHubToken } from "@/lib/api/repo-auth";
 
 const WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || "";
 
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
 
     const { data: repo } = await supabase
       .from("repos")
-      .select("watched_branch, auto_sync_enabled, understanding_tier, last_synced_sha, webhook_id, default_branch")
+      .select("watched_branch, auto_sync_enabled, understanding_tier, last_synced_sha, webhook_id, default_branch, sync_blocked_reason, pending_sync_head_sha")
       .eq("user_id", user.id)
       .eq("full_name", repoFullName)
       .single();
@@ -32,6 +33,8 @@ export async function GET(request: Request) {
       understandingTier: repo.understanding_tier || 2,
       lastSyncedSha: repo.last_synced_sha,
       hasWebhook: !!repo.webhook_id,
+      syncBlockedReason: repo.sync_blocked_reason,
+      pendingSyncHeadSha: repo.pending_sync_head_sha,
     });
   } catch (error) {
     return handleApiError(error);
@@ -50,6 +53,12 @@ export async function PATCH(request: Request) {
     const fullName = validateRepoFullName(body.repo_full_name);
     const [owner, name] = fullName.split("/");
     const adminDb = await createAdminClient();
+    const { token: effectiveGitHubToken } = await resolveRepoGitHubToken(
+      supabase,
+      user.id,
+      fullName,
+      githubToken
+    );
 
     // Build update object
     const updates: Record<string, unknown> = {};
@@ -70,7 +79,7 @@ export async function PATCH(request: Request) {
       const enable = Boolean(body.auto_sync_enabled);
       updates.auto_sync_enabled = enable;
 
-      if (!githubToken) {
+      if (!effectiveGitHubToken) {
         return NextResponse.json({ error: "GitHub token required to manage webhooks" }, { status: 401 });
       }
 
@@ -87,7 +96,7 @@ export async function PATCH(request: Request) {
         const webhookUrl = `${baseUrl}/api/webhooks/github`;
 
         try {
-          const hookId = await registerWebhook(githubToken, owner, name, webhookUrl, WEBHOOK_SECRET);
+          const hookId = await registerWebhook(effectiveGitHubToken, owner, name, webhookUrl, WEBHOOK_SECRET);
           updates.webhook_id = hookId;
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : "Unknown error";
@@ -108,7 +117,7 @@ export async function PATCH(request: Request) {
 
         if (repo?.webhook_id) {
           try {
-            await deleteWebhook(githubToken, owner, name, repo.webhook_id);
+            await deleteWebhook(effectiveGitHubToken, owner, name, repo.webhook_id);
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : "Unknown error";
             console.warn("[sync-settings] Webhook deletion failed (may be already gone):", message);

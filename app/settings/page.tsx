@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { AppShell } from "@/app/components/shell/AppShell";
 import { GlowCard } from "@/app/components/shared/GlowCard";
 import { PulseOrb } from "@/app/components/shared/PulseOrb";
+import { testGoogleAiKey, type AiHealthCheckResult } from "@/lib/client/ai-health";
+import { persistAiKeyToServer } from "@/lib/client/ai-key-persist";
 import { useAppStore } from "@/lib/store/app-store";
 import { Key, Eye, EyeOff, Check, Loader2, LogOut, Trash2, Plus, Copy, Server } from "lucide-react";
 import { signOut } from "@/app/actions";
@@ -23,6 +25,8 @@ export default function SettingsPage() {
   const [editingKey, setEditingKey] = useState(false);
   const [keyInput, setKeyInput] = useState(apiKey || "");
   const [testStatus, setTestStatus] = useState<"idle" | "testing" | "success" | "error">("idle");
+  const [testResult, setTestResult] = useState<AiHealthCheckResult | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
 
   // MCP Keys state
   const [mcpKeys, setMcpKeys] = useState<McpKey[]>([]);
@@ -47,13 +51,29 @@ export default function SettingsPage() {
 
   const handleSaveKey = () => {
     setApiKey(keyInput || null);
+    if (keyInput) persistAiKeyToServer(keyInput);
     setEditingKey(false);
   };
 
   const handleTest = async () => {
     setTestStatus("testing");
-    await new Promise((r) => setTimeout(r, 1200));
-    setTestStatus(keyInput.length > 10 ? "success" : "error");
+    setTestError(null);
+    setTestResult(null);
+
+    try {
+      const result = await testGoogleAiKey(keyInput);
+      setTestResult(result);
+      const passed = result.generationStatus === "ok" && result.embeddingStatus === "ok";
+      setTestStatus(passed ? "success" : "error");
+      if (passed) {
+        persistAiKeyToServer(keyInput);
+      }
+    } catch (error: unknown) {
+      setTestStatus("error");
+      setTestError(
+        error instanceof Error ? error.message : "Failed to test the Google AI key"
+      );
+    }
   };
 
   const handleCreateMcpKey = async () => {
@@ -186,7 +206,7 @@ export default function SettingsPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              <input type="password" value={keyInput} onChange={(e) => { setKeyInput(e.target.value); setTestStatus("idle"); }} placeholder="AIza..." className="w-full px-3 py-2 rounded-lg font-mono text-sm bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40" />
+              <input type="password" value={keyInput} onChange={(e) => { setKeyInput(e.target.value); setTestStatus("idle"); setTestResult(null); setTestError(null); }} placeholder="AIza..." className="w-full px-3 py-2 rounded-lg font-mono text-sm bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40" />
               <div className="flex gap-2">
                 <button onClick={handleTest} disabled={!keyInput || testStatus === "testing"} className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-mono bg-[var(--alpha-white-5)] text-[var(--gray-300)] border border-[var(--alpha-white-8)] cursor-pointer disabled:opacity-40">
                   {testStatus === "testing" ? <Loader2 size={14} className="animate-spin" /> : testStatus === "success" ? <Check size={14} className="text-[var(--accent-green)]" /> : null}
@@ -195,9 +215,32 @@ export default function SettingsPage() {
                 <button onClick={handleSaveKey} className="px-4 py-2 rounded-lg text-sm font-mono bg-[var(--accent-green)] text-black font-medium cursor-pointer border-none hover:opacity-90">Save</button>
                 <button onClick={() => setEditingKey(false)} className="px-4 py-2 rounded-lg text-sm font-mono bg-transparent text-[var(--gray-500)] cursor-pointer border border-[var(--alpha-white-8)]">Cancel</button>
               </div>
+
+              {(testResult || testError) && (
+                <div className={`rounded-lg border px-3 py-3 font-mono text-xs ${
+                  testStatus === "success"
+                    ? "border-[var(--accent-green)]/20 bg-[var(--accent-green)]/10 text-[var(--gray-200)]"
+                    : "border-[var(--accent-red)]/20 bg-[var(--accent-red)]/10 text-[var(--gray-200)]"
+                }`}>
+                  {testResult && (
+                    <div className="space-y-1">
+                      <p className="m-0">
+                        Generation: <span className={testResult.generationStatus === "ok" ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"}>{testResult.generationStatus}</span> via {testResult.generationModel}
+                      </p>
+                      <p className="m-0">
+                        Embeddings: <span className={testResult.embeddingStatus === "ok" ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"}>{testResult.embeddingStatus}</span> via {testResult.embeddingModel}
+                      </p>
+                      {testResult.action && (
+                        <p className="m-0 text-[var(--gray-400)]">{testResult.action}</p>
+                      )}
+                    </div>
+                  )}
+                  {testError && <p className="m-0">{testError}</p>}
+                </div>
+              )}
             </div>
           )}
-          <p className="font-mono text-[11px] text-[var(--gray-600)] mt-3 m-0">Stored in your browser&apos;s localStorage. Never sent to our servers.</p>
+          <p className="font-mono text-[11px] text-[var(--gray-600)] mt-3 m-0">Stored in your browser&apos;s localStorage. Sent to our servers only to execute your request, and not persisted on our servers by default.</p>
         </GlowCard>
 
         {/* MCP API Keys */}

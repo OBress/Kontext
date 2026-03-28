@@ -97,7 +97,7 @@ export default function RepoSettingsPage() {
     {
       icon: Database,
       label: "Embeddings & vector data",
-      description: "All repo_chunks with 768-dim vectors",
+      description: "All repo_chunks with 1536-dim Gemini embeddings",
     },
     {
       icon: FileCode,

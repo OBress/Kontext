@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { testGoogleAiKey, type AiHealthCheckResult } from "@/lib/client/ai-health";
+import { persistAiKeyToServer } from "@/lib/client/ai-key-persist";
 import { useAppStore } from "@/lib/store/app-store";
 import { motion, AnimatePresence } from "framer-motion";
 import { Lock, Eye, EyeOff, CheckCircle, XCircle, Loader2, X } from "lucide-react";
@@ -13,22 +15,38 @@ export function ApiKeyGate() {
   const [testStatus, setTestStatus] = useState<
     "idle" | "testing" | "success" | "error"
   >("idle");
+  const [testResult, setTestResult] = useState<AiHealthCheckResult | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
 
   const handleTest = async () => {
     setTestStatus("testing");
-    // Simulate API test (actual Gemini validation would go here)
-    await new Promise((r) => setTimeout(r, 1200));
-    if (inputValue.startsWith("AI") || inputValue.length > 20) {
-      setTestStatus("success");
-      setApiKey(inputValue);
-      setTimeout(() => setApiKeyModalOpen(false), 800);
-    } else {
+    setTestResult(null);
+    setTestError(null);
+
+    try {
+      const result = await testGoogleAiKey(inputValue);
+      setTestResult(result);
+
+      const passed =
+        result.generationStatus === "ok" && result.embeddingStatus === "ok";
+
+      setTestStatus(passed ? "success" : "error");
+      if (passed) {
+        setApiKey(inputValue);
+        persistAiKeyToServer(inputValue);
+        setTimeout(() => setApiKeyModalOpen(false), 800);
+      }
+    } catch (error: unknown) {
       setTestStatus("error");
+      setTestError(
+        error instanceof Error ? error.message : "Failed to test the Google AI key"
+      );
     }
   };
 
   const handleSave = () => {
     setApiKey(inputValue);
+    persistAiKeyToServer(inputValue);
     setApiKeyModalOpen(false);
   };
 
@@ -91,6 +109,8 @@ export function ApiKeyGate() {
                 onChange={(e) => {
                   setInputValue(e.target.value);
                   setTestStatus("idle");
+                  setTestResult(null);
+                  setTestError(null);
                 }}
                 placeholder="AIza..."
                 className="w-full px-4 py-3 pr-12 rounded-lg font-mono text-sm bg-[var(--surface-1)] border border-[var(--alpha-white-8)] text-[var(--gray-100)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)] focus:ring-1 focus:ring-[var(--accent-green)]/30 transition-colors"
@@ -102,6 +122,37 @@ export function ApiKeyGate() {
                 {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
+
+            {(testResult || testError) && (
+              <div
+                className={`mb-4 rounded-lg border px-3 py-2.5 font-mono text-[11px] ${
+                  testStatus === "success"
+                    ? "border-[var(--accent-green)]/20 bg-[var(--accent-green)]/10 text-[var(--gray-200)]"
+                    : "border-[var(--accent-red)]/20 bg-[var(--accent-red)]/10 text-[var(--gray-200)]"
+                }`}
+              >
+                {testResult && (
+                  <div className="space-y-1">
+                    <p className="m-0">
+                      Generation:{" "}
+                      <span className={testResult.generationStatus === "ok" ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"}>
+                        {testResult.generationStatus}
+                      </span>
+                    </p>
+                    <p className="m-0">
+                      Embeddings:{" "}
+                      <span className={testResult.embeddingStatus === "ok" ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"}>
+                        {testResult.embeddingStatus}
+                      </span>
+                    </p>
+                    {testResult.action && (
+                      <p className="m-0 text-[var(--gray-400)]">{testResult.action}</p>
+                    )}
+                  </div>
+                )}
+                {testError && <p className="m-0">{testError}</p>}
+              </div>
+            )}
 
             {/* Actions */}
             <div className="flex gap-3">
@@ -135,7 +186,7 @@ export function ApiKeyGate() {
 
             {/* Footer note */}
             <p className="text-center text-[11px] text-[var(--gray-600)] mt-4 font-mono">
-              Stored locally in your browser. Never sent to our servers.
+              Stored locally in your browser. Sent to our servers only to execute your request, and not persisted on our servers by default.
             </p>
           </motion.div>
         </motion.div>

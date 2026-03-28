@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { hashApiKey } from "@/lib/api/crypto";
+import { ApiError, getApiErrorPayload } from "@/lib/api/errors";
 import { rateLimit } from "@/lib/api/rate-limit";
-import { generateEmbeddings, generateText } from "@/lib/api/embeddings";
+import { generateQueryEmbedding, generateText } from "@/lib/api/embeddings";
 
 async function validateMcpAuth(
   request: Request
@@ -69,9 +70,13 @@ export async function POST(request: Request) {
       switch (name) {
         case "search_code": {
           if (!apiKey) {
-            throw new Error("x-google-api-key header required for search_code");
+            throw new ApiError(
+              400,
+              "API_KEY_REQUIRED",
+              "x-google-api-key header required for search_code"
+            );
           }
-          const [embedding] = await generateEmbeddings(apiKey, [args.query]);
+          const embedding = await generateQueryEmbedding(apiKey, args.query);
           const { data } = await adminDb.rpc("match_chunks", {
             query_embedding: JSON.stringify(embedding),
             match_count: args.max_results || 5,
@@ -127,10 +132,14 @@ export async function POST(request: Request) {
 
         case "ask_question": {
           if (!apiKey) {
-            throw new Error("x-google-api-key header required for ask_question");
+            throw new ApiError(
+              400,
+              "API_KEY_REQUIRED",
+              "x-google-api-key header required for ask_question"
+            );
           }
 
-          const [qEmbedding] = await generateEmbeddings(apiKey, [args.question]);
+          const qEmbedding = await generateQueryEmbedding(apiKey, args.question);
           const { data: chunks } = await adminDb.rpc("match_chunks", {
             query_embedding: JSON.stringify(qEmbedding),
             match_count: 5,
@@ -166,11 +175,15 @@ export async function POST(request: Request) {
         result: { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] },
       });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Unknown error";
+      const payload = getApiErrorPayload(err);
       return NextResponse.json({
         jsonrpc: "2.0",
         id: body.id,
-        error: { code: -32000, message },
+        error: {
+          code: payload.code.startsWith("AI_") ? -32001 : -32000,
+          message: payload.message,
+          data: payload,
+        },
       });
     }
   }

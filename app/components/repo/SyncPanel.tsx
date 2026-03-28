@@ -27,6 +27,23 @@ interface SyncCheckResult {
   branch: string;
   autoSyncEnabled: boolean;
   understandingTier: number;
+  syncBlockedReason?: string | null;
+  pendingSyncHeadSha?: string | null;
+}
+
+function getSyncBlockedMessage(reason: string | null | undefined) {
+  switch (reason) {
+    case "pending_user_key_sync":
+      return "A webhook detected new commits, but no browser-provided Google AI key was available to safely re-embed the changed files.";
+    case "blocked_quota":
+      return "Sync is blocked because the Google project behind this key hit its Gemini embedding quota.";
+    case "blocked_billing":
+      return "Sync is blocked because the Google project behind this key needs active billing.";
+    case "blocked_model":
+      return "Sync is blocked because the configured Gemini model is unavailable for this key.";
+    default:
+      return null;
+  }
 }
 
 export function SyncStatusCard() {
@@ -39,25 +56,28 @@ export function SyncStatusCard() {
   const [error, setError] = useState<string | null>(null);
 
   const checkForUpdates = useCallback(async () => {
-    if (!activeRepo || !apiKey) return;
+    if (!activeRepo) return;
     setChecking(true);
     setError(null);
 
     try {
       const res = await fetch(
-        `/api/repos/sync/check?repo=${encodeURIComponent(activeRepo.full_name)}`,
-        { headers: { "x-google-api-key": apiKey } }
+        `/api/repos/sync/check?repo=${encodeURIComponent(activeRepo.full_name)}`
       );
 
       if (!res.ok) throw new Error("Failed to check for updates");
       const data: SyncCheckResult = await res.json();
       setCheckResult(data);
+      updateRepo(activeRepo.full_name, {
+        sync_blocked_reason: data.syncBlockedReason || null,
+        pending_sync_head_sha: data.pendingSyncHeadSha || null,
+      });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setChecking(false);
     }
-  }, [activeRepo, apiKey]);
+  }, [activeRepo, updateRepo]);
 
   const runSync = useCallback(async () => {
     if (!activeRepo || !apiKey) return;
@@ -97,7 +117,21 @@ export function SyncStatusCard() {
                 // Refresh repo data
                 updateRepo(activeRepo.full_name, {
                   last_synced_sha: data.lastSyncedSha,
+                  sync_blocked_reason: null,
+                  pending_sync_head_sha: null,
                 });
+              }
+              if (
+                data.status === "blocked_quota" ||
+                data.status === "blocked_billing" ||
+                data.status === "blocked_model" ||
+                data.status === "pending_user_key_sync"
+              ) {
+                updateRepo(activeRepo.full_name, {
+                  sync_blocked_reason: data.status,
+                  pending_sync_head_sha: data.pendingHeadSha || activeRepo.pending_sync_head_sha || null,
+                });
+                setError(data.message);
               }
               if (data.status === "error") {
                 setError(data.message);
@@ -117,6 +151,7 @@ export function SyncStatusCard() {
   if (!activeRepo?.indexed) return null;
 
   const hasSha = !!activeRepo.last_synced_sha;
+  const blockedMessage = getSyncBlockedMessage(activeRepo.sync_blocked_reason);
 
   return (
     <div className="rounded-xl border border-[var(--alpha-white-5)] bg-[var(--alpha-white-3)] p-5">
@@ -140,6 +175,17 @@ export function SyncStatusCard() {
             <span className="ml-2">
               on <span className="text-[var(--accent-green)]">{activeRepo.watched_branch}</span>
             </span>
+          )}
+        </div>
+      )}
+
+      {blockedMessage && (
+        <div className="mb-3 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-3 text-xs font-mono text-amber-200">
+          <p className="m-0">{blockedMessage}</p>
+          {activeRepo.pending_sync_head_sha && (
+            <p className="m-0 mt-1 text-[10px] text-amber-300/80">
+              Pending head: {activeRepo.pending_sync_head_sha.slice(0, 7)}
+            </p>
           )}
         </div>
       )}
@@ -225,7 +271,7 @@ const TIER_CONFIG = [
     value: 1,
     label: "Quick Scan",
     icon: Eye,
-    description: "Regex analysis + key file embedding only",
+    description: "Future lightweight mode with reduced AI spend",
     cost: "~Free",
     color: "text-emerald-400",
   },
@@ -233,7 +279,7 @@ const TIER_CONFIG = [
     value: 2,
     label: "Standard",
     icon: Brain,
-    description: "Full codebase embedding with 3072-dim vectors",
+    description: "Current default: full codebase embedding with 1536-dim Gemini vectors",
     cost: "$0.02-0.10",
     color: "text-blue-400",
   },
@@ -241,7 +287,7 @@ const TIER_CONFIG = [
     value: 3,
     label: "Deep Dive",
     icon: Sparkles,
-    description: "Full embedding + LLM summaries per file",
+    description: "Adds file summaries on refreshed files during sync",
     cost: "$0.10-0.50",
     color: "text-purple-400",
   },
@@ -249,7 +295,7 @@ const TIER_CONFIG = [
 
 export function SyncSettingsCard() {
   const activeRepo = useCurrentRepo();
-  const { apiKey, updateRepo } = useAppStore();
+  const { updateRepo } = useAppStore();
   const [saving, setSaving] = useState(false);
   const [autoSync, setAutoSync] = useState(activeRepo?.auto_sync_enabled || false);
   const [tier, setTier] = useState<number>(activeRepo?.understanding_tier || 2);
@@ -257,7 +303,7 @@ export function SyncSettingsCard() {
   const [message, setMessage] = useState<string | null>(null);
 
   const saveSettings = useCallback(async (updates: Record<string, unknown>) => {
-    if (!activeRepo || !apiKey) return;
+    if (!activeRepo) return;
     setSaving(true);
     setMessage(null);
 
@@ -266,7 +312,6 @@ export function SyncSettingsCard() {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          "x-google-api-key": apiKey,
         },
         body: JSON.stringify({
           repo_full_name: activeRepo.full_name,
@@ -289,7 +334,7 @@ export function SyncSettingsCard() {
     } finally {
       setSaving(false);
     }
-  }, [activeRepo, apiKey, updateRepo]);
+  }, [activeRepo, updateRepo]);
 
   if (!activeRepo?.indexed) return null;
 

@@ -25,6 +25,12 @@ const PHASE_LABELS: Record<string, { label: string; icon: typeof Loader2 }> = {
   fetching: { label: "Fetching Files", icon: FileCode },
   chunking: { label: "Chunking Code", icon: Layers },
   embedding: { label: "Generating Embeddings", icon: Zap },
+  finalizing: { label: "Promoting Index", icon: Database },
+  timeline: { label: "Backfilling Timeline", icon: Clock },
+  blocked_quota: { label: "Blocked By Quota", icon: AlertCircle },
+  blocked_billing: { label: "Billing Required", icon: AlertCircle },
+  blocked_model: { label: "Model Unavailable", icon: AlertCircle },
+  pending_user_key_sync: { label: "Waiting For Key", icon: Clock },
   done: { label: "Complete", icon: CheckCircle2 },
   error: { label: "Failed", icon: AlertCircle },
 };
@@ -56,12 +62,19 @@ export function TaskIndicator() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  const blockedStatuses = new Set([
+    "error",
+    "blocked_quota",
+    "blocked_billing",
+    "blocked_model",
+    "pending_user_key_sync",
+  ]);
   const tasks = Object.entries(ingestionStatus);
   const activeTasks = tasks.filter(
-    ([, s]) => s.status !== "done" && s.status !== "error" && s.status !== "idle"
+    ([, s]) => s.status !== "done" && !blockedStatuses.has(s.status) && s.status !== "idle"
   );
   const completedTasks = tasks.filter(([, s]) => s.status === "done");
-  const errorTasks = tasks.filter(([, s]) => s.status === "error");
+  const errorTasks = tasks.filter(([, s]) => blockedStatuses.has(s.status));
   const activeCount = activeTasks.length;
   const hasActive = activeCount > 0;
   const totalCount = tasks.length;
@@ -257,7 +270,12 @@ function TaskListItem({
   onSelect: () => void;
 }) {
   const isDone = status.status === "done";
-  const isError = status.status === "error";
+  const isError =
+    status.status === "error" ||
+    status.status === "blocked_quota" ||
+    status.status === "blocked_billing" ||
+    status.status === "blocked_model" ||
+    status.status === "pending_user_key_sync";
   const isActive =
     !isDone && !isError && status.status !== "idle";
   const phaseInfo = getPhaseInfo(status.status);
@@ -353,7 +371,12 @@ function TaskDetailView({
   const router = useRouter();
   const { clearIngestionStatus } = useAppStore();
   const isDone = status.status === "done";
-  const isError = status.status === "error";
+  const isError =
+    status.status === "error" ||
+    status.status === "blocked_quota" ||
+    status.status === "blocked_billing" ||
+    status.status === "blocked_model" ||
+    status.status === "pending_user_key_sync";
   const isActive = !isDone && !isError && status.status !== "idle";
 
 
@@ -369,6 +392,7 @@ function TaskDetailView({
     { key: "fetching", label: "Fetch Files", icon: FileCode },
     { key: "chunking", label: "Chunk Code", icon: Layers },
     { key: "embedding", label: "Embed", icon: Zap },
+    { key: "finalizing", label: "Promote", icon: Database },
     { key: "done", label: "Complete", icon: CheckCircle2 },
   ];
 

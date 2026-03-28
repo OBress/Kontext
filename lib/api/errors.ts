@@ -1,10 +1,25 @@
 import { NextResponse } from "next/server";
 
+export interface ApiErrorDetails {
+  recoverable?: boolean;
+  action?: string;
+  [key: string]: unknown;
+}
+
+export interface ApiErrorPayload {
+  code: string;
+  message: string;
+  recoverable?: boolean;
+  action?: string;
+  [key: string]: unknown;
+}
+
 export class ApiError extends Error {
   constructor(
     public statusCode: number,
     public code: string,
-    message: string
+    message: string,
+    public details: ApiErrorDetails = {}
   ) {
     super(message);
     this.name = "ApiError";
@@ -31,21 +46,34 @@ export function githubError(message: string) {
   return new ApiError(502, "GITHUB_ERROR", message);
 }
 
-export function aiError(message: string) {
-  return new ApiError(502, "AI_ERROR", message);
+export function aiError(message: string, details: ApiErrorDetails = {}) {
+  return new ApiError(502, "AI_ERROR", message, details);
+}
+
+export function getApiErrorPayload(error: unknown): ApiErrorPayload {
+  if (error instanceof ApiError) {
+    return {
+      code: error.code,
+      message: error.message,
+      ...error.details,
+    };
+  }
+
+  // Preserve the real error message for debugging instead of hiding it
+  const message =
+    error instanceof Error ? error.message : "An unexpected error occurred";
+
+  return {
+    code: "INTERNAL_ERROR",
+    message,
+  };
 }
 
 export function handleApiError(error: unknown): NextResponse {
   if (error instanceof ApiError) {
-    return NextResponse.json(
-      { error: { code: error.code, message: error.message } },
-      { status: error.statusCode }
-    );
+    return NextResponse.json({ error: getApiErrorPayload(error) }, { status: error.statusCode });
   }
 
   console.error("[API Error]", error);
-  return NextResponse.json(
-    { error: { code: "INTERNAL_ERROR", message: "An unexpected error occurred" } },
-    { status: 500 }
-  );
+  return NextResponse.json({ error: getApiErrorPayload(error) }, { status: 500 });
 }

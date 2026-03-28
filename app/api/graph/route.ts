@@ -7,6 +7,7 @@ import { buildGraph } from "@/lib/api/graph-builder";
 
 /**
  * GET /api/graph?repo=owner/name — Build dependency graph from repo_files
+ * Also returns cached architecture analysis if available.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -30,6 +31,14 @@ export async function GET(request: NextRequest) {
 
     validateRepoFullName(repoFullName);
 
+    // Fetch cached architecture analysis from repos table
+    const { data: repoData } = await supabase
+      .from("repos")
+      .select("architecture_analysis, architecture_analyzed_at")
+      .eq("user_id", user.id)
+      .eq("full_name", repoFullName)
+      .single();
+
     // Fetch cached file data from repo_files
     const { data: files, error } = await supabase
       .from("repo_files")
@@ -43,14 +52,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         nodes: [],
         links: [],
+        architecture: null,
+        analyzedAt: null,
         message: "No file data available. Index the repository first.",
       });
     }
 
-    // Build the graph
+    // Build the raw file graph
     const graph = buildGraph(files);
 
-    return NextResponse.json(graph);
+    return NextResponse.json({
+      ...graph,
+      architecture: repoData?.architecture_analysis || null,
+      analyzedAt: repoData?.architecture_analyzed_at || null,
+    });
   } catch (error) {
     return handleApiError(error);
   }

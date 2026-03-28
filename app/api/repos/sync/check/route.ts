@@ -3,6 +3,7 @@ import { getAuthenticatedUser } from "@/lib/api/auth";
 import { handleApiError } from "@/lib/api/errors";
 import { validateRepoFullName } from "@/lib/api/validate";
 import { fetchLatestCommit, fetchCommitsSince } from "@/lib/api/github";
+import { resolveRepoGitHubToken } from "@/lib/api/repo-auth";
 
 /**
  * GET /api/repos/sync/check?repo=owner/name — Check for new commits
@@ -14,14 +15,10 @@ export async function GET(request: Request) {
     const repoFullName = validateRepoFullName(searchParams.get("repo") || "");
     const [owner, name] = repoFullName.split("/");
 
-    if (!githubToken) {
-      return NextResponse.json({ error: "GitHub token required" }, { status: 401 });
-    }
-
     // Get stored repo data
     const { data: repo } = await supabase
       .from("repos")
-      .select("last_synced_sha, watched_branch, auto_sync_enabled, understanding_tier")
+      .select("last_synced_sha, watched_branch, default_branch, auto_sync_enabled, understanding_tier, sync_blocked_reason, pending_sync_head_sha")
       .eq("user_id", user.id)
       .eq("full_name", repoFullName)
       .single();
@@ -30,15 +27,26 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Repo not found" }, { status: 404 });
     }
 
-    const branch = repo.watched_branch || "main";
-    const latest = await fetchLatestCommit(githubToken, owner, name, branch);
+    const { token: effectiveToken } = await resolveRepoGitHubToken(
+      supabase,
+      user.id,
+      repoFullName,
+      githubToken
+    );
+
+    if (!effectiveToken) {
+      return NextResponse.json({ error: "GitHub token required" }, { status: 401 });
+    }
+
+    const branch = repo.watched_branch || repo.default_branch || "main";
+    const latest = await fetchLatestCommit(effectiveToken, owner, name, branch);
 
     const hasUpdates = repo.last_synced_sha !== latest.sha;
     let newCommitCount = 0;
 
     if (hasUpdates && repo.last_synced_sha) {
       const newCommits = await fetchCommitsSince(
-        githubToken, owner, name, branch, repo.last_synced_sha
+        effectiveToken, owner, name, branch, repo.last_synced_sha
       );
       newCommitCount = newCommits.length;
     }
@@ -54,6 +62,8 @@ export async function GET(request: Request) {
       branch,
       autoSyncEnabled: repo.auto_sync_enabled,
       understandingTier: repo.understanding_tier,
+      syncBlockedReason: repo.sync_blocked_reason,
+      pendingSyncHeadSha: repo.pending_sync_head_sha,
     });
   } catch (error) {
     return handleApiError(error);

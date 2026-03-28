@@ -16,6 +16,7 @@ export interface Repo {
   indexed: boolean;
   indexing: boolean;
   chunk_count: number;
+  last_indexed_at?: string | null;
   // Sync fields
   last_synced_sha?: string | null;
   watched_branch?: string | null;
@@ -23,10 +24,24 @@ export interface Repo {
   understanding_tier?: 1 | 2 | 3;
   webhook_id?: number | null;
   default_branch?: string | null;
+  sync_blocked_reason?: string | null;
+  pending_sync_head_sha?: string | null;
 }
 
 export interface IngestionState {
-  status: "idle" | "fetching" | "chunking" | "embedding" | "done" | "error";
+  status:
+    | "idle"
+    | "fetching"
+    | "chunking"
+    | "embedding"
+    | "finalizing"
+    | "timeline"
+    | "blocked_quota"
+    | "blocked_billing"
+    | "blocked_model"
+    | "pending_user_key_sync"
+    | "done"
+    | "error";
   progress: number; // 0-100
   filesTotal: number;
   filesProcessed: number;

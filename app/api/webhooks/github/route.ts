@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/api/auth";
 import crypto from "crypto";
 import { logActivity } from "@/lib/api/activity";
+import { resolveAiKey } from "@/lib/api/ai-key";
+import { summarizeAndEmbedCommits } from "@/lib/api/timeline-ai";
 
 
 const WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || "";
@@ -86,6 +88,74 @@ export async function POST(request: Request) {
               avatar_url: payload.sender?.avatar_url,
             },
           });
+
+          // ── Store commits in repo_commits with push grouping ──
+          interface WebhookCommit {
+            id: string;
+            message: string;
+            timestamp: string;
+            author?: { name?: string };
+            added?: string[];
+            modified?: string[];
+            removed?: string[];
+          }
+          const commitRows = commits.map((c: WebhookCommit) => ({
+            user_id: repo.user_id,
+            repo_full_name: repoFullName,
+            sha: c.id,
+            message: c.message,
+            author_name: c.author?.name || pusher,
+            author_avatar_url: payload.sender?.avatar_url || null,
+            committed_at: c.timestamp || new Date().toISOString(),
+            files_changed: [
+              ...(c.added || []).map((f: string) => ({ path: f, status: "added" })),
+              ...(c.modified || []).map((f: string) => ({ path: f, status: "modified" })),
+              ...(c.removed || []).map((f: string) => ({ path: f, status: "removed" })),
+            ],
+            push_group_id: deliveryId || `push-${Date.now()}`,
+            sync_triggered: !!repo.auto_sync_enabled,
+          }));
+
+          if (commitRows.length > 0) {
+            await adminDb.from("repo_commits").upsert(commitRows, {
+              onConflict: "user_id,repo_full_name,sha",
+              ignoreDuplicates: true,
+            });
+          }
+
+          // ── AI Summarize commits (fire-and-forget) ──
+          resolveAiKey(repo.user_id)
+            .then(async (aiKey) => {
+              if (!aiKey || commitRows.length === 0) return;
+              try {
+                const commitsForAi = commitRows.map((r: { sha: string; message: string; files_changed: { path: string; status: string }[] }) => ({
+                  sha: r.sha,
+                  message: r.message,
+                  files_changed: r.files_changed,
+                }));
+                const { summaries, embeddings } = await summarizeAndEmbedCommits(
+                  aiKey,
+                  commitsForAi
+                );
+                for (let i = 0; i < commitRows.length; i++) {
+                  await adminDb
+                    .from("repo_commits")
+                    .update({
+                      ai_summary: summaries[i],
+                      ai_summary_embedding: JSON.stringify(embeddings[i]),
+                    })
+                    .eq("user_id", repo.user_id)
+                    .eq("repo_full_name", repoFullName)
+                    .eq("sha", commitRows[i].sha);
+                }
+                console.log(
+                  `[webhook] AI summaries generated for ${summaries.length} commits on ${repoFullName}`
+                );
+              } catch (err) {
+                console.warn("[webhook] AI summary generation failed:", err);
+              }
+            })
+            .catch(() => {});
 
           // Trigger auto-sync if enabled
           if (repo.auto_sync_enabled) {

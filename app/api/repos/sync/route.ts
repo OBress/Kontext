@@ -1,85 +1,110 @@
+import { createHash } from "crypto";
+import { TaskType } from "@google/generative-ai";
 import { NextResponse } from "next/server";
-import { getAuthenticatedUser, createAdminClient } from "@/lib/api/auth";
-import { handleApiError, ApiError } from "@/lib/api/errors";
-import { validateRepoFullName, validateApiKey } from "@/lib/api/validate";
-import {
-  fetchChangedFiles,
-  fetchFileContent,
-  fetchLatestCommit,
-  fetchCommitsSince,
-  shouldIndexFile,
-} from "@/lib/api/github";
+import { createAdminClient, getAuthenticatedUser } from "@/lib/api/auth";
+import { ApiError, getApiErrorPayload, handleApiError } from "@/lib/api/errors";
 import { chunkFile } from "@/lib/api/chunker";
 import { generateEmbeddings, generateFileSummary } from "@/lib/api/embeddings";
+import {
+  fetchChangedFiles,
+  fetchCommitsSince,
+  fetchFileContent,
+  fetchLatestCommit,
+  shouldIndexFile,
+} from "@/lib/api/github";
 import { extractImports } from "@/lib/api/graph-builder";
-import { TaskType } from "@google/generative-ai";
+import { getAiBlockedStatus } from "@/lib/api/gemini";
+import { resolveRepoGitHubToken } from "@/lib/api/repo-auth";
+import { validateApiKey, validateRepoFullName } from "@/lib/api/validate";
+import { summarizeAndEmbedCommits } from "@/lib/api/timeline-ai";
+
+interface PreparedFileRecord {
+  file_path: string;
+  file_name: string;
+  extension: string;
+  line_count: number;
+  size_bytes: number;
+  content_hash: string;
+  imports: string[];
+}
+
+interface PreparedChunk {
+  file_path: string;
+  chunk_index: number;
+  content: string;
+  token_count: number;
+  metadata: Record<string, unknown>;
+}
+
+function hashContent(content: string) {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function serializeChunkRows(
+  chunks: PreparedChunk[],
+  embeddings: number[][]
+) {
+  return chunks.map((chunk, index) => ({
+    file_path: chunk.file_path,
+    chunk_index: chunk.chunk_index,
+    content: chunk.content,
+    token_count: chunk.token_count,
+    embedding: JSON.stringify(embeddings[index]),
+    metadata: chunk.metadata,
+  }));
+}
 
 /**
- * POST /api/repos/sync — Incremental sync pipeline with SSE progress
+ * POST /api/repos/sync - Incremental sync pipeline with SSE progress.
  *
- * Only re-processes files that changed since last_synced_sha.
- * Supports both manual (user-triggered) and webhook-triggered invocations.
+ * Reliability rule: changed paths are only replaced after their new embeddings are ready.
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const fullName = validateRepoFullName(body.repo_full_name);
     const [owner, name] = fullName.split("/");
-
-    // Webhook-triggered calls pass user_id directly
     const isWebhookTriggered = body.webhook_triggered === true;
-
-    let userId: string;
-    let githubToken: string;
-    let apiKey: string;
     const adminDb = await createAdminClient();
 
+    let userId: string;
+    let apiKey: string | null = null;
+    let fallbackGitHubToken: string | null = null;
+
     if (isWebhookTriggered) {
-      // Server-to-server call from webhook handler
       userId = body.user_id;
       if (!userId) {
         return NextResponse.json({ error: "user_id required for webhook sync" }, { status: 400 });
       }
 
-      // Fetch tokens from DB
       const { data: tokenRow } = await adminDb
         .from("user_tokens")
         .select("encrypted_token, token_iv, token_tag")
         .eq("user_id", userId)
         .single();
 
-      if (!tokenRow) {
-        return NextResponse.json({ error: "No GitHub token for user" }, { status: 401 });
+      if (tokenRow) {
+        const { decryptToken } = await import("@/lib/api/crypto");
+        fallbackGitHubToken = decryptToken({
+          ciphertext: tokenRow.encrypted_token,
+          iv: tokenRow.token_iv,
+          tag: tokenRow.token_tag,
+        });
       }
 
-      // Decrypt GitHub token
-      const { decryptToken } = await import("@/lib/api/crypto");
-      githubToken = decryptToken({
-        ciphertext: tokenRow.encrypted_token,
-        iv: tokenRow.token_iv,
-        tag: tokenRow.token_tag,
-      });
-
-      // For webhook, we need the user's stored API key — not available.
-      // We'll skip embedding for webhook-triggered syncs if no API key is provided.
-      // In production, you'd store this or use a service API key.
-      apiKey = body.api_key || "";
+      apiKey = body.api_key || null;
     } else {
-      // User-triggered call
       const auth = await getAuthenticatedUser();
       userId = auth.user.id;
-      githubToken = auth.githubToken!;
+      fallbackGitHubToken = auth.githubToken;
       apiKey = validateApiKey(request);
-
-      if (!githubToken) {
-        throw new ApiError(401, "GITHUB_TOKEN_REQUIRED", "GitHub token not available.");
-      }
     }
 
-    // Get repo state
     const { data: repo } = await adminDb
       .from("repos")
-      .select("id, last_synced_sha, watched_branch, understanding_tier, indexed")
+      .select(
+        "id, indexed, last_synced_sha, watched_branch, default_branch, understanding_tier, pending_sync_head_sha, sync_blocked_reason"
+      )
       .eq("user_id", userId)
       .eq("full_name", fullName)
       .single();
@@ -88,52 +113,110 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Repo not found" }, { status: 404 });
     }
 
-    if (!repo.last_synced_sha || !repo.indexed) {
+    if (!repo.indexed || !repo.last_synced_sha) {
       return NextResponse.json(
         { error: "Repo has not been fully ingested yet. Run full ingestion first." },
         { status: 400 }
       );
     }
 
-    const branch = repo.watched_branch || "main";
+    const { token: githubToken } = await resolveRepoGitHubToken(
+      adminDb,
+      userId,
+      fullName,
+      fallbackGitHubToken
+    );
+
+    if (!githubToken) {
+      throw new ApiError(
+        401,
+        "GITHUB_TOKEN_REQUIRED",
+        "GitHub token not available. Please re-authenticate or provide an access token for this repository."
+      );
+    }
+
+    const branch = repo.watched_branch || repo.default_branch || "main";
     const understandingTier = repo.understanding_tier || 2;
-
-    // For webhook-triggered without API key, we can only track commits, not re-embed
-    const canEmbed = !!apiKey;
-
     const encoder = new TextEncoder();
+
+    let targetHeadSHA: string | null = body.head_sha || null;
+
     const stream = new ReadableStream({
       async start(controller) {
         const send = (data: Record<string, unknown>) => {
           try {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
           } catch {
-            // Controller might be closed
+            // Controller might already be closed by the client.
           }
         };
 
         try {
-          // 1. Detect changes
           send({ status: "checking", message: "Checking for changes..." });
 
-          const latest = await fetchLatestCommit(githubToken, owner, name, branch);
-          const headSHA = body.head_sha || latest.sha;
+          if (!targetHeadSHA) {
+            const latest = await fetchLatestCommit(githubToken, owner, name, branch);
+            targetHeadSHA = latest.sha;
+          }
 
-          if (headSHA === repo.last_synced_sha) {
-            send({ status: "done", message: "Already up to date.", filesChanged: 0 });
+          if (targetHeadSHA === repo.last_synced_sha) {
+            if (repo.sync_blocked_reason || repo.pending_sync_head_sha) {
+              await adminDb
+                .from("repos")
+                .update({
+                  sync_blocked_reason: null,
+                  pending_sync_head_sha: null,
+                })
+                .eq("user_id", userId)
+                .eq("full_name", fullName);
+            }
+
+            send({
+              status: "done",
+              message: "Already up to date.",
+              filesChanged: 0,
+              lastSyncedSha: repo.last_synced_sha,
+            });
             controller.close();
             return;
           }
 
-          // 2. Get changed files
+          const activeApiKey = apiKey;
+
+          if (!activeApiKey) {
+            await adminDb
+              .from("repos")
+              .update({
+                sync_blocked_reason: "pending_user_key_sync",
+                pending_sync_head_sha: targetHeadSHA,
+              })
+              .eq("user_id", userId)
+              .eq("full_name", fullName);
+
+            send({
+              status: "pending_user_key_sync",
+              message:
+                "A repository update is waiting for your Google AI key. Re-open Kontext with your key and run sync to refresh the index safely.",
+              pendingHeadSha: targetHeadSHA,
+            });
+            controller.close();
+            return;
+          }
+
           send({ status: "fetching", message: "Fetching changed files..." });
 
           const { files: changedFiles } = await fetchChangedFiles(
-            githubToken, owner, name, repo.last_synced_sha!, headSHA
+            githubToken,
+            owner,
+            name,
+            repo.last_synced_sha,
+            targetHeadSHA
           );
 
-          // Filter to indexable files only
-          const indexableFiles = changedFiles.filter((f) => shouldIndexFile(f.filename));
+          const indexableFiles = changedFiles.filter((file) =>
+            shouldIndexFile(file.filename) ||
+            (file.previous_filename ? shouldIndexFile(file.previous_filename) : false)
+          );
 
           send({
             status: "fetching",
@@ -141,225 +224,235 @@ export async function POST(request: Request) {
             filesChanged: indexableFiles.length,
           });
 
-          // 3. Categorize changes
-          const removedFiles = indexableFiles.filter((f) => f.status === "removed");
-          const addedOrModified = indexableFiles.filter((f) => f.status !== "removed");
+          const filesToRemove = Array.from(
+            new Set(
+              indexableFiles.flatMap((file) => {
+                const paths = [file.filename];
+                if (file.previous_filename) {
+                  paths.push(file.previous_filename);
+                }
+                return paths;
+              })
+            )
+          );
 
-          // 4. Remove old chunks for deleted/modified files
-          const filesToRemove = [
-            ...removedFiles.map((f) => f.filename),
-            ...addedOrModified.map((f) => f.filename),
-          ];
+          const addedOrModified = indexableFiles.filter((file) => file.status !== "removed");
+          const preparedChunks: PreparedChunk[] = [];
+          const fileRecords: PreparedFileRecord[] = [];
 
-          if (filesToRemove.length > 0) {
-            send({ status: "cleaning", message: `Removing ${filesToRemove.length} old file chunks...` });
+          if (addedOrModified.length > 0) {
+            send({
+              status: "chunking",
+              message: `Preparing ${addedOrModified.length} changed files...`,
+            });
 
-            // Delete in batches of 50 paths (avoid oversized IN clause)
-            for (let i = 0; i < filesToRemove.length; i += 50) {
-              const batch = filesToRemove.slice(i, i + 50);
-              await adminDb
-                .from("repo_chunks")
-                .delete()
-                .eq("user_id", userId)
-                .eq("repo_full_name", fullName)
-                .in("file_path", batch);
-
-              await adminDb
-                .from("repo_files")
-                .delete()
-                .eq("user_id", userId)
-                .eq("repo_full_name", fullName)
-                .in("file_path", batch);
-            }
-          }
-
-          // 5. Fetch, chunk, and embed new/modified files
-          if (addedOrModified.length > 0 && canEmbed) {
-            send({ status: "chunking", message: `Processing ${addedOrModified.length} files...` });
-
-            const allChunks: Array<{
-              content: string;
-              filePath: string;
-              chunkIndex: number;
-              tokenCount: number;
-              metadata: Record<string, unknown>;
-            }> = [];
-
-            const fileRecords: Array<{
-              user_id: string;
-              repo_full_name: string;
-              file_path: string;
-              file_name: string;
-              extension: string;
-              line_count: number;
-              size_bytes: number;
-              imports: string[];
-            }> = [];
-
-            for (let i = 0; i < addedOrModified.length; i++) {
-              const file = addedOrModified[i];
-              const content = await fetchFileContent(githubToken, owner, name, file.filename);
+            for (let index = 0; index < addedOrModified.length; index += 1) {
+              const file = addedOrModified[index];
+              const content = await fetchFileContent(
+                githubToken,
+                owner,
+                name,
+                file.filename,
+                targetHeadSHA
+              );
 
               if (content) {
-                const ext = file.filename.split(".").pop() || "";
+                const extension = file.filename.split(".").pop() || "";
                 const lines = content.split("\n").length;
                 const imports = extractImports(content);
 
                 fileRecords.push({
-                  user_id: userId,
-                  repo_full_name: fullName,
                   file_path: file.filename,
                   file_name: file.filename.split("/").pop() || file.filename,
-                  extension: ext,
+                  extension,
                   line_count: lines,
                   size_bytes: content.length,
+                  content_hash: hashContent(content),
                   imports,
                 });
 
+                const llmSummary =
+                  understandingTier === 3
+                    ? await generateFileSummary(activeApiKey, file.filename, content).catch(() => null)
+                    : null;
+
                 const chunks = chunkFile(content, file.filename);
                 for (const chunk of chunks) {
-                  allChunks.push({
+                  preparedChunks.push({
+                    file_path: file.filename,
+                    chunk_index: chunk.chunkIndex,
                     content: chunk.content,
-                    filePath: file.filename,
-                    chunkIndex: chunk.chunkIndex,
-                    tokenCount: chunk.tokenCount,
+                    token_count: chunk.tokenCount,
                     metadata: {
                       ...chunk.metadata,
-                      // Tier 3: Add LLM summary to metadata
-                      ...(understandingTier === 3 ? {
-                        llm_summary: await generateFileSummary(apiKey, file.filename, content)
-                          .catch(() => null),
-                      } : {}),
+                      ...(llmSummary ? { llm_summary: llmSummary } : {}),
                     },
                   });
                 }
               }
 
-              if ((i + 1) % 5 === 0 || i === addedOrModified.length - 1) {
+              if ((index + 1) % 5 === 0 || index === addedOrModified.length - 1) {
                 send({
                   status: "chunking",
-                  filesProcessed: i + 1,
+                  filesProcessed: index + 1,
                   filesTotal: addedOrModified.length,
-                  chunksCreated: allChunks.length,
+                  chunksCreated: preparedChunks.length,
                 });
-              }
-            }
-
-            // 6. Generate embeddings
-            if (allChunks.length > 0) {
-              send({ status: "embedding", message: `Embedding ${allChunks.length} chunks...` });
-
-              const batchSize = 50;
-              const embeddings: number[][] = [];
-
-              for (let i = 0; i < allChunks.length; i += batchSize) {
-                const batch = allChunks.slice(i, i + batchSize);
-                const batchTexts = batch.map((c) => c.content);
-                const batchEmbeddings = await generateEmbeddings(
-                  apiKey,
-                  batchTexts,
-                  TaskType.RETRIEVAL_DOCUMENT
-                );
-                embeddings.push(...batchEmbeddings);
-
-                send({
-                  status: "embedding",
-                  chunksEmbedded: embeddings.length,
-                  chunksTotal: allChunks.length,
-                });
-              }
-
-              // 7. Insert new chunks
-              const chunkRows = allChunks.map((chunk, i) => ({
-                user_id: userId,
-                repo_full_name: fullName,
-                file_path: chunk.filePath,
-                chunk_index: chunk.chunkIndex,
-                content: chunk.content,
-                token_count: chunk.tokenCount,
-                embedding: JSON.stringify(embeddings[i]),
-                metadata: chunk.metadata,
-              }));
-
-              for (let i = 0; i < chunkRows.length; i += 100) {
-                await adminDb.from("repo_chunks").insert(chunkRows.slice(i, i + 100));
-              }
-
-              // 8. Insert file records
-              if (fileRecords.length > 0) {
-                for (let i = 0; i < fileRecords.length; i += 100) {
-                  await adminDb.from("repo_files").insert(fileRecords.slice(i, i + 100));
-                }
               }
             }
           }
 
-          // 9. Store commit history
-          send({ status: "timeline", message: "Updating development timeline..." });
+          let serializedChunks: Array<Record<string, unknown>> = [];
+          if (preparedChunks.length > 0) {
+            send({
+              status: "embedding",
+              message: `Embedding ${preparedChunks.length} chunks...`,
+              chunksTotal: preparedChunks.length,
+            });
 
+            const embeddings = await generateEmbeddings(
+              activeApiKey,
+              preparedChunks.map((chunk) => chunk.content),
+              TaskType.RETRIEVAL_DOCUMENT,
+              {
+                onBatchComplete: (completed, total) => {
+                  send({
+                    status: "embedding",
+                    chunksEmbedded: completed,
+                    chunksTotal: total,
+                  });
+                },
+              }
+            );
+
+            serializedChunks = serializeChunkRows(preparedChunks, embeddings);
+          }
+
+          send({ status: "finalizing", message: "Promoting changed files..." });
+
+          const promotedAt = new Date().toISOString();
+          const { error: replaceError } = await adminDb.rpc("replace_repo_paths", {
+            p_user_id: userId,
+            p_repo_full_name: fullName,
+            p_remove_paths: filesToRemove,
+            p_files: fileRecords,
+            p_chunks: serializedChunks,
+            p_last_synced_sha: targetHeadSHA,
+            p_last_indexed_at: promotedAt,
+            p_chunk_count: null,
+            p_sync_blocked_reason: null,
+            p_pending_sync_head_sha: null,
+          });
+
+          if (replaceError) {
+            throw replaceError;
+          }
+
+          send({ status: "timeline", message: "Updating development timeline..." });
           const newCommits = await fetchCommitsSince(
-            githubToken, owner, name, branch, repo.last_synced_sha!
+            githubToken,
+            owner,
+            name,
+            branch,
+            repo.last_synced_sha
           );
 
           if (newCommits.length > 0) {
-            const commitRows = newCommits.map((c) => ({
+            const syncGroupId = `sync-${Date.now()}`;
+            const commitRows = newCommits.map((commit) => ({
               user_id: userId,
               repo_full_name: fullName,
-              sha: c.sha,
-              message: c.commit.message,
-              author_name: c.author?.login || c.commit.author.name,
-              author_avatar_url: c.author?.avatar_url || null,
-              committed_at: c.commit.author.date,
-              files_changed: JSON.stringify(
-                changedFiles
-                  .filter(() => true) // All files for this batch
-                  .map((f) => ({
-                    path: f.filename,
-                    status: f.status,
-                    additions: f.additions,
-                    deletions: f.deletions,
-                  }))
-              ),
+              sha: commit.sha,
+              message: commit.commit.message,
+              author_name: commit.author?.login || commit.commit.author.name,
+              author_avatar_url: commit.author?.avatar_url || null,
+              committed_at: commit.commit.author.date,
+              files_changed: changedFiles.map((file) => ({
+                path: file.filename,
+                status: file.status,
+                additions: file.additions,
+                deletions: file.deletions,
+              })),
               sync_triggered: true,
+              push_group_id: syncGroupId,
             }));
 
-            // Insert in batches, ignoring duplicates
-            for (let i = 0; i < commitRows.length; i += 50) {
-              const batch = commitRows.slice(i, i + 50);
+            for (let index = 0; index < commitRows.length; index += 50) {
+              const batch = commitRows.slice(index, index + 50);
               await adminDb
                 .from("repo_commits")
-                .upsert(batch, { onConflict: "user_id,repo_full_name,sha", ignoreDuplicates: true });
+                .upsert(batch, {
+                  onConflict: "user_id,repo_full_name,sha",
+                  ignoreDuplicates: true,
+                });
+            }
+
+            // Generate AI summaries for the new commits
+            if (activeApiKey) {
+              send({ status: "timeline", message: `Summarizing ${newCommits.length} commits...` });
+              try {
+                const commitsForAi = commitRows.map((r) => ({
+                  sha: r.sha,
+                  message: r.message,
+                  files_changed: r.files_changed,
+                }));
+                const { summaries, embeddings } = await summarizeAndEmbedCommits(
+                  activeApiKey,
+                  commitsForAi
+                );
+                for (let i = 0; i < commitRows.length; i++) {
+                  await adminDb
+                    .from("repo_commits")
+                    .update({
+                      ai_summary: summaries[i],
+                      ai_summary_embedding: JSON.stringify(embeddings[i]),
+                    })
+                    .eq("user_id", userId)
+                    .eq("repo_full_name", fullName)
+                    .eq("sha", commitRows[i].sha);
+                }
+              } catch (aiErr) {
+                console.warn("[sync] AI summary generation failed:", aiErr);
+              }
             }
           }
 
-          // 10. Update repo state
           const { count: chunkCount } = await adminDb
             .from("repo_chunks")
             .select("id", { count: "exact", head: true })
             .eq("user_id", userId)
             .eq("repo_full_name", fullName);
 
-          await adminDb
-            .from("repos")
-            .update({
-              last_synced_sha: headSHA,
-              chunk_count: chunkCount || 0,
-              last_indexed_at: new Date().toISOString(),
-            })
-            .eq("user_id", userId)
-            .eq("full_name", fullName);
-
           send({
             status: "done",
             message: `Synced ${indexableFiles.length} files, ${newCommits.length} commits`,
             filesChanged: indexableFiles.length,
             commitsTracked: newCommits.length,
-            newChunkCount: chunkCount,
+            newChunkCount: chunkCount || 0,
+            lastSyncedSha: targetHeadSHA,
           });
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : "Unknown error";
-          console.error("[sync] Error:", err);
-          send({ status: "error", message });
+        } catch (error: unknown) {
+          const payload = getApiErrorPayload(error);
+          const blockedStatus = getAiBlockedStatus(payload.code);
+          const failureStatus = blockedStatus || "error";
+
+          if (blockedStatus) {
+            await adminDb
+              .from("repos")
+              .update({
+                sync_blocked_reason: blockedStatus,
+                pending_sync_head_sha: targetHeadSHA,
+              })
+              .eq("user_id", userId)
+              .eq("full_name", fullName);
+          }
+
+          send({
+            status: failureStatus,
+            message: payload.message,
+            error: payload,
+            pendingHeadSha: targetHeadSHA,
+          });
         }
 
         controller.close();

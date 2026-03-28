@@ -1,13 +1,22 @@
-import { GoogleGenerativeAI, TaskType } from "@google/generative-ai";
-import { aiError } from "./errors";
+import { TaskType } from "@google/generative-ai";
+import {
+  createGeminiClient,
+  delay,
+  GEMINI_EMBEDDING_BATCH_DELAY_MS,
+  GEMINI_EMBEDDING_BATCH_SIZE,
+  GEMINI_EMBEDDING_DIMENSIONS,
+  GEMINI_EMBEDDING_MODEL,
+  GEMINI_GENERATION_MODEL,
+  normalizeGeminiError,
+} from "./gemini";
 
-/** Embedding model configuration */
-const EMBEDDING_MODEL = "gemini-embedding-001";
-const EMBEDDING_DIMENSIONS = 1536;
+interface EmbeddingOptions {
+  onBatchComplete?: (completed: number, total: number) => void;
+}
 
 /**
  * Generate embeddings for one or more texts using Google's gemini-embedding-001 model.
- * Returns array of 3072-dimensional float arrays.
+ * Returns array of 1536-dimensional float arrays.
  *
  * Uses TaskType to optimize embeddings for their intended use:
  * - RETRIEVAL_DOCUMENT: when embedding source code / documents for storage
@@ -17,44 +26,58 @@ const EMBEDDING_DIMENSIONS = 1536;
 export async function generateEmbeddings(
   apiKey: string,
   texts: string[],
-  taskType: TaskType = TaskType.RETRIEVAL_DOCUMENT
+  taskType: TaskType = TaskType.RETRIEVAL_DOCUMENT,
+  options: EmbeddingOptions = {}
 ): Promise<number[][]> {
-  try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: EMBEDDING_MODEL });
+  const genAI = createGeminiClient(apiKey);
+  const model = genAI.getGenerativeModel({ model: GEMINI_EMBEDDING_MODEL });
+  const results: number[][] = [];
 
-    // Batch in groups of 100 (API limit)
-    const results: number[][] = [];
-    const batchSize = 100;
+  for (let i = 0; i < texts.length; i += GEMINI_EMBEDDING_BATCH_SIZE) {
+    const batch = texts.slice(i, i + GEMINI_EMBEDDING_BATCH_SIZE);
+    let attempts = 0;
 
-    for (let i = 0; i < texts.length; i += batchSize) {
-      const batch = texts.slice(i, i + batchSize);
-      const response = await model.batchEmbedContents({
-        requests: batch.map((text) => ({
-          content: { role: "user", parts: [{ text }] },
-          taskType,
-          outputDimensionality: EMBEDDING_DIMENSIONS,
-        })),
-      });
+    while (true) {
+      try {
+        const response = await model.batchEmbedContents({
+          requests: batch.map((text) => ({
+            content: { role: "user", parts: [{ text }] },
+            taskType,
+            outputDimensionality: GEMINI_EMBEDDING_DIMENSIONS,
+          })),
+        });
 
-      for (const embedding of response.embeddings) {
-        results.push(embedding.values);
+        for (const embedding of response.embeddings) {
+          results.push(embedding.values);
+        }
+
+        options.onBatchComplete?.(results.length, texts.length);
+        break;
+      } catch (error: unknown) {
+        const normalized = normalizeGeminiError(error, "embedding");
+        const shouldRetry =
+          normalized.code === "AI_TRANSIENT" && attempts === 0;
+
+        if (!shouldRetry) {
+          throw normalized;
+        }
+
+        attempts += 1;
+        await delay(GEMINI_EMBEDDING_BATCH_DELAY_MS);
       }
     }
 
-    return results;
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    if (message.includes("API key")) {
-      throw aiError("Invalid Google AI API key. Please check your key in Settings.");
+    const hasMore = i + GEMINI_EMBEDDING_BATCH_SIZE < texts.length;
+    if (hasMore) {
+      await delay(GEMINI_EMBEDDING_BATCH_DELAY_MS);
     }
-    throw aiError(`Embedding generation failed: ${message}`);
   }
+
+  return results;
 }
 
 /**
- * Generate embeddings optimized for code search queries.
- * Uses CODE_RETRIEVAL_QUERY task type for better retrieval of code blocks.
+ * Generate embeddings optimized for retrieval queries.
  */
 export async function generateQueryEmbedding(
   apiKey: string,
@@ -73,9 +96,9 @@ export async function generateChatStream(
   systemPrompt: string,
   userMessage: string
 ): Promise<ReadableStream<Uint8Array>> {
-  const genAI = new GoogleGenerativeAI(apiKey);
+  const genAI = createGeminiClient(apiKey);
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
+    model: GEMINI_GENERATION_MODEL,
     systemInstruction: systemPrompt,
   });
 
@@ -100,7 +123,7 @@ export async function generateChatStream(
         );
         controller.close();
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : "Unknown error";
+        const message = normalizeGeminiError(err, "generation").message;
         controller.enqueue(
           encoder.encode(
             `data: ${JSON.stringify({ type: "error", message })}\n\n`
@@ -121,17 +144,16 @@ export async function generateText(
   systemInstruction?: string
 ): Promise<string> {
   try {
-    const genAI = new GoogleGenerativeAI(apiKey);
+    const genAI = createGeminiClient(apiKey);
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
+      model: GEMINI_GENERATION_MODEL,
       ...(systemInstruction ? { systemInstruction } : {}),
     });
 
     const result = await model.generateContent(prompt);
     return result.response.text();
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    throw aiError(`Text generation failed: ${message}`);
+    throw normalizeGeminiError(err, "generation");
   }
 }
 

@@ -84,6 +84,15 @@ export async function GET(request: NextRequest) {
       indexed: r.indexed,
       indexing: r.indexing,
       chunk_count: r.chunk_count,
+      last_indexed_at: r.last_indexed_at,
+      last_synced_sha: r.last_synced_sha,
+      watched_branch: r.watched_branch,
+      default_branch: r.default_branch,
+      auto_sync_enabled: r.auto_sync_enabled,
+      understanding_tier: r.understanding_tier,
+      webhook_id: r.webhook_id,
+      sync_blocked_reason: r.sync_blocked_reason,
+      pending_sync_head_sha: r.pending_sync_head_sha,
     }));
 
     return NextResponse.json({ repos });
@@ -130,6 +139,10 @@ export async function POST(request: Request) {
           forks_count: body.forks_count || 0,
           default_branch: body.default_branch || "main",
           updated_at: new Date().toISOString(),
+          // Ingestion config fields
+          understanding_tier: body.understanding_tier || 2,
+          auto_sync_enabled: body.auto_sync_enabled || false,
+          watched_branch: body.watched_branch || body.default_branch || "main",
           ...tokenFields,
         },
         { onConflict: "user_id,full_name" }
