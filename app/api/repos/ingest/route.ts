@@ -3,10 +3,11 @@ import { getAuthenticatedUser, createAdminClient } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/api/rate-limit";
 import { handleApiError, ApiError } from "@/lib/api/errors";
 import { validateRepoFullName, validateApiKey } from "@/lib/api/validate";
-import { fetchRepoTree, fetchFileContent } from "@/lib/api/github";
+import { fetchRepoTree, fetchFileContent, fetchLatestCommit, fetchCommitsSince } from "@/lib/api/github";
 import { chunkFile } from "@/lib/api/chunker";
-import { generateEmbeddings } from "@/lib/api/embeddings";
+import { generateEmbeddings, generateFileSummary } from "@/lib/api/embeddings";
 import { extractImports } from "@/lib/api/graph-builder";
+import { TaskType } from "@google/generative-ai";
 
 /**
  * POST /api/repos/ingest — Full ingestion pipeline with SSE progress
@@ -27,6 +28,16 @@ export async function POST(request: Request) {
     const fullName = validateRepoFullName(body.repo_full_name);
     const apiKey = validateApiKey(request);
     const [owner, name] = fullName.split("/");
+
+    // Get understanding tier from repo settings (default: 2 = Standard)
+    const { data: repoSettings } = await supabase
+      .from("repos")
+      .select("understanding_tier, default_branch")
+      .eq("user_id", user.id)
+      .eq("full_name", fullName)
+      .single();
+    const understandingTier = repoSettings?.understanding_tier || 2;
+    const defaultBranch = repoSettings?.default_branch || "main";
 
     if (!githubToken) {
       throw new ApiError(401, "GITHUB_TOKEN_REQUIRED", "GitHub token not available. Please re-authenticate.");
@@ -145,7 +156,7 @@ export async function POST(request: Request) {
           for (let i = 0; i < allChunks.length; i += batchSize) {
             const batch = allChunks.slice(i, i + batchSize);
             const batchTexts = batch.map((c) => c.content);
-            const batchEmbeddings = await generateEmbeddings(apiKey, batchTexts);
+            const batchEmbeddings = await generateEmbeddings(apiKey, batchTexts, TaskType.RETRIEVAL_DOCUMENT);
             embeddings.push(...batchEmbeddings);
 
             send({
@@ -193,7 +204,17 @@ export async function POST(request: Request) {
             }
           }
 
-          // 7. Update repo status
+          // 7. Store HEAD SHA and set branch for future incremental syncs
+          send({ status: "finalizing", message: "Setting up sync tracking..." });
+
+          let headSHA: string | null = null;
+          try {
+            const latestCommit = await fetchLatestCommit(githubToken!, owner, name, defaultBranch);
+            headSHA = latestCommit.sha;
+          } catch {
+            // Non-fatal — sync tracking just won't work
+          }
+
           await adminDb
             .from("repos")
             .update({
@@ -201,11 +222,43 @@ export async function POST(request: Request) {
               indexing: false,
               chunk_count: allChunks.length,
               last_indexed_at: new Date().toISOString(),
+              last_synced_sha: headSHA,
+              watched_branch: defaultBranch,
             })
             .eq("user_id", user.id)
             .eq("full_name", fullName);
 
-          // 8. Update job
+          // 8. Backfill commit history (last 50 commits)
+          if (headSHA) {
+            try {
+              send({ status: "timeline", message: "Backfilling commit history..." });
+              const commits = await fetchCommitsSince(
+                githubToken!, owner, name, defaultBranch, headSHA, 50
+              ).catch(() => []);
+
+              // Also get the HEAD commit itself
+              const commitRows = [{
+                user_id: user.id,
+                repo_full_name: fullName,
+                sha: headSHA,
+                message: "Initial ingestion baseline",
+                author_name: "system",
+                committed_at: new Date().toISOString(),
+                sync_triggered: true,
+              }];
+
+              if (commitRows.length > 0) {
+                await adminDb
+                  .from("repo_commits")
+                  .upsert(commitRows, { onConflict: "user_id,repo_full_name,sha", ignoreDuplicates: true });
+              }
+            } catch (e) {
+              // Non-fatal
+              console.warn("[ingest] Commit backfill failed:", e);
+            }
+          }
+
+          // 9. Update job
           await supabase
             .from("ingestion_jobs")
             .update({

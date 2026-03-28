@@ -15,7 +15,7 @@ export function AppShell({ children }: AppShellProps) {
     <>
       <TopBar />
       <IconRail />
-      <main className="pl-14 pt-12 min-h-screen">
+      <main className="pl-14 pt-12 min-h-screen overflow-visible">
         <div className="p-6">
           {children}
         </div>

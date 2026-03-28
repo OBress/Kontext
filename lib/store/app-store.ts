@@ -16,6 +16,13 @@ export interface Repo {
   indexed: boolean;
   indexing: boolean;
   chunk_count: number;
+  // Sync fields
+  last_synced_sha?: string | null;
+  watched_branch?: string | null;
+  auto_sync_enabled?: boolean;
+  understanding_tier?: 1 | 2 | 3;
+  webhook_id?: number | null;
+  default_branch?: string | null;
 }
 
 export interface IngestionState {

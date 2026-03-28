@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.4"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       chat_sessions: {
@@ -216,6 +191,48 @@ export type Database = {
         }
         Relationships: []
       }
+      repo_commits: {
+        Row: {
+          author_avatar_url: string | null
+          author_name: string | null
+          committed_at: string
+          created_at: string | null
+          files_changed: Json | null
+          id: number
+          message: string
+          repo_full_name: string
+          sha: string
+          sync_triggered: boolean | null
+          user_id: string
+        }
+        Insert: {
+          author_avatar_url?: string | null
+          author_name?: string | null
+          committed_at: string
+          created_at?: string | null
+          files_changed?: Json | null
+          id?: number
+          message: string
+          repo_full_name: string
+          sha: string
+          sync_triggered?: boolean | null
+          user_id: string
+        }
+        Update: {
+          author_avatar_url?: string | null
+          author_name?: string | null
+          committed_at?: string
+          created_at?: string | null
+          files_changed?: Json | null
+          id?: number
+          message?: string
+          repo_full_name?: string
+          sha?: string
+          sync_triggered?: boolean | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       repo_files: {
         Row: {
           content_hash: string | null
@@ -260,6 +277,7 @@ export type Database = {
       }
       repos: {
         Row: {
+          auto_sync_enabled: boolean | null
           chunk_count: number | null
           created_at: string | null
           default_branch: string | null
@@ -272,13 +290,18 @@ export type Database = {
           indexing: boolean | null
           language: string | null
           last_indexed_at: string | null
+          last_synced_sha: string | null
           name: string
           owner: string
           stargazers_count: number | null
+          understanding_tier: number | null
           updated_at: string | null
           user_id: string
+          watched_branch: string | null
+          webhook_id: number | null
         }
         Insert: {
+          auto_sync_enabled?: boolean | null
           chunk_count?: number | null
           created_at?: string | null
           default_branch?: string | null
@@ -291,13 +314,18 @@ export type Database = {
           indexing?: boolean | null
           language?: string | null
           last_indexed_at?: string | null
+          last_synced_sha?: string | null
           name: string
           owner: string
           stargazers_count?: number | null
+          understanding_tier?: number | null
           updated_at?: string | null
           user_id: string
+          watched_branch?: string | null
+          webhook_id?: number | null
         }
         Update: {
+          auto_sync_enabled?: boolean | null
           chunk_count?: number | null
           created_at?: string | null
           default_branch?: string | null
@@ -310,11 +338,15 @@ export type Database = {
           indexing?: boolean | null
           language?: string | null
           last_indexed_at?: string | null
+          last_synced_sha?: string | null
           name?: string
           owner?: string
           stargazers_count?: number | null
+          understanding_tier?: number | null
           updated_at?: string | null
           user_id?: string
+          watched_branch?: string | null
+          webhook_id?: number | null
         }
         Relationships: []
       }
@@ -420,6 +452,36 @@ export type Database = {
           token_tag?: string
           updated_at?: string | null
           user_id?: string
+        }
+        Relationships: []
+      }
+      webhook_events: {
+        Row: {
+          created_at: string | null
+          delivery_id: string
+          event_type: string
+          id: number
+          payload: Json
+          processed: boolean | null
+          repo_full_name: string
+        }
+        Insert: {
+          created_at?: string | null
+          delivery_id: string
+          event_type: string
+          id?: number
+          payload: Json
+          processed?: boolean | null
+          repo_full_name: string
+        }
+        Update: {
+          created_at?: string | null
+          delivery_id?: string
+          event_type?: string
+          id?: number
+          payload?: Json
+          processed?: boolean | null
+          repo_full_name?: string
         }
         Relationships: []
       }
@@ -570,11 +632,7 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {},
   },
 } as const
-
