@@ -1,9 +1,10 @@
 "use client";
 
-import { Repo } from "@/lib/store/app-store";
+import { Repo, useAppStore } from "@/lib/store/app-store";
 import { Tilt3D } from "../shared/Tilt3D";
 import { useRouter } from "next/navigation";
-import { Star, GitFork, Clock, Loader2, Database } from "lucide-react";
+import { Star, GitFork, Clock, Loader2, Database, Zap } from "lucide-react";
+import { motion } from "framer-motion";
 
 const langColors: Record<string, string> = {
   TypeScript: "#3178C6",
@@ -34,6 +35,13 @@ interface RepoCard3DProps {
 export function RepoCard3D({ repo, index }: RepoCard3DProps) {
   const router = useRouter();
   const langColor = langColors[repo.language || ""] || "#737373";
+  const ingestionStatus = useAppStore((s) => s.ingestionStatus[repo.full_name]);
+
+  const isIngesting =
+    ingestionStatus &&
+    ingestionStatus.status !== "done" &&
+    ingestionStatus.status !== "error" &&
+    ingestionStatus.status !== "idle";
 
   return (
     <Tilt3D maxTilt={6} scale={1.01}>
@@ -64,16 +72,22 @@ export function RepoCard3D({ repo, index }: RepoCard3DProps) {
               </span>
             </div>
             {/* Status badge */}
-            {repo.indexed && (
+            {repo.indexed && !isIngesting && (
               <span className="shrink-0 ml-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20">
                 <Database size={10} />
                 Indexed
               </span>
             )}
-            {repo.indexing && (
+            {isIngesting && (
               <span className="shrink-0 ml-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)] border border-[var(--accent-cyan)]/20">
                 <Loader2 size={10} className="animate-spin" />
-                Indexing
+                {ingestionStatus.progress}%
+              </span>
+            )}
+            {!repo.indexed && !isIngesting && (
+              <span className="shrink-0 ml-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono bg-[var(--alpha-white-5)] text-[var(--gray-400)] border border-[var(--alpha-white-8)]">
+                <Zap size={10} />
+                Pending
               </span>
             )}
           </div>
@@ -82,6 +96,27 @@ export function RepoCard3D({ repo, index }: RepoCard3DProps) {
           <p className="font-mono text-xs text-[var(--gray-400)] line-clamp-2 mb-4 leading-relaxed m-0">
             {repo.description || "No description"}
           </p>
+
+          {/* Ingestion progress bar */}
+          {isIngesting && (
+            <div className="mb-4">
+              <div className="w-full h-1.5 rounded-full bg-[var(--alpha-white-8)] overflow-hidden">
+                <motion.div
+                  className="h-full rounded-full"
+                  style={{
+                    background:
+                      "linear-gradient(90deg, var(--accent-cyan), var(--accent-purple))",
+                  }}
+                  initial={{ width: "0%" }}
+                  animate={{ width: `${ingestionStatus.progress}%` }}
+                  transition={{ duration: 0.3, ease: "easeOut" }}
+                />
+              </div>
+              <p className="font-mono text-[10px] text-[var(--gray-500)] mt-1.5 m-0">
+                {ingestionStatus.message}
+              </p>
+            </div>
+          )}
 
           {/* Footer stats */}
           <div className="flex items-center gap-4 text-[11px] font-mono text-[var(--gray-500)]">
@@ -109,7 +144,7 @@ export function RepoCard3D({ repo, index }: RepoCard3DProps) {
           </div>
 
           {/* Indexed chunk count */}
-          {repo.indexed && repo.chunk_count > 0 && (
+          {repo.indexed && repo.chunk_count > 0 && !isIngesting && (
             <div className="mt-3 pt-3 border-t border-[var(--alpha-white-5)]">
               <span className="text-[11px] font-mono text-[var(--gray-500)]">
                 {repo.chunk_count.toLocaleString()} chunks embedded

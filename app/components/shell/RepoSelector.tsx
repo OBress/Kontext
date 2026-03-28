@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useAppStore, Repo } from "@/lib/store/app-store";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, Search, GitBranch, Star, Loader2 } from "lucide-react";
+import { ChevronDown, Search, GitBranch, Star, Loader2, Plus, Database } from "lucide-react";
 import { PulseOrb } from "../shared/PulseOrb";
 
 // Language color map for dots
@@ -27,17 +27,9 @@ const langColors: Record<string, string> = {
 export function RepoSelector() {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const { repos, activeRepo, setActiveRepo, setRepos } = useAppStore();
+  const { repos, activeRepo, setActiveRepo, setAddRepoModalOpen } = useAppStore();
   const router = useRouter();
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Load mock repos on mount if empty
-  useEffect(() => {
-    if (repos.length === 0) {
-      fetchRepos();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Close on outside click
   useEffect(() => {
@@ -50,22 +42,12 @@ export function RepoSelector() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const fetchRepos = async () => {
-    try {
-      const res = await fetch("/api/repos");
-      const data = await res.json();
-      setRepos(data.repos);
-    } catch {
-      // fail silently for now
-    }
-  };
-
   const filteredRepos = repos.filter((r) =>
     r.full_name.toLowerCase().includes(search.toLowerCase())
   );
 
   const indexed = filteredRepos.filter((r) => r.indexed);
-  const available = filteredRepos.filter((r) => !r.indexed);
+  const pending = filteredRepos.filter((r) => !r.indexed);
 
   const handleSelect = (repo: Repo) => {
     setActiveRepo(repo);
@@ -113,7 +95,7 @@ export function RepoSelector() {
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search repositories..."
+                  placeholder="Search added repositories..."
                   autoFocus
                   className="w-full pl-9 pr-3 py-2 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-cyan)]/40 transition-colors"
                 />
@@ -123,9 +105,12 @@ export function RepoSelector() {
             {/* Repo list */}
             <div className="max-h-[320px] overflow-y-auto py-1">
               {repos.length === 0 ? (
-                <div className="flex items-center justify-center py-8 text-[var(--gray-500)]">
-                  <Loader2 size={16} className="animate-spin mr-2" />
-                  <span className="text-sm font-mono">Loading repos...</span>
+                <div className="flex flex-col items-center justify-center py-8 text-[var(--gray-500)]">
+                  <Database size={20} className="mb-2 opacity-40" />
+                  <span className="text-sm font-mono">No repositories added</span>
+                  <span className="text-[11px] font-mono text-[var(--gray-600)] mt-1">
+                    Add one to get started
+                  </span>
                 </div>
               ) : (
                 <>
@@ -144,18 +129,18 @@ export function RepoSelector() {
                       onSelect={handleSelect}
                     />
                   ))}
-                  {available.length > 0 && (
+                  {pending.length > 0 && (
                     <div className="px-3 py-1.5 mt-1">
                       <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--gray-500)]">
-                        Available
+                        Pending
                       </span>
                     </div>
                   )}
-                  {available.map((repo) => (
+                  {pending.map((repo) => (
                     <RepoItem
                       key={repo.id}
                       repo={repo}
-                      isActive={false}
+                      isActive={activeRepo?.id === repo.id}
                       onSelect={handleSelect}
                     />
                   ))}
@@ -166,6 +151,20 @@ export function RepoSelector() {
                   )}
                 </>
               )}
+            </div>
+
+            {/* Add new repo footer */}
+            <div className="border-t border-[var(--alpha-white-5)]">
+              <button
+                onClick={() => {
+                  setIsOpen(false);
+                  setAddRepoModalOpen(true);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors cursor-pointer bg-transparent border-none hover:bg-[var(--alpha-white-5)] text-[var(--accent-cyan)]"
+              >
+                <Plus size={14} />
+                <span className="text-sm font-mono">Add New Repository</span>
+              </button>
             </div>
           </motion.div>
         )}
@@ -184,6 +183,12 @@ function RepoItem({
   onSelect: (r: Repo) => void;
 }) {
   const langColor = langColors[repo.language || ""] || "var(--gray-500)";
+  const ingestionStatus = useAppStore((s) => s.ingestionStatus[repo.full_name]);
+  const isIngesting =
+    ingestionStatus &&
+    ingestionStatus.status !== "done" &&
+    ingestionStatus.status !== "error" &&
+    ingestionStatus.status !== "idle";
 
   return (
     <button
@@ -206,10 +211,10 @@ function RepoItem({
               Indexed
             </span>
           )}
-          {repo.indexing && (
+          {isIngesting && (
             <span className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)]">
               <Loader2 size={10} className="animate-spin" />
-              Indexing
+              {ingestionStatus.progress}%
             </span>
           )}
         </div>

@@ -1,67 +1,142 @@
 import { NextResponse } from "next/server";
+import { getAuthenticatedUser } from "@/lib/api/auth";
+import { rateLimit } from "@/lib/api/rate-limit";
+import { handleApiError } from "@/lib/api/errors";
+import { validateRepoFullName, validateApiKey, validateTarget } from "@/lib/api/validate";
+import { generateText } from "@/lib/api/embeddings";
 
-export async function POST() {
-  const mockPrompt = `# System Prompt — acme/web-platform
+// Config files that indicate tech stack
+const CONFIG_FILES = [
+  "package.json", "tsconfig.json", "next.config.js", "next.config.ts", "next.config.mjs",
+  "vite.config.ts", "vite.config.js", "webpack.config.js",
+  "tailwind.config.js", "tailwind.config.ts",
+  "Cargo.toml", "go.mod", "requirements.txt", "Pipfile", "pyproject.toml",
+  "Gemfile", "build.gradle", "pom.xml", "Dockerfile", "docker-compose.yml",
+  ".eslintrc", ".eslintrc.js", ".eslintrc.json", "jest.config.ts", "jest.config.js",
+  "vitest.config.ts", ".prettierrc",
+];
 
-You are an expert developer working on the **acme/web-platform** repository. Follow these conventions precisely.
+/**
+ * POST /api/prompts — Detect stack + generate system prompt via Gemini
+ */
+export async function POST(request: Request) {
+  try {
+    const { user, supabase } = await getAuthenticatedUser();
 
-## Tech Stack
-- **Framework**: Next.js 14 (App Router)
-- **Language**: TypeScript 5.x (strict mode)
-- **Styling**: Tailwind CSS 3.x
-- **Database**: PostgreSQL via Prisma ORM
-- **Auth**: Cookie-based sessions via \`lib/auth.ts\`
-- **Testing**: Jest + React Testing Library
-- **Deployment**: Docker on Railway
+    const rl = rateLimit(user.id, "prompts");
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: { code: "RATE_LIMITED", message: "Too many requests" } },
+        { status: 429 }
+      );
+    }
 
-## Coding Standards
+    const body = await request.json();
+    const repoFullName = validateRepoFullName(body.repo_full_name);
+    const apiKey = validateApiKey(request);
+    const target = validateTarget(body.target);
+    const customInstructions = body.custom_instructions || "";
 
-### File Organization
-- Pages go in \`app/\` using the App Router convention
-- Shared components go in \`components/\`
-- UI primitives go in \`components/ui/\`
-- Business logic goes in \`lib/\`
-- Custom hooks go in \`hooks/\`
+    // 1. Fetch config file chunks from repo_chunks
+    const { data: configChunks } = await supabase
+      .from("repo_chunks")
+      .select("file_path, content")
+      .eq("user_id", user.id)
+      .eq("repo_full_name", repoFullName)
+      .in("file_path", CONFIG_FILES);
 
-### TypeScript
-- Always use explicit return types on exported functions
-- Prefer \`interface\` over \`type\` for object shapes
-- Use \`const\` assertions for literal types
-- Never use \`any\` — use \`unknown\` with type guards instead
+    // Also get file structure overview
+    const { data: files } = await supabase
+      .from("repo_files")
+      .select("file_path, extension")
+      .eq("user_id", user.id)
+      .eq("repo_full_name", repoFullName)
+      .limit(200);
 
-### React
-- Use Server Components by default
-- Add \`"use client"\` only when using hooks, event handlers, or browser APIs
-- Colocate component-specific types in the same file
-- Use \`React.FC\` sparingly — prefer explicit props interfaces
+    // 2. Build context about the repo
+    const configContext = (configChunks || [])
+      .map((c) => `--- ${c.file_path} ---\n${c.content}`)
+      .join("\n\n");
 
-### Styling
-- Use Tailwind utilities; avoid custom CSS unless absolutely necessary
-- Follow the design system tokens in \`globals.css\`
-- Use \`cn()\` utility from \`lib/utils\` for conditional classes
+    const fileTree = (files || []).map((f) => f.file_path).join("\n");
 
-### Error Handling
-- Wrap async operations in try/catch
-- Use custom error classes from \`lib/errors.ts\`
-- Always return meaningful error messages to the UI
+    // 3. Build meta-prompt for Gemini
+    const targetNames: Record<string, string> = {
+      cursor: "Cursor (.cursorrules)",
+      copilot: "GitHub Copilot",
+      claude: "Claude",
+      gpt: "ChatGPT / GPT",
+    };
 
-### Git
-- Commit messages follow Conventional Commits
-- Branch names: \`feat/\`, \`fix/\`, \`chore/\`
-- PRs require at least one review
-`;
+    const metaPrompt = `Analyze this repository and generate a comprehensive system prompt for ${targetNames[target] || target}.
 
-  const detectedStack = [
-    { name: "Next.js 14", category: "Framework", confidence: 98 },
-    { name: "TypeScript", category: "Language", confidence: 100 },
-    { name: "React 18", category: "Library", confidence: 100 },
-    { name: "Tailwind CSS", category: "Styling", confidence: 95 },
-    { name: "Prisma", category: "Database", confidence: 90 },
-    { name: "PostgreSQL", category: "Database", confidence: 85 },
-    { name: "Jest", category: "Testing", confidence: 80 },
-    { name: "Docker", category: "DevOps", confidence: 75 },
-    { name: "ESLint", category: "Tooling", confidence: 92 },
-  ];
+## Repository: ${repoFullName}
 
-  return NextResponse.json({ prompt: mockPrompt, detectedStack });
+## Configuration Files
+${configContext || "No config files found."}
+
+## File Structure (sample)
+${fileTree || "No files available."}
+
+${customInstructions ? `## Additional Instructions from User\n${customInstructions}` : ""}
+
+## Your Task
+
+1. First, analyze the config files to detect the tech stack. Output a JSON array of detected technologies with format: [{"name": "Tech Name", "category": "Framework|Language|Database|Styling|Testing|DevOps|Tooling|Library", "confidence": 90}]
+
+2. Then generate a complete, detailed system prompt that an AI coding assistant should follow when working on this codebase. Include:
+   - Project description and tech stack
+   - File organization conventions
+   - Coding standards (TypeScript strictness, naming, etc.)
+   - React/Component patterns
+   - Styling conventions
+   - Error handling patterns
+   - Testing patterns
+   - Git conventions
+
+Format your response EXACTLY as:
+===STACK_START===
+[JSON array of detected stack]
+===STACK_END===
+===PROMPT_START===
+[The generated system prompt in markdown]
+===PROMPT_END===`;
+
+    const systemInstruction = "You are an expert software architect who analyzes codebases and generates precise, actionable system prompts for AI coding assistants.";
+
+    const result = await generateText(apiKey, metaPrompt, systemInstruction);
+
+    // 4. Parse the response
+    let detectedStack: Array<{ name: string; category: string; confidence: number }> = [];
+    let promptText = result;
+
+    const stackMatch = result.match(/===STACK_START===\s*([\s\S]*?)\s*===STACK_END===/);
+    const promptMatch = result.match(/===PROMPT_START===\s*([\s\S]*?)\s*===PROMPT_END===/);
+
+    if (stackMatch) {
+      try {
+        detectedStack = JSON.parse(stackMatch[1]);
+      } catch {
+        // Parsing failed — use empty
+      }
+    }
+
+    if (promptMatch) {
+      promptText = promptMatch[1].trim();
+    }
+
+    // 5. Cache the result
+    await supabase.from("generated_prompts").insert({
+      user_id: user.id,
+      repo_full_name: repoFullName,
+      target,
+      detected_stack: detectedStack,
+      prompt_text: promptText,
+      custom_instructions: customInstructions || null,
+    });
+
+    return NextResponse.json({ prompt: promptText, detectedStack });
+  } catch (error) {
+    return handleApiError(error);
+  }
 }

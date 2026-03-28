@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useParams } from "next/navigation";
 import { useGraphStore } from "@/lib/store/graph-store";
 import { ForceGraph3DWrapper } from "@/app/components/graph/ForceGraph3DWrapper";
 import { GraphControls } from "@/app/components/graph/GraphControls";
@@ -14,15 +15,19 @@ const ParticleField = dynamic(
 
 export default function GraphPage() {
   const { setGraphData, graphData, isFullscreen } = useGraphStore();
+  const params = useParams<{ owner: string; name: string }>();
+  const repoFullName = `${params.owner}/${params.name}`;
 
   useEffect(() => {
     if (graphData.nodes.length === 0) {
-      fetch("/api/graph")
+      fetch(`/api/graph?repo=${encodeURIComponent(repoFullName)}`)
         .then((r) => r.json())
-        .then((data) => setGraphData(data))
+        .then((data) => {
+          if (data.nodes) setGraphData(data);
+        })
         .catch(() => {});
     }
-  }, [graphData.nodes.length, setGraphData]);
+  }, [graphData.nodes.length, setGraphData, repoFullName]);
 
   return (
     <div

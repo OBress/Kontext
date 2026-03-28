@@ -4,6 +4,7 @@ import { ReactNode } from "react";
 import { IconRail } from "./IconRail";
 import { TopBar } from "./TopBar";
 import { ApiKeyGate } from "../shared/ApiKeyGate";
+import { AddRepoModal } from "../dashboard/AddRepoModal";
 
 interface AppShellProps {
   children: ReactNode;
@@ -20,6 +21,7 @@ export function AppShell({ children }: AppShellProps) {
         </div>
       </main>
       <ApiKeyGate />
+      <AddRepoModal />
     </>
   );
 }

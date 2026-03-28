@@ -1,121 +1,141 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getAuthenticatedUser } from "@/lib/api/auth";
+import { rateLimit } from "@/lib/api/rate-limit";
+import { handleApiError } from "@/lib/api/errors";
+import { validateRepoFullName } from "@/lib/api/validate";
+import { fetchUserRepos } from "@/lib/api/github";
 
-// Mock repository data for frontend development
-const mockRepos = [
-  {
-    id: 1,
-    full_name: "acme/web-platform",
-    name: "web-platform",
-    owner: "acme",
-    description: "Main web platform built with Next.js 14, TypeScript, and Tailwind CSS",
-    language: "TypeScript",
-    stargazers_count: 342,
-    forks_count: 28,
-    updated_at: "2026-03-27T14:30:00Z",
-    indexed: true,
-    indexing: false,
-    chunk_count: 1847,
-  },
-  {
-    id: 2,
-    full_name: "acme/api-gateway",
-    name: "api-gateway",
-    owner: "acme",
-    description: "REST & GraphQL API gateway with Redis caching and rate limiting",
-    language: "TypeScript",
-    stargazers_count: 156,
-    forks_count: 12,
-    updated_at: "2026-03-26T09:15:00Z",
-    indexed: true,
-    indexing: false,
-    chunk_count: 923,
-  },
-  {
-    id: 3,
-    full_name: "acme/ml-pipeline",
-    name: "ml-pipeline",
-    owner: "acme",
-    description: "Machine learning data pipeline for recommendation engine",
-    language: "Python",
-    stargazers_count: 89,
-    forks_count: 7,
-    updated_at: "2026-03-25T18:00:00Z",
-    indexed: true,
-    indexing: false,
-    chunk_count: 612,
-  },
-  {
-    id: 4,
-    full_name: "acme/mobile-app",
-    name: "mobile-app",
-    owner: "acme",
-    description: "Cross-platform mobile application built with React Native",
-    language: "TypeScript",
-    stargazers_count: 203,
-    forks_count: 19,
-    updated_at: "2026-03-28T10:00:00Z",
-    indexed: false,
-    indexing: false,
-    chunk_count: 0,
-  },
-  {
-    id: 5,
-    full_name: "acme/infra-config",
-    name: "infra-config",
-    owner: "acme",
-    description: "Terraform & Kubernetes infrastructure configuration",
-    language: "Go",
-    stargazers_count: 45,
-    forks_count: 3,
-    updated_at: "2026-03-20T08:30:00Z",
-    indexed: false,
-    indexing: false,
-    chunk_count: 0,
-  },
-  {
-    id: 6,
-    full_name: "acme/design-system",
-    name: "design-system",
-    owner: "acme",
-    description: "Shared UI component library and design tokens",
-    language: "TypeScript",
-    stargazers_count: 178,
-    forks_count: 15,
-    updated_at: "2026-03-24T12:45:00Z",
-    indexed: false,
-    indexing: true,
-    chunk_count: 0,
-  },
-  {
-    id: 7,
-    full_name: "acme/rust-engine",
-    name: "rust-engine",
-    owner: "acme",
-    description: "High-performance computation engine written in Rust",
-    language: "Rust",
-    stargazers_count: 410,
-    forks_count: 34,
-    updated_at: "2026-03-22T16:20:00Z",
-    indexed: false,
-    indexing: false,
-    chunk_count: 0,
-  },
-  {
-    id: 8,
-    full_name: "acme/docs",
-    name: "docs",
-    owner: "acme",
-    description: "Developer documentation and API reference",
-    language: "JavaScript",
-    stargazers_count: 67,
-    forks_count: 5,
-    updated_at: "2026-03-21T11:10:00Z",
-    indexed: false,
-    indexing: false,
-    chunk_count: 0,
-  },
-];
+/**
+ * GET /api/repos — Returns repos based on source:
+ *   default:          Only repos the user has "added" (exist in Supabase repos table)
+ *   ?source=github:   The user's GitHub repos, excluding any already added
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const { user, supabase, githubToken } = await getAuthenticatedUser();
 
-export async function GET() {
-  return NextResponse.json({ repos: mockRepos });
+    const rl = rateLimit(user.id, "repos");
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: { code: "RATE_LIMITED", message: "Too many requests" } },
+        { status: 429, headers: { "Retry-After": String(Math.ceil((rl.resetAt - Date.now()) / 1000)) } }
+      );
+    }
+
+    const source = request.nextUrl.searchParams.get("source");
+
+    if (source === "github") {
+      // Browse mode: return GitHub repos, excluding already-added ones
+      if (!githubToken) {
+        return NextResponse.json(
+          { error: { code: "NO_TOKEN", message: "GitHub token not available" } },
+          { status: 401 }
+        );
+      }
+
+      // Get already-added repo names
+      const { data: addedRepos } = await supabase
+        .from("repos")
+        .select("full_name")
+        .eq("user_id", user.id);
+
+      const addedSet = new Set((addedRepos || []).map((r) => r.full_name));
+
+      const ghRepos = await fetchUserRepos(githubToken);
+      const repos = ghRepos
+        .filter((r) => !addedSet.has(r.full_name))
+        .map((r) => ({
+          id: r.id,
+          full_name: r.full_name,
+          name: r.name,
+          owner: r.owner.login,
+          description: r.description,
+          language: r.language,
+          stargazers_count: r.stargazers_count,
+          forks_count: r.forks_count,
+          updated_at: r.updated_at,
+          default_branch: r.default_branch,
+          private: r.private,
+        }));
+
+      return NextResponse.json({ repos });
+    }
+
+    // Default: return only added repos from Supabase
+    const { data: dbRepos } = await supabase
+      .from("repos")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false });
+
+    const repos = (dbRepos || []).map((r) => ({
+      id: r.github_id,
+      full_name: r.full_name,
+      name: r.name,
+      owner: r.owner,
+      description: r.description,
+      language: r.language,
+      stargazers_count: r.stargazers_count,
+      forks_count: r.forks_count,
+      updated_at: r.updated_at,
+      indexed: r.indexed,
+      indexing: r.indexing,
+      chunk_count: r.chunk_count,
+    }));
+
+    return NextResponse.json({ repos });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+/**
+ * POST /api/repos — Connect/add a repo (upsert into repos + add owner to team)
+ */
+export async function POST(request: Request) {
+  try {
+    const { user, supabase } = await getAuthenticatedUser();
+    const body = await request.json();
+
+    const fullName = validateRepoFullName(body.repo_full_name);
+    const [owner, name] = fullName.split("/");
+
+    // Upsert the repo record
+    const { data: repo, error } = await supabase
+      .from("repos")
+      .upsert(
+        {
+          user_id: user.id,
+          github_id: body.github_id || 0,
+          full_name: fullName,
+          name,
+          owner,
+          description: body.description || null,
+          language: body.language || null,
+          stargazers_count: body.stargazers_count || 0,
+          forks_count: body.forks_count || 0,
+          default_branch: body.default_branch || "main",
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,full_name" }
+      )
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Add caller as owner of the team
+    await supabase.from("team_members").upsert(
+      {
+        repo_full_name: fullName,
+        user_id: user.id,
+        role: "owner",
+      },
+      { onConflict: "repo_full_name,user_id" }
+    );
+
+    return NextResponse.json({ repo });
+  } catch (error) {
+    return handleApiError(error);
+  }
 }

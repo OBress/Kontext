@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useParams } from "next/navigation";
+import { useAppStore } from "@/lib/store/app-store";
 import { GlowCard } from "@/app/components/shared/GlowCard";
 import { TypewriterText } from "@/app/components/shared/TypewriterText";
 import {
@@ -31,6 +33,10 @@ const targetOptions = [
 ];
 
 export default function PromptsPage() {
+  const params = useParams<{ owner: string; name: string }>();
+  const { apiKey } = useAppStore();
+  const repoFullName = `${params.owner}/${params.name}`;
+
   const [prompt, setPrompt] = useState("");
   const [detectedStack, setDetectedStack] = useState<StackItem[]>([]);
   const [enabledTech, setEnabledTech] = useState<Record<string, boolean>>({});
@@ -45,7 +51,18 @@ export default function PromptsPage() {
     setIsGenerating(true);
     setIsAnimating(true);
     try {
-      const res = await fetch("/api/prompts", { method: "POST" });
+      const res = await fetch("/api/prompts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { "x-google-api-key": apiKey } : {}),
+        },
+        body: JSON.stringify({
+          repo_full_name: repoFullName,
+          target,
+          custom_instructions: customInstructions,
+        }),
+      });
       const data = await res.json();
       setPrompt(data.prompt);
       setDetectedStack(data.detectedStack);

@@ -1,18 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useParams } from "next/navigation";
 import { GlowCard } from "@/app/components/shared/GlowCard";
 import { PulseOrb } from "@/app/components/shared/PulseOrb";
-import { Users, UserPlus, Mail, ChevronRight, ChevronLeft, Check, Shield, Eye, Edit, Crown, X, Send, PartyPopper, type LucideIcon } from "lucide-react";
+import { Users, UserPlus, Mail, ChevronRight, ChevronLeft, Check, Shield, Eye, Edit, Crown, X, Send, PartyPopper, Loader2, type LucideIcon } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-const mockMembers = [
-  { id: 1, name: "Owen Bress", username: "obress", avatar: "", role: "Owner" as const, online: true, joinedAt: "2026-03-01" },
-  { id: 2, name: "Sarah Chen", username: "schen", avatar: "", role: "Admin" as const, online: true, joinedAt: "2026-03-05" },
-  { id: 3, name: "Alex Kim", username: "akim", avatar: "", role: "Member" as const, online: false, joinedAt: "2026-03-12" },
-  { id: 4, name: "Jordan Lee", username: "jlee", avatar: "", role: "Member" as const, online: true, joinedAt: "2026-03-18" },
-  { id: 5, name: "Morgan Davis", username: "mdavis", avatar: "", role: "Viewer" as const, online: false, joinedAt: "2026-03-25" },
-];
+interface TeamMember {
+  id: number;
+  user_id: string;
+  role: string;
+  joined_at: string;
+}
+
 
 const roleColors: Record<string, string> = { Owner: "var(--accent-amber)", Admin: "var(--accent-purple)", Member: "var(--accent-cyan)", Viewer: "var(--gray-500)" };
 const roleIcons: Record<string, LucideIcon> = { Owner: Crown, Admin: Shield, Member: Edit, Viewer: Eye };
@@ -26,15 +27,50 @@ const onboardingSteps = [
 ];
 
 export default function TeamPage() {
+  const params = useParams<{ owner: string; name: string }>();
+  const repoFullName = `${params.owner}/${params.name}`;
+
+  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [loading, setLoading] = useState(true);
   const [inviteUsername, setInviteUsername] = useState("");
-  const [inviteRole, setInviteRole] = useState("Member");
+  const [inviteRole, setInviteRole] = useState("member");
+  const [inviting, setInviting] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
   const [wizardComplete, setWizardComplete] = useState(false);
 
-  const handleInvite = () => {
-    if (!inviteUsername.trim()) return;
-    setInviteUsername("");
+  const fetchTeam = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/team?repo=${encodeURIComponent(repoFullName)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setMembers(data.members || []);
+      }
+    } catch {}
+    setLoading(false);
+  }, [repoFullName]);
+
+  useEffect(() => {
+    fetchTeam();
+  }, [fetchTeam]);
+
+  const handleInvite = async () => {
+    if (!inviteUsername.trim() || inviting) return;
+    setInviting(true);
+    try {
+      await fetch("/api/team", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repo_full_name: repoFullName,
+          github_username: inviteUsername.trim(),
+          role: inviteRole,
+        }),
+      });
+      setInviteUsername("");
+      fetchTeam();
+    } catch {}
+    setInviting(false);
   };
 
   return (
@@ -42,34 +78,40 @@ export default function TeamPage() {
       {/* Team Roster */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-mono text-xs uppercase tracking-wider text-[var(--gray-500)] m-0">Team Members ({mockMembers.length})</h3>
+          <h3 className="font-mono text-xs uppercase tracking-wider text-[var(--gray-500)] m-0">Team Members ({members.length})</h3>
         </div>
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 size={20} className="animate-spin text-[var(--gray-500)]" />
+          </div>
+        ) : members.length === 0 ? (
+          <p className="font-mono text-sm text-[var(--gray-500)] text-center py-8">No team members yet. You&apos;ll be added as owner when you index this repo.</p>
+        ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {mockMembers.map((member) => {
-            const RoleIcon = roleIcons[member.role];
+          {members.map((member) => {
+            const displayRole = member.role.charAt(0).toUpperCase() + member.role.slice(1);
+            const RoleIcon = roleIcons[displayRole] || Eye;
             return (
               <GlowCard key={member.id} glowColor="none" className="p-4">
                 <div className="flex items-start gap-3">
                   <div className="relative">
                     <div className="w-10 h-10 rounded-full bg-[var(--surface-3)] flex items-center justify-center font-mono text-sm text-[var(--gray-300)]">
-                      {member.name.split(" ").map((n) => n[0]).join("")}
+                      {member.user_id.slice(0, 2).toUpperCase()}
                     </div>
-                    {member.online && (
-                      <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[var(--accent-green)] border-2 border-[var(--surface-2)]" />
-                    )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-mono text-sm text-[var(--gray-100)] m-0">{member.name}</p>
-                    <p className="font-mono text-xs text-[var(--gray-500)] m-0">@{member.username}</p>
+                    <p className="font-mono text-sm text-[var(--gray-100)] m-0">{member.user_id.slice(0, 8)}...</p>
+                    <p className="font-mono text-xs text-[var(--gray-500)] m-0">Joined {new Date(member.joined_at).toLocaleDateString()}</p>
                   </div>
-                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono" style={{ color: roleColors[member.role], backgroundColor: `${roleColors[member.role]}15` }}>
-                    <RoleIcon size={10} /> {member.role}
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono" style={{ color: roleColors[displayRole] || "var(--gray-500)", backgroundColor: `${roleColors[displayRole] || "var(--gray-500)"}15` }}>
+                    <RoleIcon size={10} /> {displayRole}
                   </span>
                 </div>
               </GlowCard>
             );
           })}
         </div>
+        )}
       </div>
 
       {/* Invite */}
@@ -81,12 +123,12 @@ export default function TeamPage() {
         <div className="flex flex-col sm:flex-row gap-3">
           <input value={inviteUsername} onChange={(e) => setInviteUsername(e.target.value)} placeholder="GitHub username" className="flex-1 px-3 py-2 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-cyan)]/40" />
           <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} className="px-3 py-2 rounded-lg text-sm font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] focus:outline-none cursor-pointer">
-            <option value="Viewer">Viewer</option>
-            <option value="Member">Member</option>
-            <option value="Admin">Admin</option>
+            <option value="viewer">Viewer</option>
+            <option value="member">Member</option>
+            <option value="admin">Admin</option>
           </select>
-          <button onClick={handleInvite} disabled={!inviteUsername.trim()} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-mono bg-[var(--accent-cyan)] text-black font-medium hover:opacity-90 disabled:opacity-40 border-none cursor-pointer">
-            <Send size={14} /> Send Invite
+          <button onClick={handleInvite} disabled={!inviteUsername.trim() || inviting} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-mono bg-[var(--accent-cyan)] text-black font-medium hover:opacity-90 disabled:opacity-40 border-none cursor-pointer">
+            {inviting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Send Invite
           </button>
         </div>
       </GlowCard>

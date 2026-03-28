@@ -4,6 +4,14 @@ import { signInWithGitHub } from "./actions";
 import { motion } from "framer-motion";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import dynamic from "next/dynamic";
+import Image from "next/image";
+
+const ParticleField = dynamic(
+  () =>
+    import("../components/shared/ParticleField").then((m) => m.ParticleField),
+  { ssr: false }
+);
 
 function GitHubIcon() {
   return (
@@ -36,12 +44,15 @@ function LoginContent() {
   const error = searchParams.get("error");
 
   return (
-    <main className="font-mono min-h-screen flex items-center justify-center px-6">
+    <main className="font-mono min-h-screen flex items-center justify-center px-6 relative">
+      {/* 3D Particle Background */}
+      <ParticleField />
+
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-        className="w-full max-w-sm"
+        className="w-full max-w-sm relative z-10"
       >
         {/* Header */}
         <div className="text-center mb-8">
@@ -49,25 +60,34 @@ function LoginContent() {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.3, delay: 0.1 }}
-            className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-alpha-100 mb-4"
+            className="inline-flex items-center justify-center mb-4"
           >
-            <span className="text-xl">◆</span>
+            <Image
+              src="/icon.svg"
+              alt="Kontext logo"
+              width={48}
+              height={48}
+              className="rounded-xl"
+              priority
+            />
           </motion.div>
-          <h1 className="text-gray-1000 font-mono font-medium text-lg tracking-tight my-0">
+          <h1 className="text-foreground font-mono font-medium text-lg tracking-tight my-0">
             Kontext
           </h1>
-          <p className="text-gray-900 font-mono text-sm mt-1.5 mb-0">
+          <p className="text-muted-foreground font-mono text-sm mt-1.5 mb-0">
             GitHub Repository Analyzer
           </p>
         </div>
 
         {/* Login Card */}
-        <div className="bg-gray-alpha-100 rounded-md p-6 space-y-5">
+        <div
+          className="glass-strong rounded-lg p-6 space-y-5"
+        >
           <div className="space-y-1.5">
-            <h2 className="my-0 font-mono font-medium text-sm tracking-tight uppercase text-gray-1000">
+            <h2 className="my-0 font-mono font-medium text-sm tracking-tight uppercase text-foreground">
               Sign in
             </h2>
-            <p className="text-gray-900 text-xs font-mono my-0 leading-relaxed">
+            <p className="text-muted-foreground text-xs font-mono my-0 leading-relaxed">
               Authenticate with GitHub to analyze your repositories.
             </p>
           </div>
@@ -76,9 +96,13 @@ function LoginContent() {
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
-              className="bg-[var(--ds-red-600)]/10 border border-[var(--ds-red-600)]/20 rounded px-3 py-2"
+              className="rounded px-3 py-2"
+              style={{
+                background: "rgba(255, 82, 82, 0.1)",
+                border: "1px solid rgba(255, 82, 82, 0.2)",
+              }}
             >
-              <p className="text-[var(--ds-red-600)] text-xs font-mono my-0">
+              <p className="text-[var(--accent-red)] text-xs font-mono my-0">
                 {error === "auth"
                   ? "Authentication failed. Please try again."
                   : "Could not connect to GitHub. Please try again."}
@@ -89,7 +113,11 @@ function LoginContent() {
           <form action={signInWithGitHub}>
             <button
               type="submit"
-              className="w-full flex items-center justify-center gap-2.5 bg-[var(--ds-gray-1000)] text-[var(--ds-background-100)] font-mono text-sm font-medium py-2.5 px-4 rounded-md border-none cursor-pointer transition-opacity duration-150 hover:opacity-90 active:opacity-80"
+              className="w-full flex items-center justify-center gap-2.5 font-mono text-sm font-medium py-2.5 px-4 rounded-md border-none cursor-pointer transition-all duration-150 hover:opacity-90 active:scale-[0.98]"
+              style={{
+                background: "var(--foreground)",
+                color: "var(--background)",
+              }}
             >
               <GitHubIcon />
               Sign in with GitHub
@@ -97,29 +125,44 @@ function LoginContent() {
           </form>
 
           {/* Scopes info */}
-          <div className="border-t border-[var(--ds-gray-alpha-200)] pt-4 space-y-2.5">
-            <div className="flex items-center gap-1.5">
+          <div
+            className="pt-4 space-y-2.5"
+            style={{ borderTop: "1px solid var(--alpha-white-8)" }}
+          >
+            <div className="flex items-center gap-1.5 text-muted-foreground">
               <LockIcon />
-              <span className="text-gray-900 text-xs font-mono uppercase">
+              <span className="text-xs font-mono uppercase">
                 Permissions requested
               </span>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              <span className="inline-flex items-center px-2 py-0.5 bg-[var(--ds-gray-alpha-100)] border border-[var(--ds-gray-alpha-200)] rounded text-xs font-mono text-gray-900">
+              <span
+                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono text-muted-foreground"
+                style={{
+                  background: "var(--alpha-white-5)",
+                  border: "1px solid var(--alpha-white-10)",
+                }}
+              >
                 repo
               </span>
-              <span className="inline-flex items-center px-2 py-0.5 bg-[var(--ds-gray-alpha-100)] border border-[var(--ds-gray-alpha-200)] rounded text-xs font-mono text-gray-900">
+              <span
+                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono text-muted-foreground"
+                style={{
+                  background: "var(--alpha-white-5)",
+                  border: "1px solid var(--alpha-white-10)",
+                }}
+              >
                 read:user
               </span>
             </div>
-            <p className="text-gray-900 text-[11px] font-mono my-0 leading-relaxed opacity-70">
+            <p className="text-muted-foreground text-[11px] font-mono my-0 leading-relaxed opacity-70">
               Required to read repository contents and your profile.
             </p>
           </div>
         </div>
 
         {/* Footer */}
-        <p className="text-center text-gray-900 text-[11px] font-mono mt-4 opacity-60">
+        <p className="text-center text-muted-foreground text-[11px] font-mono mt-4 opacity-60">
           Your tokens are never stored on our servers.
         </p>
       </motion.div>
@@ -132,7 +175,7 @@ export default function LoginPage() {
     <Suspense
       fallback={
         <main className="font-mono min-h-screen flex items-center justify-center">
-          <div className="text-gray-900 text-sm">Loading...</div>
+          <div className="text-muted-foreground text-sm">Loading...</div>
         </main>
       }
     >

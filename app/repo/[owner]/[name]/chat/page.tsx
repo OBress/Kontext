@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useParams } from "next/navigation";
 import { useChatStore, ChatMessage, ChatSource } from "@/lib/store/chat-store";
+import { useAppStore } from "@/lib/store/app-store";
 import { GlowCard } from "@/app/components/shared/GlowCard";
 import {
   Send,
@@ -253,6 +255,9 @@ export default function ChatPage() {
   } = useChatStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const params = useParams<{ owner: string; name: string }>();
+  const { apiKey } = useAppStore();
+  const repoFullName = `${params.owner}/${params.name}`;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -285,8 +290,11 @@ export default function ChatPage() {
       try {
         const res = await fetch("/api/chat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: content }),
+          headers: {
+            "Content-Type": "application/json",
+            ...(apiKey ? { "x-google-api-key": apiKey } : {}),
+          },
+          body: JSON.stringify({ message: content, repo_full_name: repoFullName }),
           signal: controller.signal,
         });
 
