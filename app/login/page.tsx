@@ -69,6 +69,7 @@ function LoginContent() {
               height={48}
               className="rounded-xl"
               priority
+              unoptimized
             />
           </motion.div>
           <h1 className="text-foreground font-mono font-medium text-lg tracking-tight my-0">

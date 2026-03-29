@@ -125,10 +125,37 @@ export async function POST(request: Request) {
       .eq("full_name", fullName);
 
     const encoder = new TextEncoder();
+    const abortSignal = request.signal;
     const stream = new ReadableStream({
       async start(controller) {
+        let streamClosed = false;
+
+        const closeStream = () => {
+          if (!streamClosed) {
+            streamClosed = true;
+            try {
+              controller.close();
+            } catch {
+              // Already closed by runtime — safe to ignore.
+            }
+          }
+        };
+
+        // If the client disconnects, mark the stream as closed so we
+        // stop trying to enqueue data. The pipeline itself continues
+        // so the index is still built, we just can't report progress.
+        abortSignal?.addEventListener("abort", () => {
+          closeStream();
+        });
+
         const send = (data: Record<string, unknown>) => {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+          if (streamClosed) return;
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+          } catch {
+            // Controller was closed between our check and the enqueue — race-safe.
+            streamClosed = true;
+          }
         };
 
         try {
@@ -410,7 +437,7 @@ export async function POST(request: Request) {
             .eq("full_name", fullName);
         }
 
-        controller.close();
+        closeStream();
       },
     });
 
