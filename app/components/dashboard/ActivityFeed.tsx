@@ -282,7 +282,7 @@ export function ActivityFeed() {
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto pr-1 overscroll-contain">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1 overscroll-contain">
         {loading ? (
           <ActivitySkeleton />
         ) : events.length === 0 ? (

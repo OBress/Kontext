@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAppStore } from "@/lib/store/app-store";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -70,7 +70,9 @@ export function AddRepoModal() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupResult, setLookupResult] = useState<GitHubRepoPreview | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
-  const [accessToken, setAccessToken] = useState("");
+  // Use a ref instead of state to keep the raw PAT out of React DevTools / state snapshots
+  const accessTokenRef = useRef("");
+  const [accessTokenDisplay, setAccessTokenDisplay] = useState("");
   const [showTokenField, setShowTokenField] = useState(false);
 
   // Step 2: Configuration state
@@ -140,7 +142,8 @@ export function AddRepoModal() {
     setUrlInput("");
     setLookupResult(null);
     setLookupError(null);
-    setAccessToken("");
+    accessTokenRef.current = "";
+    setAccessTokenDisplay("");
     setShowTokenField(false);
     setAddRepoDefaultUrl(null);
     // Reset step 2
@@ -199,7 +202,7 @@ export function AddRepoModal() {
             stargazers_count: repo.stargazers_count,
             forks_count: repo.forks_count,
             default_branch: repo.default_branch || "main",
-            custom_access_token: accessToken.trim() || undefined,
+            custom_access_token: accessTokenRef.current.trim() || undefined,
             // ── New config fields ──
             understanding_tier: config.understanding_tier,
             auto_sync_enabled: config.auto_sync_enabled,
@@ -425,7 +428,7 @@ export function AddRepoModal() {
         setAddingRepo(null);
       }
     },
-    [apiKey, addRepo, setIngestionStatus, updateRepo, accessToken, handleClose, config]
+    [apiKey, addRepo, setIngestionStatus, updateRepo, handleClose, config]
   );
 
   const handleLookup = async () => {
@@ -440,7 +443,7 @@ export function AddRepoModal() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           url: urlInput.trim(),
-          access_token: accessToken.trim() || null,
+          access_token: accessTokenRef.current.trim() || null,
         }),
       });
       const data = await res.json();
@@ -723,8 +726,11 @@ export function AddRepoModal() {
                             >
                               <input
                                 type="password"
-                                value={accessToken}
-                                onChange={(e) => setAccessToken(e.target.value)}
+                                value={accessTokenDisplay}
+                                onChange={(e) => {
+                                  accessTokenRef.current = e.target.value;
+                                  setAccessTokenDisplay(e.target.value);
+                                }}
                                 placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
                                 className="w-full px-3 py-2 rounded-lg text-xs font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40 transition-colors"
                               />

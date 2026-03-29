@@ -40,6 +40,26 @@ const AUTO_SPOTLIGHT_DURATION = 2800;
    Helpers
    ═══════════════════════════════════════════════════ */
 
+/** Mulberry32 — fast, deterministic 32-bit PRNG. */
+function mulberry32(seed: number) {
+  return () => {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Simple string → 32-bit hash for PRNG seeding. */
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  }
+  return h;
+}
+
 function buildNodes(userRepos: Repo[]): ConstellationNode[] {
   const userNodes: ConstellationNode[] = userRepos.map((r) => ({
     id: r.full_name,
@@ -80,12 +100,16 @@ function placeOnSphere(nodes: ConstellationNode[]): NodePlacement[] {
     return [{ ...nodes[0], x: 0, y: 0, z: SPHERE_RADIUS, baseScale: 0.07 }];
   }
 
+  // Seed PRNG from node IDs for deterministic placement
+  const seed = hashString(nodes.map((n) => n.id).join("|"));
+  const rand = mulberry32(seed);
+
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
   return nodes.map((node, i) => {
     const y = 1 - (i / (count - 1)) * 2;
     const radiusAtY = Math.sqrt(1 - y * y);
     const theta = goldenAngle * i;
-    const r = SPHERE_RADIUS + (Math.random() - 0.5) * 0.3;
+    const r = SPHERE_RADIUS + (rand() - 0.5) * 0.3;
     return {
       ...node,
       x: Math.cos(theta) * radiusAtY * r,
@@ -188,15 +212,15 @@ function RepoNodes({
     animatedScales.current = new Float32Array(placements.length).fill(1);
   }, [placements.length]);
 
-  // Language-based colors
+  // Language-based colors — cache a shared THREE.Color to avoid per-node allocation
+  const scratchColor = useRef(new THREE.Color());
   const colors = useMemo(() => {
     const arr = new Float32Array(placements.length * 3);
     placements.forEach((p, i) => {
-      const hex = getLanguageColor(p.language);
-      const color = new THREE.Color(hex);
-      arr[i * 3] = color.r;
-      arr[i * 3 + 1] = color.g;
-      arr[i * 3 + 2] = color.b;
+      scratchColor.current.set(getLanguageColor(p.language));
+      arr[i * 3] = scratchColor.current.r;
+      arr[i * 3 + 1] = scratchColor.current.g;
+      arr[i * 3 + 2] = scratchColor.current.b;
     });
     return arr;
   }, [placements]);

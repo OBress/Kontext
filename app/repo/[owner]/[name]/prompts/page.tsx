@@ -83,6 +83,7 @@ const INSTALL_INSTRUCTIONS: Record<PromptTarget, { title: string; steps: string[
       "Scoped rules go to .agents/rules/*.md — loaded contextually.",
       "Antigravity walks the folder tree, so deeper AGENTS.md files override parent ones.",
       "Commit AGENTS.md and .agents/ to Git for team-wide consistency.",
+      "To make scoped rules activate only when relevant, open each rule in the Antigravity UI and change Activation Mode from \"Always On\" to \"Auto\".",
     ],
   },
   windsurf: {
