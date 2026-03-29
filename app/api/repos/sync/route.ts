@@ -2,6 +2,8 @@ import { createHash } from "crypto";
 import { TaskType } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 import { createAdminClient, getAuthenticatedUser } from "@/lib/api/auth";
+import { resolveAiKey } from "@/lib/api/ai-key";
+import { queueArchitectureRefresh } from "@/lib/api/architecture-refresh";
 import { ApiError, getApiErrorPayload, handleApiError } from "@/lib/api/errors";
 import { logActivity } from "@/lib/api/activity";
 import { chunkFile } from "@/lib/api/chunker";
@@ -15,6 +17,7 @@ import {
 } from "@/lib/api/github";
 import { extractImports } from "@/lib/api/graph-builder";
 import { getAiBlockedStatus } from "@/lib/api/gemini";
+import { runRepoChecks } from "@/lib/api/repo-checks";
 import { resolveRepoGitHubToken } from "@/lib/api/repo-auth";
 import { validateApiKey, validateRepoFullName } from "@/lib/api/validate";
 import { summarizeAndEmbedCommits } from "@/lib/api/timeline-ai";
@@ -55,6 +58,28 @@ function serializeChunkRows(
   }));
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function runWorker() {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= items.length) return;
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  }
+
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  return results;
+}
+
 /**
  * POST /api/repos/sync - Incremental sync pipeline with SSE progress.
  *
@@ -93,7 +118,7 @@ export async function POST(request: Request) {
         });
       }
 
-      apiKey = body.api_key || null;
+      apiKey = body.api_key || await resolveAiKey(userId);
     } else {
       const auth = await getAuthenticatedUser();
       userId = auth.user.id;
@@ -121,14 +146,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const { token: githubToken } = await resolveRepoGitHubToken(
+    const { token: effectiveToken } = await resolveRepoGitHubToken(
       adminDb,
       userId,
       fullName,
       fallbackGitHubToken
     );
 
-    if (!githubToken) {
+    if (!effectiveToken) {
       throw new ApiError(
         401,
         "GITHUB_TOKEN_REQUIRED",
@@ -156,7 +181,7 @@ export async function POST(request: Request) {
           send({ status: "checking", message: "Checking for changes..." });
 
           if (!targetHeadSHA) {
-            const latest = await fetchLatestCommit(githubToken, owner, name, branch);
+            const latest = await fetchLatestCommit(effectiveToken, owner, name, branch);
             targetHeadSHA = latest.sha;
           }
 
@@ -207,7 +232,7 @@ export async function POST(request: Request) {
           send({ status: "fetching", message: "Fetching changed files..." });
 
           const { files: changedFiles } = await fetchChangedFiles(
-            githubToken,
+            effectiveToken,
             owner,
             name,
             repo.last_synced_sha,
@@ -246,60 +271,77 @@ export async function POST(request: Request) {
               status: "chunking",
               message: `Preparing ${addedOrModified.length} changed files...`,
             });
+            let filesProcessed = 0;
+            let chunksCreated = 0;
 
-            for (let index = 0; index < addedOrModified.length; index += 1) {
-              const file = addedOrModified[index];
-              const content = await fetchFileContent(
-                githubToken,
-                owner,
-                name,
-                file.filename,
-                targetHeadSHA
-              );
+            const preparedResults = await mapWithConcurrency(
+              addedOrModified,
+              understandingTier === 3 ? 3 : 6,
+              async (file) => {
+                const content = await fetchFileContent(
+                  effectiveToken,
+                  owner,
+                  name,
+                  file.filename,
+                  targetHeadSHA || undefined
+                );
 
-              if (content) {
-                const extension = file.filename.split(".").pop() || "";
-                const lines = content.split("\n").length;
-                const imports = extractImports(content);
+                let nextFileRecord: PreparedFileRecord | null = null;
+                const nextChunks: PreparedChunk[] = [];
 
-                fileRecords.push({
-                  file_path: file.filename,
-                  file_name: file.filename.split("/").pop() || file.filename,
-                  extension,
-                  line_count: lines,
-                  size_bytes: content.length,
-                  content_hash: hashContent(content),
-                  imports,
-                });
+                if (content) {
+                  const extension = file.filename.split(".").pop() || "";
+                  const lines = content.split("\n").length;
+                  const imports = extractImports(content);
 
-                const llmSummary =
-                  understandingTier === 3
-                    ? await generateFileSummary(activeApiKey, file.filename, content).catch(() => null)
-                    : null;
-
-                const chunks = chunkFile(content, file.filename);
-                for (const chunk of chunks) {
-                  preparedChunks.push({
+                  nextFileRecord = {
                     file_path: file.filename,
-                    chunk_index: chunk.chunkIndex,
-                    content: chunk.content,
-                    token_count: chunk.tokenCount,
-                    metadata: {
-                      ...chunk.metadata,
-                      ...(llmSummary ? { llm_summary: llmSummary } : {}),
-                    },
-                  });
-                }
-              }
+                    file_name: file.filename.split("/").pop() || file.filename,
+                    extension,
+                    line_count: lines,
+                    size_bytes: content.length,
+                    content_hash: hashContent(content),
+                    imports,
+                  };
 
-              if ((index + 1) % 5 === 0 || index === addedOrModified.length - 1) {
+                  const llmSummary =
+                    understandingTier === 3
+                      ? await generateFileSummary(activeApiKey, file.filename, content).catch(() => null)
+                      : null;
+
+                  const chunks = chunkFile(content, file.filename);
+                  for (const chunk of chunks) {
+                    nextChunks.push({
+                      file_path: file.filename,
+                      chunk_index: chunk.chunkIndex,
+                      content: chunk.content,
+                      token_count: chunk.tokenCount,
+                      metadata: {
+                        ...chunk.metadata,
+                        ...(llmSummary ? { llm_summary: llmSummary } : {}),
+                      },
+                    });
+                  }
+                }
+
+                filesProcessed += 1;
+                chunksCreated += nextChunks.length;
                 send({
                   status: "chunking",
-                  filesProcessed: index + 1,
+                  filesProcessed,
                   filesTotal: addedOrModified.length,
-                  chunksCreated: preparedChunks.length,
+                  chunksCreated,
                 });
+
+                return { nextFileRecord, nextChunks };
               }
+            );
+
+            for (const result of preparedResults) {
+              if (result.nextFileRecord) {
+                fileRecords.push(result.nextFileRecord);
+              }
+              preparedChunks.push(...result.nextChunks);
             }
           }
 
@@ -351,7 +393,7 @@ export async function POST(request: Request) {
 
           send({ status: "timeline", message: "Updating development timeline..." });
           const newCommits = await fetchCommitsSince(
-            githubToken,
+            effectiveToken,
             owner,
             name,
             branch,
@@ -439,6 +481,38 @@ export async function POST(request: Request) {
                 commits_tracked: newCommits.length,
                 webhook_triggered: isWebhookTriggered,
               },
+            });
+          }
+
+          await queueArchitectureRefresh({
+            userId,
+            repoFullName: fullName,
+            apiKey: activeApiKey,
+            sourceSha: targetHeadSHA,
+          });
+
+          if (
+            activeApiKey &&
+            targetHeadSHA &&
+            (indexableFiles.length > 0 || newCommits.length > 0)
+          ) {
+            void runRepoChecks({
+              supabase: adminDb,
+              userId,
+              repoFullName: fullName,
+              apiKey: activeApiKey,
+              triggerMode: "after_sync",
+              headSha: targetHeadSHA,
+              baseSha: repo.last_synced_sha,
+              changedFiles: changedFiles.map((file) => ({
+                filename: file.filename,
+                status: file.status,
+                additions: file.additions,
+                deletions: file.deletions,
+                previous_filename: file.previous_filename,
+              })),
+            }).catch((checkError) => {
+              console.error("[sync] Repo health checks failed:", checkError);
             });
           }
 

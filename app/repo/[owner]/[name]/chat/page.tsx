@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   useChatStore,
-  ChatAnswerMode,
   ChatCitation,
   ChatMessage,
   TimelineCitation,
@@ -150,30 +149,68 @@ function SuggestedQuestions({ onSelect }: { onSelect: (question: string) => void
   );
 }
 
-function AnswerModeBadge({ mode }: { mode?: ChatAnswerMode }) {
-  if (!mode) return null;
-
-  const styles: Record<ChatAnswerMode, string> = {
-    grounded:
-      "border-[var(--accent-green)]/30 bg-[var(--accent-green)]/10 text-[var(--accent-green)]",
-    partial:
-      "border-[var(--accent-yellow)]/30 bg-[var(--accent-yellow)]/10 text-[var(--accent-yellow)]",
-    insufficient_evidence:
-      "border-[var(--accent-red)]/25 bg-[var(--accent-red)]/10 text-[var(--accent-red)]",
-  };
-
-  const labels: Record<ChatAnswerMode, string> = {
-    grounded: "Grounded",
-    partial: "Partial evidence",
-    insufficient_evidence: "Insufficient evidence",
-  };
+function ContextBlock({
+  citations,
+  timelineCitations,
+  selectedCitationId,
+  onSelectCitation,
+  timestamp,
+}: {
+  citations?: ChatCitation[];
+  timelineCitations?: TimelineCitation[];
+  selectedCitationId: string | null;
+  onSelectCitation: (citation: ChatCitation) => void;
+  timestamp: Date;
+}) {
+  const hasCitations = (citations && citations.length > 0) || (timelineCitations && timelineCitations.length > 0);
+  if (!hasCitations) return null;
 
   return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.14em] ${styles[mode]}`}
-    >
-      {labels[mode]}
-    </span>
+    <div className="flex justify-start">
+      <div className="w-full max-w-[92%] rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--surface-1)] px-4 py-4 shadow-[0_18px_60px_rgba(0,0,0,0.18)]">
+        {/* Header: Kontext branding */}
+        <div className="mb-3 flex items-center gap-2">
+          <div className="flex h-5 w-5 items-center justify-center">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M6 0L11.196 6L6 12L0.804 6L6 0Z" fill="#3fb950" />
+            </svg>
+          </div>
+          <span className="font-mono text-sm font-medium text-[var(--gray-100)]">
+            Kontext
+          </span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--gray-600)]">
+            {timestamp.toLocaleTimeString()}
+          </span>
+        </div>
+
+        <div className="font-mono text-xs text-[var(--gray-400)] mb-3">
+          Retrieved context from indexed codebase
+        </div>
+
+        {/* Code citations */}
+        {citations && citations.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {citations.map((citation) => (
+              <CitationChip
+                key={citation.citation_id}
+                citation={citation}
+                isSelected={selectedCitationId === citation.citation_id}
+                onSelect={onSelectCitation}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Timeline citations */}
+        {timelineCitations && timelineCitations.length > 0 && (
+          <div className={`flex flex-col gap-2 ${citations && citations.length > 0 ? "mt-3" : ""}`}>
+            {timelineCitations.map((tc) => (
+              <TimelineCitationChip key={tc.sha} citation={tc} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -278,77 +315,94 @@ function MessageBubble({
   }
 
   return (
-    <div className="flex justify-start">
-      <div className="w-full max-w-[92%] rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--surface-1)] px-4 py-4 shadow-[0_18px_60px_rgba(0,0,0,0.18)]">
-        <div className="mb-3 flex items-center gap-2">
-          <AnswerModeBadge mode={message.answerMode} />
-          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--gray-600)]">
-            {message.timestamp.toLocaleTimeString()}
-          </span>
-        </div>
+    <>
+      {/* Context block — rendered as a separate message-like element */}
+      <ContextBlock
+        citations={message.citations}
+        timelineCitations={message.timelineCitations}
+        selectedCitationId={selectedCitationId}
+        onSelectCitation={onSelectCitation}
+        timestamp={message.timestamp}
+      />
 
-        <div className="prose prose-invert prose-sm max-w-none font-mono text-sm text-[var(--gray-200)] [&_p]:m-0 [&_p]:mb-3 [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-sm [&_h2]:text-[var(--gray-100)] [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-sm [&_h3]:text-[var(--gray-100)] [&_pre]:m-0 [&_strong]:text-[var(--gray-100)] [&_ul]:my-2">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              code({ className, children, ...props }: any) {
-                const match = /language-(\w+)/.exec(className || "");
-                const codeString = String(children).replace(/\n$/, "");
+      {/* Assistant response */}
+      <div className="flex justify-start">
+        <div className="w-full max-w-[92%] rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--surface-1)] px-4 py-4 shadow-[0_18px_60px_rgba(0,0,0,0.18)]">
+          <div className="mb-3 flex items-center gap-2">
+            <div className="flex h-5 w-5 items-center justify-center">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M6 0L11.196 6L6 12L0.804 6L6 0Z" fill="#3fb950" />
+              </svg>
+            </div>
+            <span className="font-mono text-sm font-medium text-[var(--gray-100)]">
+              Kontext
+            </span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--gray-600)]">
+              {message.timestamp.toLocaleTimeString()}
+            </span>
+          </div>
 
-                // Inline code (no language class) — check for file path
-                if (!match) {
-                  const pathMatch = FILE_PATH_REGEX.exec(codeString);
-                  if (pathMatch) {
-                    const cleanPath = codeString.replace(/:L?\d+.*$/, "");
-                    const lineStart = pathMatch[1] ? parseInt(pathMatch[1], 10) : undefined;
-                    const lineEnd = pathMatch[2] ? parseInt(pathMatch[2], 10) : undefined;
+          <div className="prose prose-invert prose-sm max-w-none font-mono text-sm text-[var(--gray-200)] [&_p]:m-0 [&_p]:mb-3 [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-sm [&_h2]:text-[var(--gray-100)] [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-sm [&_h3]:text-[var(--gray-100)] [&_pre]:m-0 [&_strong]:text-[var(--gray-100)] [&_ul]:my-2">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                code({ className, children, ...props }: any) {
+                  const match = /language-(\w+)/.exec(className || "");
+                  const codeString = String(children).replace(/\n$/, "");
+
+                  // Inline code (no language class) — check for file path
+                  if (!match) {
+                    const pathMatch = FILE_PATH_REGEX.exec(codeString);
+                    if (pathMatch) {
+                      const cleanPath = codeString.replace(/:L?\d+.*$/, "");
+                      const lineStart = pathMatch[1] ? parseInt(pathMatch[1], 10) : undefined;
+                      const lineEnd = pathMatch[2] ? parseInt(pathMatch[2], 10) : undefined;
+                      return (
+                        <button
+                          onClick={() => onOpenFilePath(cleanPath, lineStart, lineEnd)}
+                          className="inline-flex items-center gap-1 rounded bg-[var(--accent-green)]/10 border border-[var(--accent-green)]/20 px-1.5 py-0.5 text-[var(--accent-green)] hover:bg-[var(--accent-green)]/18 hover:border-[var(--accent-green)]/35 transition-all cursor-pointer font-mono text-[0.85em] no-underline"
+                        >
+                          <FileCode size={11} className="shrink-0" />
+                          {codeString}
+                        </button>
+                      );
+                    }
+
                     return (
-                      <button
-                        onClick={() => onOpenFilePath(cleanPath, lineStart, lineEnd)}
-                        className="inline-flex items-center gap-1 rounded bg-[var(--accent-green)]/10 border border-[var(--accent-green)]/20 px-1.5 py-0.5 text-[var(--accent-green)] hover:bg-[var(--accent-green)]/18 hover:border-[var(--accent-green)]/35 transition-all cursor-pointer font-mono text-[0.85em] no-underline"
+                      <code
+                        className="rounded bg-[var(--alpha-white-5)] px-1 py-0.5 text-[var(--accent-green)]"
+                        {...props}
                       >
-                        <FileCode size={11} className="shrink-0" />
-                        {codeString}
-                      </button>
+                        {children}
+                      </code>
                     );
                   }
 
                   return (
-                    <code
-                      className="rounded bg-[var(--alpha-white-5)] px-1 py-0.5 text-[var(--accent-green)]"
-                      {...props}
-                    >
-                      {children}
-                    </code>
+                    <div className="group relative my-4 overflow-hidden rounded-xl border border-[var(--alpha-white-8)] bg-[var(--surface-0)]">
+                      <button
+                        onClick={() => handleCopy(codeString)}
+                        className="absolute right-3 top-3 z-10 rounded-lg border border-[var(--alpha-white-8)] bg-[var(--surface-2)] p-1 text-[var(--gray-400)] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--gray-100)]"
+                      >
+                        {copied === codeString ? <Check size={12} /> : <Copy size={12} />}
+                      </button>
+                      <HighlightedCode
+                        content={codeString}
+                        language={match[1]}
+                        compact
+                      />
+                    </div>
                   );
-                }
-
-                return (
-                  <div className="group relative my-4 overflow-hidden rounded-xl border border-[var(--alpha-white-8)] bg-[var(--surface-0)]">
-                    <button
-                      onClick={() => handleCopy(codeString)}
-                      className="absolute right-3 top-3 z-10 rounded-lg border border-[var(--alpha-white-8)] bg-[var(--surface-2)] p-1 text-[var(--gray-400)] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--gray-100)]"
-                    >
-                      {copied === codeString ? <Check size={12} /> : <Copy size={12} />}
-                    </button>
-                    <HighlightedCode
-                      content={codeString}
-                      language={match[1]}
-                      compact
-                    />
-                  </div>
-                );
-              },
-            }}
-          >
-            {message.content}
-          </ReactMarkdown>
+                },
+              }}
+            >
+              {message.content}
+            </ReactMarkdown>
+          </div>
         </div>
-
-
       </div>
-    </div>
+    </>
   );
 }
 

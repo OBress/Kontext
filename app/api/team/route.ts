@@ -4,6 +4,7 @@ import { rateLimit } from "@/lib/api/rate-limit";
 import { handleApiError, ApiError } from "@/lib/api/errors";
 import { validateRepoFullName, validateRole, validateGitHubUsername } from "@/lib/api/validate";
 import { logActivity } from "@/lib/api/activity";
+import { createOnboardingAssignmentForInvite } from "@/lib/api/onboarding";
 
 /**
  * GET /api/team?repo=owner/name — List team members
@@ -70,6 +71,10 @@ export async function POST(request: Request) {
     const repoFullName = validateRepoFullName(body.repo_full_name);
     const githubUsername = validateGitHubUsername(body.github_username);
     const role = validateRole(body.role);
+    const assignOnboarding =
+      typeof body.assign_onboarding === "boolean"
+        ? body.assign_onboarding
+        : role !== "admin";
 
     // Verify caller is owner/admin
     const { data: membership } = await supabase
@@ -97,6 +102,18 @@ export async function POST(request: Request) {
 
     if (error) throw error;
 
+    const onboardingAssignment = assignOnboarding
+      ? await createOnboardingAssignmentForInvite({
+          supabase,
+          userId: user.id,
+          repoFullName,
+          inviteId: invite.id,
+          githubUsername,
+          role,
+          assignedBy: user.id,
+        })
+      : null;
+
     // Log activity event
     logActivity({
       userId: user.id,
@@ -104,11 +121,16 @@ export async function POST(request: Request) {
       source: "kontext",
       eventType: "team_invite_sent",
       title: `Invited @${githubUsername} to ${repoFullName}`,
-      description: `Role: ${role}`,
-      metadata: { github_username: githubUsername, role },
+      description: `Role: ${role}${onboardingAssignment ? " with onboarding assigned" : ""}`,
+      metadata: {
+        github_username: githubUsername,
+        role,
+        onboarding_assigned: !!onboardingAssignment,
+        onboarding_assignment_id: onboardingAssignment?.id || null,
+      },
     });
 
-    return NextResponse.json({ invite });
+    return NextResponse.json({ invite, onboarding_assignment: onboardingAssignment });
   } catch (error) {
     return handleApiError(error);
   }

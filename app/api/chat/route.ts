@@ -8,71 +8,9 @@ import {
   validateApiKey,
 } from "@/lib/api/validate";
 import {
-  generateChatStream,
-  generateQueryEmbedding,
-} from "@/lib/api/embeddings";
-import {
-  buildGitHubBlobUrl,
-  detectCodeLanguage,
-  stripChunkFileHeader,
-} from "@/lib/code";
-
-type ChatAnswerMode = "grounded" | "partial" | "insufficient_evidence";
-
-interface MatchChunk {
-  id: number;
-  file_path: string;
-  content: string;
-  similarity: number;
-}
-
-interface TimelineMatch {
-  id: number;
-  sha: string;
-  message: string;
-  ai_summary: string;
-  author_name: string;
-  author_avatar_url: string | null;
-  committed_at: string;
-  push_group_id: string | null;
-  files_changed: unknown;
-  similarity: number;
-}
-
-interface ChunkMetadata {
-  startLine?: number;
-  endLine?: number;
-}
-
-interface ChunkDetails {
-  id: number;
-  file_path: string;
-  content: string;
-  metadata: ChunkMetadata | null;
-}
-
-function parseChunkMetadata(metadata: unknown): ChunkMetadata {
-  if (!metadata || typeof metadata !== "object") return {};
-
-  const record = metadata as Record<string, unknown>;
-  return {
-    startLine:
-      typeof record.startLine === "number" ? record.startLine : undefined,
-    endLine: typeof record.endLine === "number" ? record.endLine : undefined,
-  };
-}
-
-function classifyAnswerMode(
-  citations: Array<{ retrieval_score: number }>
-): ChatAnswerMode {
-  if (citations.length === 0) return "insufficient_evidence";
-
-  const strongestMatch = Math.max(
-    ...citations.map((citation) => citation.retrieval_score)
-  );
-
-  return strongestMatch >= 0.78 ? "grounded" : "partial";
-}
+  retrieveRepoContext,
+  streamRepoAnswer,
+} from "@/lib/api/repo-intelligence";
 
 /**
  * POST /api/chat - RAG chatbot with streaming Gemini response
@@ -94,201 +32,15 @@ export async function POST(request: Request) {
     const repoFullName = validateRepoFullName(body.repo_full_name);
     const apiKey = validateApiKey(request);
 
-    const { data: repo } = await supabase
-      .from("repos")
-      .select("last_synced_sha, last_indexed_at")
-      .eq("user_id", user.id)
-      .eq("full_name", repoFullName)
-      .single();
-
-    const queryEmbedding = await generateQueryEmbedding(apiKey, message);
-
-    // Hybrid search: combines vector similarity + BM25 keyword matching via RRF
-    const { data: chunks, error } = await supabase.rpc("hybrid_match_chunks", {
-      query_text: message,
-      query_embedding: JSON.stringify(queryEmbedding),
-      match_count: 25,
-      filter_repo: repoFullName,
-      filter_user_id: user.id,
+    const context = await retrieveRepoContext({
+      supabase,
+      userId: user.id,
+      repoFullName,
+      query: message,
+      apiKey,
+      includeTimeline: true,
+      matchCount: 25,
     });
-
-    if (error) {
-      console.error("hybrid_match_chunks error:", error);
-    }
-
-    // Fetch file manifest for repo awareness
-    const { data: repoFiles } = await supabase
-      .from("repo_files")
-      .select("file_path")
-      .eq("user_id", user.id)
-      .eq("repo_full_name", repoFullName)
-      .order("file_path");
-
-    const allFilePaths = (repoFiles || []).map((f: { file_path: string }) => f.file_path);
-    let fileManifest: string;
-
-    if (allFilePaths.length <= 200) {
-      fileManifest = allFilePaths.join("\n");
-    } else {
-      // For large repos: show directory tree + top matched file paths
-      const dirs = new Set<string>();
-      for (const fp of allFilePaths) {
-        const parts = fp.split("/");
-        for (let i = 1; i < parts.length; i++) {
-          dirs.add(parts.slice(0, i).join("/") + "/");
-        }
-      }
-      const matchedPaths = new Set(
-        (chunks || []).map((c: MatchChunk) => c.file_path)
-      );
-      const dirTree = [...dirs].sort().join("\n");
-      const matchedFiles = [...matchedPaths].sort().join("\n");
-      fileManifest = `Directory tree (${allFilePaths.length} files total):\n${dirTree}\n\nTop matched files:\n${matchedFiles}`;
-    }
-
-    // Timeline vector search — find relevant development events
-    const { data: timelineChunks, error: timelineError } = await supabase.rpc(
-      "match_timeline",
-      {
-        query_embedding: JSON.stringify(queryEmbedding),
-        match_count: 3,
-        filter_repo: repoFullName,
-        filter_user_id: user.id,
-      }
-    );
-
-    if (timelineError) {
-      console.error("match_timeline error:", timelineError);
-    }
-
-    const timelineMatches = (timelineChunks || []) as TimelineMatch[];
-
-    const matches = (chunks || []) as MatchChunk[];
-    const chunkIds = matches.map((chunk) => chunk.id);
-
-    let chunkDetailsById = new Map<number, ChunkDetails>();
-    if (chunkIds.length > 0) {
-      const { data: chunkDetails } = await supabase
-        .from("repo_chunks")
-        .select("id, file_path, content, metadata")
-        .in("id", chunkIds);
-
-      chunkDetailsById = new Map(
-        ((chunkDetails || []) as ChunkDetails[]).map((detail) => [
-          detail.id,
-          detail,
-        ])
-      );
-    }
-
-    const citations = matches.map((match, index) => {
-      const details = chunkDetailsById.get(match.id);
-      const metadata = parseChunkMetadata(details?.metadata);
-      const snippet = stripChunkFileHeader(details?.content || match.content);
-      const lineStart = metadata.startLine ?? 1;
-      const lineEnd =
-        metadata.endLine ??
-        lineStart + Math.max(snippet.split("\n").length - 1, 0);
-      const commitSha = repo?.last_synced_sha || null;
-
-      return {
-        citation_id: `${match.id}-${index}`,
-        index_version_id: commitSha || repo?.last_indexed_at || null,
-        commit_sha: commitSha,
-        file_path: match.file_path,
-        line_start: lineStart,
-        line_end: lineEnd,
-        language: detectCodeLanguage(match.file_path),
-        snippet,
-        retrieval_score: match.similarity,
-        github_url: buildGitHubBlobUrl(
-          repoFullName,
-          commitSha,
-          match.file_path,
-          lineStart,
-          lineEnd
-        ),
-      };
-    });
-
-    // Deduplicate citations by file_path — one chip per unique file for the client.
-    // The LLM context blocks below still use the raw `citations` array for full retrieval quality.
-    const fileMap = new Map<string, (typeof citations)[0]>();
-    for (const citation of citations) {
-      const existing = fileMap.get(citation.file_path);
-      if (!existing || citation.retrieval_score > existing.retrieval_score) {
-        fileMap.set(citation.file_path, {
-          ...citation,
-          // Bottom-of-message chips open Full File mode — no snippet or line highlight needed
-          snippet: "",
-          line_start: 1,
-          line_end: 1,
-        });
-      }
-    }
-    const dedupedCitations = [...fileMap.values()];
-
-    const answerMode = classifyAnswerMode(dedupedCitations);
-
-    const contextBlocks = citations
-      .map(
-        (citation, index) =>
-          `--- Citation ${index + 1}: ${citation.file_path}:${
-            citation.line_start
-          }-${citation.line_end} (retrieval score: ${(
-            citation.retrieval_score * 100
-          ).toFixed(1)}%) ---\n${citation.snippet}\n`
-      )
-      .join("\n");
-
-    // Build timeline context blocks
-    const timelineCitations = timelineMatches
-      .filter((t) => t.similarity >= 0.5)
-      .map((t) => ({
-        sha: t.sha,
-        date: new Date(t.committed_at).toISOString().split("T")[0],
-        committed_at: t.committed_at,
-        ai_summary: t.ai_summary,
-        message: t.message,
-        author: t.author_name,
-        author_avatar_url: t.author_avatar_url,
-        push_group_id: t.push_group_id,
-        similarity: t.similarity,
-      }));
-
-    const timelineBlocks = timelineCitations
-      .map(
-        (t, index) =>
-          `--- Timeline Entry ${index + 1}: ${t.date} (commit ${t.sha.slice(0, 7)} by ${t.author}, relevance: ${(t.similarity * 100).toFixed(1)}%) ---\n${t.ai_summary}\nRaw commit message: ${t.message.split("\n")[0]}\n`
-      )
-      .join("\n");
-
-    const systemPrompt = `You are Kontext, a concise code assistant for the repository "${repoFullName}".
-
-Rules:
-- Be brief and direct. No filler, no preambles, no "Great question!" or "Let me explain...". Get straight to the answer.
-- Use short sentences. Prefer bullet points and code references over prose.
-- ALWAYS wrap file paths in backticks exactly as indexed, e.g. \`app/api/chat/route.ts\`. This creates clickable links in the UI.
-- Only state facts supported by the retrieved context or file manifest.
-- When listing items (endpoints, files, etc.), be thorough — check ALL citations and the manifest.
-- Use timeline context for questions about when things were implemented or changed.
-- If evidence is incomplete, say so briefly and suggest which files to check.
-- If there is no relevant evidence, say "Insufficient evidence" and suggest next steps.
-
-## Repository File Manifest
-
-${fileManifest}
-
-## Retrieved Code Context
-
-${
-  contextBlocks ||
-  "No retrieved repository code context was found."
-}${
-  timelineBlocks
-    ? `\n\n## Development Timeline Context\n\n${timelineBlocks}`
-    : ""
-}`;
 
     const encoder = new TextEncoder();
     const combinedStream = new ReadableStream({
@@ -297,14 +49,14 @@ ${
           encoder.encode(
             `data: ${JSON.stringify({
               type: "context",
-              citations: dedupedCitations,
-              timelineCitations,
-              answerMode,
+              citations: context.dedupedCitations,
+              timelineCitations: context.timelineCitations,
+              answerMode: context.answerMode,
             })}\n\n`
           )
         );
 
-        if (dedupedCitations.length === 0) {
+        if (context.dedupedCitations.length === 0) {
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({
@@ -322,22 +74,29 @@ ${
         }
 
         try {
-          const aiStream = await generateChatStream(apiKey, systemPrompt, message);
-          const reader = aiStream.getReader();
+          const aiStream = await streamRepoAnswer({
+            apiKey,
+            repoFullName,
+            question: message,
+            fileManifest: context.fileManifest,
+            contextBlocks: context.contextBlocks,
+            timelineBlocks: context.timelineBlocks,
+          });
 
+          const reader = aiStream.getReader();
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             controller.enqueue(value);
           }
         } catch (err: unknown) {
-          const errorMessage =
+          const messageText =
             err instanceof Error ? err.message : "Unknown error";
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({
                 type: "error",
-                message: errorMessage,
+                message: messageText,
               })}\n\n`
             )
           );

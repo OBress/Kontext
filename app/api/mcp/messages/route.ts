@@ -3,7 +3,15 @@ import { createClient } from "@supabase/supabase-js";
 import { hashApiKey } from "@/lib/api/crypto";
 import { ApiError, getApiErrorPayload } from "@/lib/api/errors";
 import { rateLimit } from "@/lib/api/rate-limit";
-import { generateQueryEmbedding, generateText } from "@/lib/api/embeddings";
+import {
+  getRepoHealthSummary,
+  REPO_CHECK_TYPES,
+  runRepoChecks,
+} from "@/lib/api/repo-checks";
+import {
+  answerRepoQuestion,
+  retrieveRepoContext,
+} from "@/lib/api/repo-intelligence";
 
 async function validateMcpAuth(
   request: Request
@@ -35,8 +43,27 @@ async function validateMcpAuth(
   return { userId: keyRow.user_id, repoFullName: keyRow.repo_full_name };
 }
 
+function resolveScopedRepoFullName(
+  auth: { repoFullName: string | null },
+  args: Record<string, unknown>
+) {
+  const value =
+    (typeof args.repo_full_name === "string" && args.repo_full_name.trim()) ||
+    auth.repoFullName;
+
+  if (!value) {
+    throw new ApiError(
+      400,
+      "REPO_SCOPE_REQUIRED",
+      "repo_full_name is required when the MCP key is not already scoped to a repository."
+    );
+  }
+
+  return value;
+}
+
 /**
- * POST /api/mcp/messages — Handle MCP tool call requests
+ * POST /api/mcp/messages - Handle MCP tool call requests
  */
 export async function POST(request: Request) {
   const auth = await validateMcpAuth(request);
@@ -54,7 +81,6 @@ export async function POST(request: Request) {
 
   const body = await request.json();
 
-  // Handle JSON-RPC requests
   if (body.method === "tools/call") {
     const { name, arguments: args } = body.params;
     const apiKey = request.headers.get("x-google-api-key");
@@ -76,14 +102,18 @@ export async function POST(request: Request) {
               "x-google-api-key header required for search_code"
             );
           }
-          const embedding = await generateQueryEmbedding(apiKey, args.query);
-          const { data } = await adminDb.rpc("match_chunks", {
-            query_embedding: JSON.stringify(embedding),
-            match_count: args.max_results || 5,
-            filter_repo: auth.repoFullName,
-            filter_user_id: auth.userId,
+
+          const context = await retrieveRepoContext({
+            supabase: adminDb,
+            userId: auth.userId,
+            repoFullName: auth.repoFullName,
+            query: args.query,
+            apiKey,
+            includeTimeline: false,
+            matchCount: args.max_results || 5,
           });
-          result = data || [];
+
+          result = context.citations.slice(0, args.max_results || 5);
           break;
         }
 
@@ -100,7 +130,7 @@ export async function POST(request: Request) {
           } else {
             result = {
               file_path: args.path,
-              content: data.map((c) => c.content).join("\n"),
+              content: data.map((chunk) => chunk.content).join("\n"),
               chunks: data.length,
             };
           }
@@ -118,7 +148,6 @@ export async function POST(request: Request) {
           }
 
           if (args.pattern) {
-            // Simple LIKE pattern matching
             const likePattern = args.pattern
               .replace(/\*/g, "%")
               .replace(/\?/g, "_");
@@ -139,25 +168,108 @@ export async function POST(request: Request) {
             );
           }
 
-          const qEmbedding = await generateQueryEmbedding(apiKey, args.question);
-          const { data: chunks } = await adminDb.rpc("match_chunks", {
-            query_embedding: JSON.stringify(qEmbedding),
-            match_count: 5,
-            filter_repo: auth.repoFullName,
-            filter_user_id: auth.userId,
+          const context = await retrieveRepoContext({
+            supabase: adminDb,
+            userId: auth.userId,
+            repoFullName: auth.repoFullName,
+            query: args.question,
+            apiKey,
+            includeTimeline: true,
+            matchCount: 12,
           });
 
-          const context = (chunks || [])
-            .map((c: { file_path: string; content: string }) => `// ${c.file_path}\n${c.content}`)
-            .join("\n\n");
+          const answer =
+            context.dedupedCitations.length === 0
+              ? "Insufficient evidence from the indexed repository."
+              : await answerRepoQuestion({
+                  apiKey,
+                  repoFullName: context.repoLabel,
+                  question: args.question,
+                  fileManifest: context.fileManifest,
+                  contextBlocks: context.contextBlocks,
+                  timelineBlocks: context.timelineBlocks,
+                });
 
-          const answer = await generateText(
+          result = {
+            answer,
+            sources: context.dedupedCitations,
+            timeline: context.timelineCitations,
+            answerMode: context.answerMode,
+          };
+          break;
+        }
+
+        case "get_repo_health": {
+          const repoFullName = resolveScopedRepoFullName(auth, args);
+          result = await getRepoHealthSummary(adminDb, auth.userId, repoFullName);
+          break;
+        }
+
+        case "list_findings": {
+          let query = adminDb
+            .from("repo_check_findings")
+            .select("*")
+            .eq("user_id", auth.userId)
+            .order("updated_at", { ascending: false });
+
+          if (auth.repoFullName || typeof args.repo_full_name === "string") {
+            query = query.eq(
+              "repo_full_name",
+              resolveScopedRepoFullName(auth, args)
+            );
+          }
+
+          if (args.status === "open" || args.status === "resolved") {
+            query = query.eq("status", args.status);
+          }
+
+          if (
+            typeof args.check_type === "string" &&
+            REPO_CHECK_TYPES.includes(args.check_type as (typeof REPO_CHECK_TYPES)[number])
+          ) {
+            query = query.eq("check_type", args.check_type);
+          }
+
+          const limit =
+            typeof args.limit === "number" && Number.isFinite(args.limit)
+              ? Math.min(Math.max(Math.trunc(args.limit), 1), 50)
+              : 20;
+
+          const { data } = await query.limit(limit);
+          result = data || [];
+          break;
+        }
+
+        case "get_finding": {
+          const findingId =
+            typeof args.finding_id === "number" ? Math.trunc(args.finding_id) : 0;
+          if (!findingId) {
+            throw new ApiError(400, "FINDING_ID_REQUIRED", "finding_id is required.");
+          }
+
+          const { data } = await adminDb
+            .from("repo_check_findings")
+            .select("*")
+            .eq("user_id", auth.userId)
+            .eq("id", findingId)
+            .maybeSingle();
+
+          result = data || { error: "Finding not found" };
+          break;
+        }
+
+        case "rerun_checks": {
+          const repoFullName = resolveScopedRepoFullName(auth, args);
+          const apiKey = request.headers.get("x-google-api-key");
+          const checkTypes = Array.isArray(args.check_types) ? args.check_types : [];
+
+          result = await runRepoChecks({
+            userId: auth.userId,
+            repoFullName,
             apiKey,
-            `Question: ${args.question}\n\nCode context:\n${context}`,
-            "You are Kontext, an AI codebase assistant. Answer based on the provided code context."
-          );
-
-          result = { answer, sources: chunks || [] };
+            triggerMode: "mcp",
+            requestedCheckTypes: checkTypes,
+          });
           break;
         }
 
@@ -188,7 +300,6 @@ export async function POST(request: Request) {
     }
   }
 
-  // Handle tools/list
   if (body.method === "tools/list") {
     return NextResponse.json({
       jsonrpc: "2.0",
@@ -199,6 +310,10 @@ export async function POST(request: Request) {
           { name: "get_file", description: "Get file content", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
           { name: "list_files", description: "List repository files", inputSchema: { type: "object", properties: { pattern: { type: "string" } } } },
           { name: "ask_question", description: "Ask about the codebase", inputSchema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
+          { name: "get_repo_health", description: "Get repo health summary", inputSchema: { type: "object", properties: { repo_full_name: { type: "string" } } } },
+          { name: "list_findings", description: "List Kontext findings", inputSchema: { type: "object", properties: { repo_full_name: { type: "string" }, status: { type: "string" }, check_type: { type: "string" }, limit: { type: "number" } } } },
+          { name: "get_finding", description: "Get a finding by id", inputSchema: { type: "object", properties: { finding_id: { type: "number" } }, required: ["finding_id"] } },
+          { name: "rerun_checks", description: "Rerun Kontext checks", inputSchema: { type: "object", properties: { repo_full_name: { type: "string" }, check_types: { type: "array", items: { type: "string" } } } } },
         ],
       },
     });

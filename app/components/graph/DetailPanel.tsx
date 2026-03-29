@@ -6,8 +6,7 @@ import {
   ARCH_TYPE_COLORS,
   ARCH_TYPE_LABELS,
   ARCH_CONNECTION_LABELS,
-  type ArchComponent,
-  type ArchConnection,
+  findArchitectureComponent,
 } from "@/types/architecture";
 
 export function DetailPanel() {
@@ -18,29 +17,12 @@ export function DetailPanel() {
   const close = () => setSelectedElement(null);
 
   if (selectedElement.type === "node") {
-    // Find the component (check top-level and children)
-    let component: ArchComponent | null = null;
-    for (const comp of architectureData.components) {
-      if (comp.id === selectedElement.id) {
-        component = comp;
-        break;
-      }
-      if (comp.children) {
-        const child = comp.children.find((c) => c.id === selectedElement.id);
-        if (child) {
-          component = child;
-          break;
-        }
-      }
-    }
-
+    const component = findArchitectureComponent(architectureData, selectedElement.id);
     if (!component) return null;
 
     const color = ARCH_TYPE_COLORS[component.type] || "#8B949E";
-
-    // Find connections involving this component
-    const incoming = architectureData.connections.filter((c) => c.target === component!.id);
-    const outgoing = architectureData.connections.filter((c) => c.source === component!.id);
+    const incoming = architectureData.connections.filter((connection) => connection.target === component.id);
+    const outgoing = architectureData.connections.filter((connection) => connection.source === component.id);
 
     return (
       <div className="detail-panel">
@@ -62,39 +44,31 @@ export function DetailPanel() {
         <div className="detail-panel__body">
           <p className="detail-panel__description">{component.description}</p>
 
-          {/* Connections */}
           {(incoming.length > 0 || outgoing.length > 0) && (
             <div className="detail-panel__section">
               <h4 className="detail-panel__section-title">Connections</h4>
-              {incoming.map((conn) => (
-                <div key={conn.id} className="detail-panel__connection">
-                  <span className="detail-panel__connection-label">
-                    ← {conn.label}
-                  </span>
+              {incoming.map((connection) => (
+                <div key={connection.id} className="detail-panel__connection">
+                  <span className="detail-panel__connection-label">← {connection.label}</span>
                   <span className="detail-panel__connection-from">
-                    from {architectureData.components.find((c) => c.id === conn.source)?.label || conn.source}
+                    from {architectureData.components.find((entry) => entry.id === connection.source)?.label || connection.source}
                   </span>
                 </div>
               ))}
-              {outgoing.map((conn) => (
-                <div key={conn.id} className="detail-panel__connection">
-                  <span className="detail-panel__connection-label">
-                    → {conn.label}
-                  </span>
+              {outgoing.map((connection) => (
+                <div key={connection.id} className="detail-panel__connection">
+                  <span className="detail-panel__connection-label">→ {connection.label}</span>
                   <span className="detail-panel__connection-from">
-                    to {architectureData.components.find((c) => c.id === conn.target)?.label || conn.target}
+                    to {architectureData.components.find((entry) => entry.id === connection.target)?.label || connection.target}
                   </span>
                 </div>
               ))}
             </div>
           )}
 
-          {/* Files */}
           {component.files.length > 0 && (
             <div className="detail-panel__section">
-              <h4 className="detail-panel__section-title">
-                Files ({component.files.length})
-              </h4>
+              <h4 className="detail-panel__section-title">Files ({component.files.length})</h4>
               <div className="detail-panel__file-list">
                 {component.files.map((file) => (
                   <div key={file} className="detail-panel__file">
@@ -106,7 +80,6 @@ export function DetailPanel() {
             </div>
           )}
 
-          {/* Children */}
           {component.children && component.children.length > 0 && (
             <div className="detail-panel__section">
               <h4 className="detail-panel__section-title">
@@ -136,13 +109,12 @@ export function DetailPanel() {
     );
   }
 
-  // Edge selected
   if (selectedElement.type === "edge") {
-    const connection = architectureData.connections.find((c) => c.id === selectedElement.id);
+    const connection = architectureData.connections.find((entry) => entry.id === selectedElement.id);
     if (!connection) return null;
 
-    const sourceComp = architectureData.components.find((c) => c.id === connection.source);
-    const targetComp = architectureData.components.find((c) => c.id === connection.target);
+    const sourceComp = architectureData.components.find((entry) => entry.id === connection.source);
+    const targetComp = architectureData.components.find((entry) => entry.id === connection.target);
 
     return (
       <div className="detail-panel">

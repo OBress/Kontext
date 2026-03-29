@@ -11,6 +11,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  ShieldAlert,
   Tag,
   Trash2,
   Users,
@@ -55,6 +56,11 @@ const EVENT_CONFIG: Record<
     icon: RefreshCw,
     color: "#58A6FF",
     label: "Synced",
+  },
+  repo_check_completed: {
+    icon: ShieldAlert,
+    color: "#F0883E",
+    label: "Checks",
   },
   team_member_joined: {
     icon: Users,

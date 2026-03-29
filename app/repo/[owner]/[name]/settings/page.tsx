@@ -116,6 +116,11 @@ export default function RepoSettingsPage() {
       description: "Saved .cursorrules and system prompts",
     },
     {
+      icon: Users,
+      label: "Onboarding data",
+      description: "Templates, assignments, and progress history",
+    },
+    {
       icon: Key,
       label: "MCP API keys",
       description: "Keys scoped to this repository",
@@ -128,7 +133,7 @@ export default function RepoSettingsPage() {
     {
       icon: History,
       label: "Ingestion history",
-      description: "Job logs and activity events",
+      description: "Job logs, repo jobs, and activity events",
     },
     {
       icon: Server,

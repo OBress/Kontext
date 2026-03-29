@@ -1,26 +1,32 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAppStore, IngestionState } from "@/lib/store/app-store";
+import {
+  IngestionState,
+  RepoCheckRunState,
+  RepoJobState,
+  useAppStore,
+} from "@/lib/store/app-store";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ListTodo,
-  CheckCircle2,
-  Loader2,
   AlertCircle,
-  X,
+  ArrowRight,
+  CheckCircle2,
+  ChevronRight,
   Clock,
   Database,
   FileCode,
-  ArrowRight,
   Layers,
+  ListTodo,
+  Loader2,
+  Shield,
+  Sparkles,
+  X,
   Zap,
-  ChevronRight,
 } from "lucide-react";
 
-// Friendly phase labels
-const PHASE_LABELS: Record<string, { label: string; icon: typeof Loader2 }> = {
+const INGESTION_PHASE_LABELS: Record<string, { label: string; icon: typeof Loader2 }> = {
   idle: { label: "Queued", icon: Clock },
   fetching: { label: "Fetching Files", icon: FileCode },
   chunking: { label: "Chunking Code", icon: Layers },
@@ -35,19 +41,133 @@ const PHASE_LABELS: Record<string, { label: string; icon: typeof Loader2 }> = {
   error: { label: "Failed", icon: AlertCircle },
 };
 
-function getPhaseInfo(status: string) {
-  return PHASE_LABELS[status] || { label: status, icon: Loader2 };
+const CHECK_STATUS_LABELS: Record<
+  RepoCheckRunState["status"],
+  { label: string; icon: typeof Loader2 }
+> = {
+  queued: { label: "Queued", icon: Clock },
+  running: { label: "Analyzing Repo Health", icon: Loader2 },
+  completed: { label: "Checks Complete", icon: CheckCircle2 },
+  failed: { label: "Checks Failed", icon: AlertCircle },
+  skipped: { label: "Skipped", icon: Clock },
+};
+
+const REPO_JOB_STATUS_LABELS: Record<
+  RepoJobState["status"],
+  { label: string; icon: typeof Loader2 }
+> = {
+  queued: { label: "Queued", icon: Clock },
+  running: { label: "Running", icon: Loader2 },
+  completed: { label: "Complete", icon: CheckCircle2 },
+  failed: { label: "Failed", icon: AlertCircle },
+  skipped: { label: "Skipped", icon: Clock },
+};
+
+const REPO_JOB_TYPE_LABELS: Record<RepoJobState["jobType"], string> = {
+  ingest: "Repository Ingest",
+  sync: "Repository Sync",
+  repo_check: "Repo Health",
+  onboarding_generate: "Generate Onboarding",
+  onboarding_assign: "Assign Onboarding",
+  architecture_refresh: "Refresh Architecture",
+};
+
+type TaskItem =
+  | {
+      id: string;
+      kind: "ingestion";
+      repoName: string;
+      ingestion: IngestionState;
+      createdAt: string;
+    }
+  | {
+      id: string;
+      kind: "check";
+      repoName: string;
+      checkRun: RepoCheckRunState;
+      createdAt: string;
+    }
+  | {
+      id: string;
+      kind: "repoJob";
+      repoName: string;
+      repoJob: RepoJobState;
+      createdAt: string;
+    };
+
+function isIngestionBlocked(status: IngestionState["status"]) {
+  return (
+    status === "error" ||
+    status === "blocked_quota" ||
+    status === "blocked_billing" ||
+    status === "blocked_model" ||
+    status === "pending_user_key_sync"
+  );
 }
 
+function getTaskStatusLabel(task: TaskItem) {
+  if (task.kind === "ingestion") {
+    return INGESTION_PHASE_LABELS[task.ingestion.status] || {
+      label: task.ingestion.status,
+      icon: Loader2,
+    };
+  }
 
+  if (task.kind === "repoJob") {
+    return REPO_JOB_STATUS_LABELS[task.repoJob.status] || {
+      label: task.repoJob.status,
+      icon: Loader2,
+    };
+  }
+
+  return CHECK_STATUS_LABELS[task.checkRun.status] || {
+    label: task.checkRun.status,
+    icon: Loader2,
+  };
+}
+
+function getTaskSortScore(task: TaskItem) {
+  if (task.kind === "ingestion") {
+    if (
+      task.ingestion.status !== "done" &&
+      !isIngestionBlocked(task.ingestion.status) &&
+      task.ingestion.status !== "idle"
+    ) {
+      return 0;
+    }
+
+    if (isIngestionBlocked(task.ingestion.status)) return 1;
+    return 2;
+  }
+
+  if (task.kind === "repoJob") {
+    if (task.repoJob.status === "queued" || task.repoJob.status === "running") {
+      return 0;
+    }
+    if (task.repoJob.status === "failed") return 1;
+    return 2;
+  }
+
+  if (task.checkRun.status === "queued" || task.checkRun.status === "running") {
+    return 0;
+  }
+
+  if (task.checkRun.status === "failed") return 1;
+  return 2;
+}
 
 export function TaskIndicator() {
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedTask, setSelectedTask] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [dismissedCheckRuns, setDismissedCheckRuns] = useState<number[]>([]);
+  const [dismissedRepoJobs, setDismissedRepoJobs] = useState<number[]>([]);
   const ingestionStatus = useAppStore((s) => s.ingestionStatus);
+  const repoCheckRuns = useAppStore((s) => s.repoCheckRuns);
+  const setRepoCheckRuns = useAppStore((s) => s.setRepoCheckRuns);
+  const repoJobs = useAppStore((s) => s.repoJobs);
+  const setRepoJobs = useAppStore((s) => s.setRepoJobs);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (
@@ -55,42 +175,186 @@ export function TaskIndicator() {
         !dropdownRef.current.contains(e.target as Node)
       ) {
         setIsOpen(false);
-        setSelectedTask(null);
+        setSelectedTaskId(null);
       }
     };
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const blockedStatuses = new Set([
-    "error",
-    "blocked_quota",
-    "blocked_billing",
-    "blocked_model",
-    "pending_user_key_sync",
-  ]);
-  const tasks = Object.entries(ingestionStatus);
-  const activeTasks = tasks.filter(
-    ([, s]) => s.status !== "done" && !blockedStatuses.has(s.status) && s.status !== "idle"
-  );
-  const completedTasks = tasks.filter(([, s]) => s.status === "done");
-  const errorTasks = tasks.filter(([, s]) => blockedStatuses.has(s.status));
-  const activeCount = activeTasks.length;
-  const hasActive = activeCount > 0;
-  const totalCount = tasks.length;
+  useEffect(() => {
+    let cancelled = false;
 
-  // Find the selected task data
-  const selectedTaskData = selectedTask
-    ? tasks.find(([name]) => name === selectedTask)
+    const fetchTaskData = async () => {
+      try {
+        const [checkRes, jobRes] = await Promise.all([
+          fetch("/api/repos/checks/runs?limit=12"),
+          fetch("/api/jobs?limit=12"),
+        ]);
+
+        if (cancelled) return;
+
+        if (checkRes.ok) {
+          const data = await checkRes.json();
+          const runs = Array.isArray(data.runs)
+            ? data.runs.map(
+              (run: {
+                id: number;
+                repo_full_name: string;
+                status: RepoCheckRunState["status"];
+                trigger_mode: RepoCheckRunState["triggerMode"];
+                summary: string | null;
+                findings_total: number;
+                new_findings: number;
+                resolved_findings: number;
+                unchanged_findings: number;
+                head_sha: string | null;
+                created_at: string;
+              }): RepoCheckRunState => ({
+                id: run.id,
+                repoFullName: run.repo_full_name,
+                status: run.status,
+                triggerMode: run.trigger_mode,
+                summary: run.summary,
+                findingsTotal: run.findings_total || 0,
+                newFindings: run.new_findings || 0,
+                resolvedFindings: run.resolved_findings || 0,
+                unchangedFindings: run.unchanged_findings || 0,
+                headSha: run.head_sha,
+                createdAt: run.created_at,
+              })
+            )
+            : [];
+
+          setRepoCheckRuns(runs);
+        }
+
+        if (jobRes.ok) {
+          const data = await jobRes.json();
+          const jobs = Array.isArray(data.jobs)
+            ? data.jobs.map(
+                (job: {
+                  id: number;
+                  repo_full_name: string;
+                  job_type: RepoJobState["jobType"];
+                  trigger: RepoJobState["trigger"];
+                  status: RepoJobState["status"];
+                  title: string | null;
+                  progress_percent: number;
+                  result_summary: string | null;
+                  error_message: string | null;
+                  metadata: Record<string, unknown> | null;
+                  created_at: string;
+                  updated_at: string;
+                }): RepoJobState => ({
+                  id: job.id,
+                  repoFullName: job.repo_full_name,
+                  jobType: job.job_type,
+                  trigger: job.trigger,
+                  status: job.status,
+                  title: job.title,
+                  progressPercent: job.progress_percent || 0,
+                  resultSummary: job.result_summary,
+                  errorMessage: job.error_message,
+                  createdAt: job.created_at,
+                  updatedAt: job.updated_at,
+                  metadata: job.metadata || {},
+                })
+              )
+            : [];
+
+          setRepoJobs(jobs);
+        }
+      } catch {
+        // Ignore polling errors for the task indicator.
+      }
+    };
+
+    fetchTaskData();
+    const interval = window.setInterval(fetchTaskData, 15000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [setRepoCheckRuns, setRepoJobs]);
+
+  const tasks = useMemo(() => {
+    const ingestionTasks: TaskItem[] = Object.entries(ingestionStatus).map(
+      ([repoName, ingestion]) => ({
+        id: `ingestion:${repoName}`,
+        kind: "ingestion",
+        repoName,
+        ingestion,
+        createdAt: new Date().toISOString(),
+      })
+    );
+
+    const checkTasks: TaskItem[] = Object.values(repoCheckRuns)
+      .filter((run) => !dismissedCheckRuns.includes(run.id))
+      .map((run) => ({
+        id: `check:${run.repoFullName}:${run.id}`,
+        kind: "check" as const,
+        repoName: run.repoFullName,
+        checkRun: run,
+        createdAt: run.createdAt,
+      }));
+
+    const genericJobs: TaskItem[] = Object.values(repoJobs)
+      .filter((job) => !dismissedRepoJobs.includes(job.id))
+      .filter((job) => job.jobType !== "repo_check" && job.jobType !== "ingest")
+      .map((job) => ({
+        id: `job:${job.id}`,
+        kind: "repoJob" as const,
+        repoName: job.repoFullName,
+        repoJob: job,
+        createdAt: job.createdAt,
+      }));
+
+    return [...ingestionTasks, ...checkTasks, ...genericJobs].sort((a, b) => {
+      const scoreDiff = getTaskSortScore(a) - getTaskSortScore(b);
+      if (scoreDiff !== 0) return scoreDiff;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [dismissedCheckRuns, dismissedRepoJobs, ingestionStatus, repoCheckRuns, repoJobs]);
+
+  const activeTasks = tasks.filter((task) =>
+    task.kind === "ingestion"
+      ? task.ingestion.status !== "done" &&
+        !isIngestionBlocked(task.ingestion.status) &&
+        task.ingestion.status !== "idle"
+      : task.kind === "check"
+        ? task.checkRun.status === "queued" || task.checkRun.status === "running"
+        : task.repoJob.status === "queued" || task.repoJob.status === "running"
+  );
+  const completedTasks = tasks.filter((task) =>
+    task.kind === "ingestion"
+      ? task.ingestion.status === "done"
+      : task.kind === "check"
+        ? task.checkRun.status === "completed" || task.checkRun.status === "skipped"
+        : task.repoJob.status === "completed" || task.repoJob.status === "skipped"
+  );
+  const errorTasks = tasks.filter((task) =>
+    task.kind === "ingestion"
+      ? isIngestionBlocked(task.ingestion.status)
+      : task.kind === "check"
+        ? task.checkRun.status === "failed"
+        : task.repoJob.status === "failed"
+  );
+
+  const selectedTask = selectedTaskId
+    ? tasks.find((task) => task.id === selectedTaskId) || null
     : null;
+
+  const hasActive = activeTasks.length > 0;
+  const totalCount = tasks.length;
 
   return (
     <div ref={dropdownRef} className="relative">
-      {/* ── Trigger Button ── */}
       <button
         onClick={() => {
           setIsOpen(!isOpen);
-          if (isOpen) setSelectedTask(null);
+          if (isOpen) setSelectedTaskId(null);
         }}
         className={`relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono transition-all duration-200 bg-transparent border cursor-pointer ${
           hasActive
@@ -105,7 +369,6 @@ export function TaskIndicator() {
         )}
         <span>Tasks</span>
 
-        {/* Badge — highlighted count when tasks exist */}
         {totalCount > 0 && (
           <span
             className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold rounded-full transition-all duration-300 ${
@@ -114,17 +377,15 @@ export function TaskIndicator() {
                 : "bg-[var(--alpha-white-10)] text-[var(--gray-400)]"
             }`}
           >
-            {hasActive ? activeCount : totalCount}
+            {hasActive ? activeTasks.length : totalCount}
           </span>
         )}
 
-        {/* Pulse dot for active tasks */}
         {hasActive && (
           <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[var(--accent-green)] animate-pulse" />
         )}
       </button>
 
-      {/* ── Dropdown Panel ── */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -132,15 +393,14 @@ export function TaskIndicator() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.98 }}
             transition={{ duration: 0.15 }}
-            className="absolute top-full right-0 mt-2 w-[380px] glass-strong rounded-xl overflow-hidden shadow-2xl z-[70]"
+            className="absolute top-full right-0 mt-2 w-[400px] glass-strong rounded-xl overflow-hidden shadow-2xl z-[70]"
           >
-            {/* Header */}
             <div className="px-4 py-3 border-b border-[var(--alpha-white-5)]">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   {selectedTask ? (
                     <button
-                      onClick={() => setSelectedTask(null)}
+                      onClick={() => setSelectedTaskId(null)}
                       className="text-[var(--gray-400)] hover:text-[var(--gray-200)] transition-colors cursor-pointer bg-transparent border-none p-0"
                     >
                       <ChevronRight size={14} className="rotate-180" />
@@ -148,17 +408,17 @@ export function TaskIndicator() {
                   ) : null}
                   <span className="font-mono text-xs font-medium text-[var(--gray-200)]">
                     {selectedTask
-                      ? selectedTask.split("/").pop()
+                      ? selectedTask.repoName.split("/").pop()
                       : "Task Manager"}
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
                   {!selectedTask && (
                     <div className="flex items-center gap-2">
-                      {hasActive && (
+                      {activeTasks.length > 0 && (
                         <span className="flex items-center gap-1 font-mono text-[10px] text-[var(--accent-green)]">
                           <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-green)] animate-pulse" />
-                          {activeCount} running
+                          {activeTasks.length} running
                         </span>
                       )}
                       {completedTasks.length > 0 && (
@@ -176,7 +436,7 @@ export function TaskIndicator() {
                   <button
                     onClick={() => {
                       setIsOpen(false);
-                      setSelectedTask(null);
+                      setSelectedTaskId(null);
                     }}
                     className="text-[var(--gray-500)] hover:text-[var(--gray-300)] transition-colors cursor-pointer bg-transparent border-none p-0"
                   >
@@ -186,10 +446,9 @@ export function TaskIndicator() {
               </div>
             </div>
 
-            {/* Content */}
-            <div className="max-h-[400px] overflow-y-auto">
+            <div className="max-h-[420px] overflow-y-auto">
               <AnimatePresence mode="wait">
-                {selectedTask && selectedTaskData ? (
+                {selectedTask ? (
                   <motion.div
                     key="detail"
                     initial={{ opacity: 0, x: 20 }}
@@ -198,8 +457,13 @@ export function TaskIndicator() {
                     transition={{ duration: 0.15 }}
                   >
                     <TaskDetailView
-                      repoName={selectedTaskData[0]}
-                      status={selectedTaskData[1]}
+                      task={selectedTask}
+                      onDismissCheckRun={(runId) =>
+                        setDismissedCheckRuns((prev) => [...prev, runId])
+                      }
+                      onDismissRepoJob={(jobId) =>
+                        setDismissedRepoJobs((prev) => [...prev, jobId])
+                      }
                     />
                   </motion.div>
                 ) : (
@@ -214,14 +478,12 @@ export function TaskIndicator() {
                       <EmptyState />
                     ) : (
                       <div className="divide-y divide-[var(--alpha-white-5)]">
-                        {/* Active tasks first, then errors, then completed */}
                         {[...activeTasks, ...errorTasks, ...completedTasks].map(
-                          ([repoName, status]) => (
+                          (task) => (
                             <TaskListItem
-                              key={repoName}
-                              repoName={repoName}
-                              status={status}
-                              onSelect={() => setSelectedTask(repoName)}
+                              key={task.id}
+                              task={task}
+                              onSelect={() => setSelectedTaskId(task.id)}
                             />
                           )
                         )}
@@ -238,9 +500,6 @@ export function TaskIndicator() {
   );
 }
 
-/* ────────────────────────────────────────────
-   Empty State
-   ──────────────────────────────────────────── */
 function EmptyState() {
   return (
     <div className="px-4 py-10 text-center">
@@ -251,34 +510,33 @@ function EmptyState() {
         No tasks yet
       </p>
       <p className="font-mono text-[10px] text-[var(--gray-600)]">
-        Tasks will appear here when you index a repository
+        Ingestion, onboarding, and repo health work will appear here
       </p>
     </div>
   );
 }
 
-/* ────────────────────────────────────────────
-   Task List Item (summary row)
-   ──────────────────────────────────────────── */
 function TaskListItem({
-  repoName,
-  status,
+  task,
   onSelect,
 }: {
-  repoName: string;
-  status: IngestionState;
+  task: TaskItem;
   onSelect: () => void;
 }) {
-  const isDone = status.status === "done";
+  const label = getTaskStatusLabel(task);
+  const isDone =
+    task.kind === "ingestion"
+      ? task.ingestion.status === "done"
+      : task.kind === "check"
+        ? task.checkRun.status === "completed" || task.checkRun.status === "skipped"
+        : task.repoJob.status === "completed" || task.repoJob.status === "skipped";
   const isError =
-    status.status === "error" ||
-    status.status === "blocked_quota" ||
-    status.status === "blocked_billing" ||
-    status.status === "blocked_model" ||
-    status.status === "pending_user_key_sync";
-  const isActive =
-    !isDone && !isError && status.status !== "idle";
-  const phaseInfo = getPhaseInfo(status.status);
+    task.kind === "ingestion"
+      ? isIngestionBlocked(task.ingestion.status)
+      : task.kind === "check"
+        ? task.checkRun.status === "failed"
+        : task.repoJob.status === "failed";
+  const isActive = !isDone && !isError;
 
   return (
     <button
@@ -288,28 +546,23 @@ function TaskListItem({
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-2 min-w-0 flex-1">
           {isDone && (
-            <CheckCircle2
-              size={14}
-              className="text-[var(--accent-green)] shrink-0"
-            />
+            <CheckCircle2 size={14} className="text-[var(--accent-green)] shrink-0" />
           )}
           {isError && (
-            <AlertCircle
-              size={14}
-              className="text-[var(--accent-red)] shrink-0"
-            />
+            <AlertCircle size={14} className="text-[var(--accent-red)] shrink-0" />
           )}
           {isActive && (
-            <Loader2
-              size={14}
-              className="text-[var(--accent-green)] animate-spin shrink-0"
-            />
-          )}
-          {status.status === "idle" && (
-            <Clock size={14} className="text-[var(--gray-500)] shrink-0" />
+            <Loader2 size={14} className="text-[var(--accent-green)] animate-spin shrink-0" />
           )}
           <span className="font-mono text-xs text-[var(--gray-200)] truncate">
-            {repoName}
+            {task.repoName}
+          </span>
+          <span className="px-1.5 py-0.5 rounded-full bg-[var(--alpha-white-5)] font-mono text-[9px] text-[var(--gray-500)] shrink-0">
+            {task.kind === "ingestion"
+              ? "ingest"
+              : task.kind === "check"
+                ? "checks"
+                : "job"}
           </span>
         </div>
         <ChevronRight
@@ -318,8 +571,7 @@ function TaskListItem({
         />
       </div>
 
-      {/* Mini progress bar for active tasks */}
-      {isActive && (
+      {task.kind === "ingestion" && isActive && (
         <div className="mb-1.5">
           <div className="w-full h-1 rounded-full bg-[var(--alpha-white-8)] overflow-hidden">
             <motion.div
@@ -328,29 +580,41 @@ function TaskListItem({
                 background: "linear-gradient(90deg, #238636, #3FB950)",
               }}
               initial={{ width: "0%" }}
-              animate={{ width: `${status.progress}%` }}
+              animate={{ width: `${task.ingestion.progress}%` }}
               transition={{ duration: 0.3, ease: "easeOut" }}
             />
           </div>
         </div>
       )}
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <span
           className={`font-mono text-[10px] ${
             isDone
               ? "text-[var(--accent-green)]"
               : isError
-              ? "text-[var(--accent-red)]"
-              : "text-[var(--gray-500)]"
+                ? "text-[var(--accent-red)]"
+                : "text-[var(--gray-500)]"
           }`}
         >
-          {phaseInfo.label}
-          {isActive && status.progress > 0 ? ` · ${Math.round(status.progress)}%` : ""}
+          {label.label}
+          {task.kind === "ingestion" && isActive && task.ingestion.progress > 0
+            ? ` - ${Math.round(task.ingestion.progress)}%`
+            : ""}
         </span>
-        {isActive && (
+        {task.kind === "ingestion" ? (
+          isActive ? (
+            <span className="font-mono text-[10px] text-[var(--gray-600)]">
+              {task.ingestion.filesProcessed}/{task.ingestion.filesTotal} files
+            </span>
+          ) : null
+        ) : task.kind === "check" ? (
           <span className="font-mono text-[10px] text-[var(--gray-600)]">
-            {status.filesProcessed}/{status.filesTotal} files
+            {task.checkRun.newFindings} new - {task.checkRun.resolvedFindings} resolved
+          </span>
+        ) : (
+          <span className="font-mono text-[10px] text-[var(--gray-600)]">
+            {REPO_JOB_TYPE_LABELS[task.repoJob.jobType]}
           </span>
         )}
       </div>
@@ -358,36 +622,214 @@ function TaskListItem({
   );
 }
 
-/* ────────────────────────────────────────────
-   Task Detail View (expanded)
-   ──────────────────────────────────────────── */
 function TaskDetailView({
-  repoName,
-  status,
+  task,
+  onDismissCheckRun,
+  onDismissRepoJob,
 }: {
-  repoName: string;
-  status: IngestionState;
+  task: TaskItem;
+  onDismissCheckRun: (runId: number) => void;
+  onDismissRepoJob: (jobId: number) => void;
 }) {
   const router = useRouter();
-  const { clearIngestionStatus } = useAppStore();
-  const isDone = status.status === "done";
-  const isError =
-    status.status === "error" ||
-    status.status === "blocked_quota" ||
-    status.status === "blocked_billing" ||
-    status.status === "blocked_model" ||
-    status.status === "pending_user_key_sync";
-  const isActive = !isDone && !isError && status.status !== "idle";
+  const { clearIngestionStatus, clearRepoCheckRun, clearRepoJob } = useAppStore();
+  const [owner, name] = task.repoName.split("/");
 
-
-  const [owner, name] = repoName.split("/");
-
-  // Navigate to repo page
-  const handleGoToRepo = () => {
+  const goToRepo = () => {
     router.push(`/repo/${owner}/${name}`);
   };
 
-  // Pipeline phases
+  const goToChecks = () => {
+    router.push(`/repo/${owner}/${name}/checks`);
+  };
+
+  const goToTeam = () => {
+    router.push(`/repo/${owner}/${name}/team`);
+  };
+
+  const goToGraph = () => {
+    router.push(`/repo/${owner}/${name}/graph`);
+  };
+
+  if (task.kind === "check") {
+    const label = getTaskStatusLabel(task);
+    const isDone =
+      task.checkRun.status === "completed" || task.checkRun.status === "skipped";
+    const isError = task.checkRun.status === "failed";
+
+    return (
+      <div className="px-4 py-4 space-y-4">
+        <div className="flex items-center gap-2">
+          <Shield size={14} className="text-[var(--accent-amber)] shrink-0" />
+          <span className="font-mono text-sm font-medium text-[var(--gray-100)]">
+            {task.repoName}
+          </span>
+        </div>
+
+        <div className="rounded-lg border border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] px-3 py-3">
+          <div className="flex items-center gap-2 mb-1.5">
+            {isDone ? (
+              <CheckCircle2 size={14} className="text-[var(--accent-green)]" />
+            ) : isError ? (
+              <AlertCircle size={14} className="text-[var(--accent-red)]" />
+            ) : (
+              <Loader2 size={14} className="animate-spin text-[var(--accent-green)]" />
+            )}
+            <span className="font-mono text-xs text-[var(--gray-200)]">
+              {label.label}
+            </span>
+            <span className="ml-auto font-mono text-[10px] text-[var(--gray-500)]">
+              {task.checkRun.triggerMode}
+            </span>
+          </div>
+          <p className="font-mono text-[11px] text-[var(--gray-500)] m-0">
+            {task.checkRun.summary || "Kontext is updating repo health for the latest changes."}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          <StatCard
+            icon={AlertCircle}
+            label="New"
+            value={String(task.checkRun.newFindings)}
+            active={task.checkRun.newFindings > 0}
+          />
+          <StatCard
+            icon={CheckCircle2}
+            label="Resolved"
+            value={String(task.checkRun.resolvedFindings)}
+            active={task.checkRun.resolvedFindings > 0}
+          />
+          <StatCard
+            icon={Sparkles}
+            label="Open"
+            value={String(task.checkRun.findingsTotal)}
+            active={task.checkRun.findingsTotal > 0}
+          />
+        </div>
+
+        <div className="flex items-center gap-2 pt-1">
+          <button
+            onClick={goToChecks}
+            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-mono text-xs transition-all duration-200 cursor-pointer border bg-transparent border-[var(--alpha-white-8)] text-[var(--gray-300)] hover:bg-[var(--alpha-white-5)] hover:text-[var(--gray-100)]"
+          >
+            <span>Open Checks</span>
+            <ArrowRight size={12} />
+          </button>
+          {(isDone || isError) && (
+            <button
+              onClick={() => {
+                clearRepoCheckRun(task.repoName);
+                onDismissCheckRun(task.checkRun.id);
+              }}
+              className="flex items-center justify-center px-3 py-2 rounded-lg font-mono text-xs transition-all duration-200 cursor-pointer border bg-transparent border-[var(--alpha-white-8)] text-[var(--gray-500)] hover:bg-[var(--accent-red)]/10 hover:text-[var(--accent-red)] hover:border-[var(--accent-red)]/20"
+              title="Dismiss task"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (task.kind === "repoJob") {
+    const isDone =
+      task.repoJob.status === "completed" || task.repoJob.status === "skipped";
+    const isError = task.repoJob.status === "failed";
+    const primaryAction =
+      task.repoJob.jobType === "onboarding_generate" ||
+      task.repoJob.jobType === "onboarding_assign"
+        ? goToTeam
+        : task.repoJob.jobType === "architecture_refresh"
+          ? goToGraph
+          : goToRepo;
+
+    const primaryLabel =
+      task.repoJob.jobType === "onboarding_generate" ||
+      task.repoJob.jobType === "onboarding_assign"
+        ? "Open Team"
+        : task.repoJob.jobType === "architecture_refresh"
+          ? "Open Graph"
+          : "Open Repository";
+
+    return (
+      <div className="px-4 py-4 space-y-4">
+        <div className="flex items-center gap-2">
+          <Sparkles size={14} className="text-[var(--accent-green)] shrink-0" />
+          <span className="font-mono text-sm font-medium text-[var(--gray-100)]">
+            {task.repoName}
+          </span>
+        </div>
+
+        <div className="rounded-lg border border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] px-3 py-3">
+          <div className="flex items-center gap-2 mb-1.5">
+            {isDone ? (
+              <CheckCircle2 size={14} className="text-[var(--accent-green)]" />
+            ) : isError ? (
+              <AlertCircle size={14} className="text-[var(--accent-red)]" />
+            ) : (
+              <Loader2 size={14} className="animate-spin text-[var(--accent-green)]" />
+            )}
+            <span className="font-mono text-xs text-[var(--gray-200)]">
+              {task.repoJob.title || REPO_JOB_TYPE_LABELS[task.repoJob.jobType]}
+            </span>
+            <span className="ml-auto font-mono text-[10px] text-[var(--gray-500)]">
+              {task.repoJob.trigger}
+            </span>
+          </div>
+          <p className="font-mono text-[11px] text-[var(--gray-500)] m-0">
+            {task.repoJob.resultSummary ||
+              task.repoJob.errorMessage ||
+              "Kontext is processing this background job."}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <StatCard
+            icon={Sparkles}
+            label="Job"
+            value={REPO_JOB_TYPE_LABELS[task.repoJob.jobType]}
+            active={task.repoJob.status === "running"}
+          />
+          <StatCard
+            icon={Clock}
+            label="Progress"
+            value={`${task.repoJob.progressPercent}%`}
+            active={task.repoJob.status === "running"}
+          />
+        </div>
+
+        <div className="flex items-center gap-2 pt-1">
+          <button
+            onClick={primaryAction}
+            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-mono text-xs transition-all duration-200 cursor-pointer border bg-transparent border-[var(--alpha-white-8)] text-[var(--gray-300)] hover:bg-[var(--alpha-white-5)] hover:text-[var(--gray-100)]"
+          >
+            <span>{primaryLabel}</span>
+            <ArrowRight size={12} />
+          </button>
+          {(isDone || isError) && (
+            <button
+              onClick={() => {
+                clearRepoJob(task.repoJob.id);
+                onDismissRepoJob(task.repoJob.id);
+              }}
+              className="flex items-center justify-center px-3 py-2 rounded-lg font-mono text-xs transition-all duration-200 cursor-pointer border bg-transparent border-[var(--alpha-white-8)] text-[var(--gray-500)] hover:bg-[var(--accent-red)]/10 hover:text-[var(--accent-red)] hover:border-[var(--accent-red)]/20"
+              title="Dismiss task"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const status = task.ingestion;
+  const isDone = status.status === "done";
+  const isError = isIngestionBlocked(status.status);
+  const isActive = !isDone && !isError && status.status !== "idle";
+
   const phases = [
     { key: "fetching", label: "Fetch Files", icon: FileCode },
     { key: "chunking", label: "Chunk Code", icon: Layers },
@@ -400,15 +842,13 @@ function TaskDetailView({
 
   return (
     <div className="px-4 py-4 space-y-4">
-      {/* Repo name header */}
       <div className="flex items-center gap-2">
         <Database size={14} className="text-[var(--gray-400)] shrink-0" />
         <span className="font-mono text-sm font-medium text-[var(--gray-100)]">
-          {repoName}
+          {task.repoName}
         </span>
       </div>
 
-      {/* Phase pipeline visualization */}
       <div className="space-y-1">
         <span className="font-mono text-[10px] text-[var(--gray-500)] uppercase tracking-wider">
           Pipeline
@@ -417,7 +857,6 @@ function TaskDetailView({
           {phases.map((phase, i) => {
             const isCurrentPhase = phase.key === status.status;
             const isPast = currentPhaseIndex > i;
-
             const PIcon = phase.icon;
 
             return (
@@ -427,10 +866,10 @@ function TaskDetailView({
                     isPast || (isDone && phase.key === "done")
                       ? "bg-[var(--accent-green)]/15 text-[var(--accent-green)]"
                       : isCurrentPhase
-                      ? "bg-[var(--accent-green)]/20 text-[var(--accent-green)] ring-1 ring-[var(--accent-green)]/30"
-                      : isError && isCurrentPhase
-                      ? "bg-[var(--accent-red)]/15 text-[var(--accent-red)] ring-1 ring-[var(--accent-red)]/30"
-                      : "bg-[var(--alpha-white-5)] text-[var(--gray-600)]"
+                        ? "bg-[var(--accent-green)]/20 text-[var(--accent-green)] ring-1 ring-[var(--accent-green)]/30"
+                        : isError && isCurrentPhase
+                          ? "bg-[var(--accent-red)]/15 text-[var(--accent-red)] ring-1 ring-[var(--accent-red)]/30"
+                          : "bg-[var(--alpha-white-5)] text-[var(--gray-600)]"
                   }`}
                 >
                   {isCurrentPhase && isActive ? (
@@ -442,9 +881,7 @@ function TaskDetailView({
                 {i < phases.length - 1 && (
                   <div
                     className={`flex-1 h-px transition-colors duration-300 ${
-                      isPast
-                        ? "bg-[var(--accent-green)]/40"
-                        : "bg-[var(--alpha-white-8)]"
+                      isPast ? "bg-[var(--accent-green)]/40" : "bg-[var(--alpha-white-8)]"
                     }`}
                   />
                 )}
@@ -452,27 +889,8 @@ function TaskDetailView({
             );
           })}
         </div>
-        <div className="flex items-center">
-          {phases.map((phase, i) => (
-            <span
-              key={phase.key}
-              className={`flex-1 font-mono text-[9px] text-center ${
-                phase.key === status.status
-                  ? isError
-                    ? "text-[var(--accent-red)]"
-                    : "text-[var(--accent-green)]"
-                  : currentPhaseIndex > i || isDone
-                  ? "text-[var(--gray-500)]"
-                  : "text-[var(--gray-700)]"
-              }`}
-            >
-              {phase.label}
-            </span>
-          ))}
-        </div>
       </div>
 
-      {/* Progress bar (active only) */}
       {isActive && (
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
@@ -497,7 +915,6 @@ function TaskDetailView({
         </div>
       )}
 
-      {/* Stats grid */}
       <div className="grid grid-cols-2 gap-2">
         <StatCard
           icon={FileCode}
@@ -505,7 +922,7 @@ function TaskDetailView({
           value={
             status.filesTotal > 0
               ? `${status.filesProcessed} / ${status.filesTotal}`
-              : "—"
+              : "--"
           }
           active={isActive && status.status === "fetching"}
         />
@@ -516,14 +933,13 @@ function TaskDetailView({
             status.chunksTotal > 0
               ? `${status.chunksCreated} / ${status.chunksTotal}`
               : status.chunksCreated > 0
-              ? `${status.chunksCreated}`
-              : "—"
+                ? `${status.chunksCreated}`
+                : "--"
           }
           active={isActive && status.status === "chunking"}
         />
       </div>
 
-      {/* Status message */}
       {(status.message || status.error) && (
         <div
           className={`px-3 py-2 rounded-lg font-mono text-[10px] ${
@@ -536,10 +952,9 @@ function TaskDetailView({
         </div>
       )}
 
-      {/* Actions */}
       <div className="flex items-center gap-2 pt-1">
         <button
-          onClick={handleGoToRepo}
+          onClick={goToRepo}
           className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-mono text-xs transition-all duration-200 cursor-pointer border bg-transparent border-[var(--alpha-white-8)] text-[var(--gray-300)] hover:bg-[var(--alpha-white-5)] hover:text-[var(--gray-100)]"
         >
           <span>View Repository</span>
@@ -547,7 +962,7 @@ function TaskDetailView({
         </button>
         {(isDone || isError) && (
           <button
-            onClick={() => clearIngestionStatus(repoName)}
+            onClick={() => clearIngestionStatus(task.repoName)}
             className="flex items-center justify-center px-3 py-2 rounded-lg font-mono text-xs transition-all duration-200 cursor-pointer border bg-transparent border-[var(--alpha-white-8)] text-[var(--gray-500)] hover:bg-[var(--accent-red)]/10 hover:text-[var(--accent-red)] hover:border-[var(--accent-red)]/20"
             title="Dismiss task"
           >
@@ -559,9 +974,6 @@ function TaskDetailView({
   );
 }
 
-/* ────────────────────────────────────────────
-   Stat Card
-   ──────────────────────────────────────────── */
 function StatCard({
   icon: Icon,
   label,
@@ -584,9 +996,7 @@ function StatCard({
       <div className="flex items-center gap-1.5 mb-1">
         <Icon
           size={11}
-          className={
-            active ? "text-[var(--accent-green)]" : "text-[var(--gray-500)]"
-          }
+          className={active ? "text-[var(--accent-green)]" : "text-[var(--gray-500)]"}
         />
         <span className="font-mono text-[9px] text-[var(--gray-500)] uppercase tracking-wider">
           {label}

@@ -4,10 +4,14 @@ import { rateLimit } from "@/lib/api/rate-limit";
 import { handleApiError } from "@/lib/api/errors";
 import { validateRepoFullName } from "@/lib/api/validate";
 import { buildGraph } from "@/lib/api/graph-builder";
+import {
+  getArchitectureView,
+  toArchitectureBundle,
+} from "@/types/architecture";
 
 /**
- * GET /api/graph?repo=owner/name — Build dependency graph from repo_files
- * Also returns cached architecture analysis if available.
+ * GET /api/graph?repo=owner/name - Build dependency graph from repo_files
+ * Also returns cached architecture bundle and freshness metadata.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -31,15 +35,15 @@ export async function GET(request: NextRequest) {
 
     validateRepoFullName(repoFullName);
 
-    // Fetch cached architecture analysis from repos table
     const { data: repoData } = await supabase
       .from("repos")
-      .select("architecture_analysis, architecture_analyzed_at")
+      .select(
+        "architecture_analysis, architecture_analyzed_at, architecture_status, architecture_for_sha, architecture_error, last_synced_sha"
+      )
       .eq("user_id", user.id)
       .eq("full_name", repoFullName)
       .single();
 
-    // Fetch cached file data from repo_files
     const { data: files, error } = await supabase
       .from("repo_files")
       .select("file_path, file_name, extension, line_count, imports")
@@ -48,23 +52,44 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error;
 
+    const architectureBundle = toArchitectureBundle(
+      repoData?.architecture_analysis || null,
+      repoData?.architecture_for_sha || repoData?.last_synced_sha || null,
+      repoData?.architecture_analyzed_at || null
+    );
+
+    const architectureStatus = repoData?.architecture_status || (architectureBundle ? "ready" : "missing");
+    const architectureForSha = repoData?.architecture_for_sha || architectureBundle?.sourceSha || null;
+    const isStale =
+      architectureStatus === "stale" ||
+      (!!repoData?.last_synced_sha && architectureForSha !== repoData.last_synced_sha);
+
     if (!files || files.length === 0) {
       return NextResponse.json({
         nodes: [],
         links: [],
-        architecture: null,
-        analyzedAt: null,
+        architecture: getArchitectureView(architectureBundle, "system"),
+        architectureBundle,
+        architectureStatus,
+        architectureForSha,
+        architectureError: repoData?.architecture_error || null,
+        analyzedAt: repoData?.architecture_analyzed_at || null,
+        isStale,
         message: "No file data available. Index the repository first.",
       });
     }
 
-    // Build the raw file graph
     const graph = buildGraph(files);
 
     return NextResponse.json({
       ...graph,
-      architecture: repoData?.architecture_analysis || null,
+      architecture: getArchitectureView(architectureBundle, "system"),
+      architectureBundle,
+      architectureStatus,
+      architectureForSha,
+      architectureError: repoData?.architecture_error || null,
       analyzedAt: repoData?.architecture_analyzed_at || null,
+      isStale,
     });
   } catch (error) {
     return handleApiError(error);

@@ -34,7 +34,7 @@ export default function DashboardPage() {
   return (
     <AppShell>
       <ParticleField />
-      <div className="relative z-10 max-w-6xl mx-auto">
+      <div className="relative z-10 max-w-6xl mx-auto pb-8">
         <div className="space-y-8">
           {/* Header row */}
           <div className="flex items-center justify-between">
@@ -171,7 +171,7 @@ export default function DashboardPage() {
             <div className="hidden lg:block">
               <GlowCard
                 glowColor="green"
-                className="h-[min(72vh,760px)] min-h-[440px] overflow-hidden p-4"
+                className="h-[min(56vh,560px)] max-h-[calc(100vh-18rem)] min-h-[360px] overflow-hidden p-4"
               >
                 <ActivityFeed />
               </GlowCard>

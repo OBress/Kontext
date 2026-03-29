@@ -42,6 +42,34 @@ const mcpTools = [
     description: "Ask a natural language question about the codebase. Uses RAG to find relevant code context, then generates an answer via Gemini.",
     params: { question: "string" },
   },
+  {
+    name: "get_repo_health",
+    description: "Retrieve Kontext's latest repo health summary, including open findings and the latest automated check run.",
+    params: { repo_full_name: "string? (optional when key is repo-scoped)" },
+  },
+  {
+    name: "list_findings",
+    description: "List current automated findings from Kontext checks, filtered by status or check lane.",
+    params: {
+      repo_full_name: "string? (optional when key is repo-scoped)",
+      status: "string? (open | resolved)",
+      check_type: "string? (security | optimization | consistency | change_impact)",
+      limit: "number? (default: 20)",
+    },
+  },
+  {
+    name: "get_finding",
+    description: "Retrieve the full details of a single finding, including evidence, severity, and recommended fix direction.",
+    params: { finding_id: "number" },
+  },
+  {
+    name: "rerun_checks",
+    description: "Ask Kontext to rerun its automated checks so an external agent can verify that a fix actually resolved the issue.",
+    params: {
+      repo_full_name: "string? (optional when key is repo-scoped)",
+      check_types: "string[]? (subset of lanes to rerun)",
+    },
+  },
 ];
 
 // ── Mock logs ────────────────────────────────────────

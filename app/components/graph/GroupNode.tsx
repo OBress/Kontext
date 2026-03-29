@@ -17,9 +17,18 @@ export interface GroupNodeData {
 
 function GroupNodeComponent({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as GroupNodeData;
-  const { toggleGroup, setSelectedElement, collapsedNodes, toggleCollapsed } = useGraphStore();
+  const {
+    toggleGroup,
+    setSelectedElement,
+    collapsedNodes,
+    toggleCollapsed,
+    highlightedNodeIds,
+    dimUnfocused,
+  } = useGraphStore();
   const color = ARCH_TYPE_COLORS[nodeData.componentType] || "#8B949E";
   const isCollapsed = collapsedNodes.has(id);
+  const isHighlighted = highlightedNodeIds.includes(id);
+  const isDimmed = dimUnfocused && highlightedNodeIds.length > 0 && !isHighlighted;
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -34,12 +43,15 @@ function GroupNodeComponent({ id, data, selected }: NodeProps) {
 
   return (
     <div
-      className={`group-node ${selected ? "group-node--selected" : ""} ${nodeData.isExpanded ? "group-node--expanded" : ""}`}
+      className={`group-node ${selected ? "group-node--selected" : ""} ${
+        nodeData.isExpanded ? "group-node--expanded" : ""
+      } ${isHighlighted ? "arch-node--highlighted" : ""}`}
       style={{
-        borderColor: selected ? color : `${color}30`,
-        boxShadow: selected ? `0 0 20px ${color}25` : undefined,
+        borderColor: selected || isHighlighted ? color : `${color}30`,
+        boxShadow: selected || isHighlighted ? `0 0 20px ${color}25` : undefined,
         minWidth: nodeData.isExpanded ? 400 : 220,
         minHeight: nodeData.isExpanded ? 200 : undefined,
+        opacity: isDimmed ? 0.28 : 1,
       }}
     >
       <Handle
@@ -49,7 +61,6 @@ function GroupNodeComponent({ id, data, selected }: NodeProps) {
         style={{ background: color }}
       />
 
-      {/* Header */}
       <div
         className="group-node__header"
         style={{ background: `${color}15`, borderBottomColor: `${color}25` }}
@@ -61,16 +72,12 @@ function GroupNodeComponent({ id, data, selected }: NodeProps) {
           <span className="group-node__child-count" style={{ color }}>
             {nodeData.childCount} items
           </span>
-          <button
-            className="arch-node__collapse-btn"
-            onClick={handleCollapseToggle}
-          >
+          <button className="arch-node__collapse-btn" onClick={handleCollapseToggle}>
             {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
           </button>
         </div>
       </div>
 
-      {/* Body — shown when not collapsed AND not expanded (collapsed = header only, expanded = children rendered inside) */}
       {!isCollapsed && !nodeData.isExpanded && (
         <div className="group-node__body">
           <p className="arch-node__description">{nodeData.description}</p>

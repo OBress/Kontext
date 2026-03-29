@@ -4,12 +4,15 @@ import { useParams } from "next/navigation";
 import { useAppStore } from "@/lib/store/app-store";
 import { GlowCard } from "@/app/components/shared/GlowCard";
 import { AnimatedCounter } from "@/app/components/shared/AnimatedCounter";
+import { RepoHealthCard } from "@/app/components/repo/RepoHealthCard";
+import { RepoCheckSummaryBanner } from "@/app/components/repo/RepoCheckSummaryBanner";
 import { SyncStatusCard } from "@/app/components/repo/SyncPanel";
 import { motion } from "framer-motion";
 import {
   Database,
   MessageSquare,
   Network,
+  Shield,
   Wand2,
   Server,
   Users,
@@ -158,8 +161,23 @@ export default function RepoOverviewPage() {
         </motion.div>
       )}
 
+      {repo?.indexed && (
+        <RepoCheckSummaryBanner
+          repoFullName={fullName}
+          checksHref={`${basePath}/checks`}
+          lastSyncedSha={repo.last_synced_sha}
+        />
+      )}
+
       {/* Bento grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {repo?.indexed && (
+          <RepoHealthCard
+            repoFullName={fullName}
+            checksHref={`${basePath}/checks`}
+          />
+        )}
+
         {/* Ingestion Status Card */}
         <GlowCard glowColor="green" className="p-5 md:col-span-2 lg:col-span-1">
           <div className="flex items-center gap-2 mb-3">
@@ -233,7 +251,15 @@ export default function RepoOverviewPage() {
           disabled={!repo?.indexed}
         />
         <QuickLink
-          href={`${basePath}/mcp`}
+          href={`${basePath}/checks`}
+          icon={Shield}
+          label="Checks"
+          description="Automated repo health and finding verification"
+          color="var(--accent-amber)"
+          disabled={!repo?.indexed}
+        />
+        <QuickLink
+          href="/mcp"
           icon={Server}
           label="MCP Server"
           description="Model Context Protocol endpoint"

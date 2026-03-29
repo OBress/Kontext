@@ -45,6 +45,7 @@ export async function GET(request: Request) {
       .select("*", { count: "exact" })
       .eq("user_id", user.id)
       .eq("repo_full_name", repoFullName)
+      .neq("author_name", "system")
       .order("committed_at", { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -53,13 +54,15 @@ export async function GET(request: Request) {
       .from("repo_commits")
       .select("id", { count: "exact", head: true })
       .eq("user_id", user.id)
-      .eq("repo_full_name", repoFullName);
+      .eq("repo_full_name", repoFullName)
+      .neq("author_name", "system");
 
     const { count: syncedCommits } = await supabase
       .from("repo_commits")
       .select("id", { count: "exact", head: true })
       .eq("user_id", user.id)
       .eq("repo_full_name", repoFullName)
+      .neq("author_name", "system")
       .eq("sync_triggered", true);
 
     const { count: pendingSummaries } = await supabase
@@ -67,6 +70,7 @@ export async function GET(request: Request) {
       .select("id", { count: "exact", head: true })
       .eq("user_id", user.id)
       .eq("repo_full_name", repoFullName)
+      .neq("author_name", "system")
       .is("ai_summary", null);
 
     // Group commits by push_group_id.

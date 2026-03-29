@@ -5,9 +5,44 @@ import { decryptToken } from "./crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export interface AuthContext {
-  user: { id: string; email?: string };
+  user: { id: string; email?: string; githubLogin?: string | null };
   supabase: SupabaseClient;
   githubToken: string | null;
+}
+
+function resolveGitHubLoginFromUser(user: {
+  user_metadata?: Record<string, unknown>;
+  identities?: Array<{ provider?: string; identity_data?: Record<string, unknown> | null }> | null;
+}): string | null {
+  const metadata = user.user_metadata || {};
+  const directKeys = [
+    "user_name",
+    "preferred_username",
+    "login",
+    "nickname",
+    "nick_name",
+  ];
+
+  for (const key of directKeys) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim().toLowerCase();
+    }
+  }
+
+  const githubIdentity = (user.identities || []).find(
+    (identity) => identity?.provider === "github"
+  );
+  const identityData = githubIdentity?.identity_data || {};
+
+  for (const key of directKeys) {
+    const value = identityData[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim().toLowerCase();
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -86,7 +121,15 @@ export async function getAuthenticatedUser(): Promise<AuthContext> {
     }
   }
 
-  return { user: { id: user.id, email: user.email }, supabase, githubToken };
+  return {
+    user: {
+      id: user.id,
+      email: user.email,
+      githubLogin: resolveGitHubLoginFromUser(user),
+    },
+    supabase,
+    githubToken,
+  };
 }
 
 /**

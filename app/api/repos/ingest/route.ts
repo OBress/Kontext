@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient, getAuthenticatedUser } from "@/lib/api/auth";
 import { getApiErrorPayload, handleApiError, ApiError } from "@/lib/api/errors";
 import { logActivity } from "@/lib/api/activity";
+import { queueArchitectureRefresh } from "@/lib/api/architecture-refresh";
 import { chunkFile } from "@/lib/api/chunker";
 import { generateEmbeddings, generateFileSummary } from "@/lib/api/embeddings";
 import { fetchFileContent, fetchLatestCommit, fetchRepoTree, fetchRecentCommits } from "@/lib/api/github";
@@ -289,25 +290,10 @@ export async function POST(request: Request) {
                 timelineCommitDepth
               ).catch(() => []);
 
-              // Filter out the head commit (we'll create a baseline entry for it)
-              const filteredHistorical = historicalCommits.filter(c => c.sha !== headSHA);
-
               const commitRows = [
-                // Baseline commit
-                {
-                  user_id: user.id,
-                  repo_full_name: fullName,
-                  sha: headSHA,
-                  message: "Initial ingestion baseline",
-                  author_name: "system",
-                  committed_at: promotedAt,
-                  sync_triggered: true,
-                  push_group_id: `ingest-baseline-${Date.now()}`,
-                  files_changed: [] as { path: string; status: string }[],
-                },
                 // Historical commits — each gets its own group so they
                 // appear as individual items on the timeline
-                ...filteredHistorical.map((c) => ({
+                ...historicalCommits.map((c) => ({
                   user_id: user.id,
                   repo_full_name: fullName,
                   sha: c.sha,
@@ -331,20 +317,18 @@ export async function POST(request: Request) {
                   });
               }
 
-              // Generate AI summaries for the commits (skip the baseline)
-              const commitsToSummarize = commitRows.filter((c) => c.sha !== headSHA && c.message !== "Initial ingestion baseline");
-              if (commitsToSummarize.length > 0) {
-                send({ status: "timeline", message: `Summarizing ${commitsToSummarize.length} historical commits...` });
+              if (commitRows.length > 0) {
+                send({ status: "timeline", message: `Summarizing ${commitRows.length} historical commits...` });
                 try {
                   const { summaries, embeddings } = await summarizeAndEmbedCommits(
                     apiKey,
-                    commitsToSummarize.map((c) => ({
+                    commitRows.map((c) => ({
                       sha: c.sha,
                       message: c.message,
                       files_changed: c.files_changed,
                     }))
                   );
-                  for (let i = 0; i < commitsToSummarize.length; i++) {
+                  for (let i = 0; i < commitRows.length; i++) {
                     await adminDb
                       .from("repo_commits")
                       .update({
@@ -353,7 +337,7 @@ export async function POST(request: Request) {
                       })
                       .eq("user_id", user.id)
                       .eq("repo_full_name", fullName)
-                      .eq("sha", commitsToSummarize[i].sha);
+                      .eq("sha", commitRows[i].sha);
                   }
                 } catch (aiErr) {
                   console.warn("[ingest] AI summary generation failed:", aiErr);
@@ -382,6 +366,13 @@ export async function POST(request: Request) {
             title: `${fullName} was indexed`,
             description: `${preparedChunks.length} chunks from ${tree.length} files`,
             metadata: { chunks: preparedChunks.length, files: tree.length },
+          });
+
+          await queueArchitectureRefresh({
+            userId: user.id,
+            repoFullName: fullName,
+            apiKey,
+            sourceSha: headSHA,
           });
 
           send({

@@ -1,7 +1,12 @@
 "use client";
 
 import { create } from "zustand";
-import type { ArchitectureAnalysis } from "@/types/architecture";
+import type {
+  ArchitectureBundle,
+  ArchitectureLayerId,
+  ArchitectureStatus,
+  ArchitectureView,
+} from "@/types/architecture";
 
 export interface GraphNode {
   id: string;
@@ -11,15 +16,15 @@ export interface GraphNode {
   lineCount: number;
   imports: string[];
   exportedBy: string[];
-  group: string; // file type group
+  group: string;
   color: string;
-  val: number; // node size
+  val: number;
 }
 
 export interface GraphLink {
   source: string;
   target: string;
-  value: number; // import count
+  value: number;
 }
 
 export type GraphLayout = "force" | "radial" | "tree" | "dag";
@@ -33,6 +38,13 @@ export interface GraphFilters {
 interface SelectedElement {
   type: "node" | "edge";
   id: string;
+}
+
+interface ActiveTrace {
+  traceId: string | null;
+  nodeIds: string[];
+  edgeIds: string[];
+  layerId: ArchitectureLayerId;
 }
 
 interface GraphState {
@@ -54,12 +66,30 @@ interface GraphState {
   isFullscreen: boolean;
   setIsFullscreen: (fullscreen: boolean) => void;
 
-  // Architecture-specific state
-  architectureData: ArchitectureAnalysis | null;
-  setArchitectureData: (data: ArchitectureAnalysis | null) => void;
+  architectureData: ArchitectureView | null;
+  setArchitectureData: (data: ArchitectureView | null) => void;
+
+  architectureBundle: ArchitectureBundle | null;
+  setArchitectureBundle: (bundle: ArchitectureBundle | null) => void;
+
+  activeLayer: ArchitectureLayerId;
+  setActiveLayer: (layer: ArchitectureLayerId) => void;
+
+  architectureStatus: ArchitectureStatus;
+  setArchitectureStatus: (status: ArchitectureStatus) => void;
+
+  architectureForSha: string | null;
+  setArchitectureForSha: (value: string | null) => void;
+
+  architectureError: string | null;
+  setArchitectureError: (value: string | null) => void;
+
+  isArchitectureStale: boolean;
+  setIsArchitectureStale: (value: boolean) => void;
 
   expandedGroups: Set<string>;
   toggleGroup: (id: string) => void;
+  setExpandedGroups: (ids: string[]) => void;
 
   selectedElement: SelectedElement | null;
   setSelectedElement: (el: SelectedElement | null) => void;
@@ -72,6 +102,16 @@ interface GraphState {
 
   collapsedNodes: Set<string>;
   toggleCollapsed: (id: string) => void;
+  setCollapsedNodes: (ids: string[]) => void;
+
+  highlightedNodeIds: string[];
+  highlightedEdgeIds: string[];
+  dimUnfocused: boolean;
+  setHighlights: (nodeIds: string[], edgeIds: string[], dimUnfocused?: boolean) => void;
+  clearHighlights: () => void;
+
+  activeTrace: ActiveTrace | null;
+  setActiveTrace: (trace: ActiveTrace | null) => void;
 }
 
 const defaultFilters: GraphFilters = {
@@ -108,9 +148,26 @@ export const useGraphStore = create<GraphState>((set) => ({
   isFullscreen: false,
   setIsFullscreen: (fullscreen) => set({ isFullscreen: fullscreen }),
 
-  // Architecture state
   architectureData: null,
   setArchitectureData: (data) => set({ architectureData: data }),
+
+  architectureBundle: null,
+  setArchitectureBundle: (bundle) => set({ architectureBundle: bundle }),
+
+  activeLayer: "system",
+  setActiveLayer: (layer) => set({ activeLayer: layer }),
+
+  architectureStatus: "missing",
+  setArchitectureStatus: (status) => set({ architectureStatus: status }),
+
+  architectureForSha: null,
+  setArchitectureForSha: (value) => set({ architectureForSha: value }),
+
+  architectureError: null,
+  setArchitectureError: (value) => set({ architectureError: value }),
+
+  isArchitectureStale: false,
+  setIsArchitectureStale: (value) => set({ isArchitectureStale: value }),
 
   expandedGroups: new Set<string>(),
   toggleGroup: (id) =>
@@ -123,6 +180,7 @@ export const useGraphStore = create<GraphState>((set) => ({
       }
       return { expandedGroups: next };
     }),
+  setExpandedGroups: (ids) => set({ expandedGroups: new Set(ids) }),
 
   selectedElement: null,
   setSelectedElement: (el) => set({ selectedElement: el }),
@@ -144,4 +202,25 @@ export const useGraphStore = create<GraphState>((set) => ({
       }
       return { collapsedNodes: next };
     }),
+  setCollapsedNodes: (ids) => set({ collapsedNodes: new Set(ids) }),
+
+  highlightedNodeIds: [],
+  highlightedEdgeIds: [],
+  dimUnfocused: false,
+  setHighlights: (nodeIds, edgeIds, dimUnfocused = true) =>
+    set({
+      highlightedNodeIds: nodeIds,
+      highlightedEdgeIds: edgeIds,
+      dimUnfocused,
+    }),
+  clearHighlights: () =>
+    set({
+      highlightedNodeIds: [],
+      highlightedEdgeIds: [],
+      dimUnfocused: false,
+      activeTrace: null,
+    }),
+
+  activeTrace: null,
+  setActiveTrace: (trace) => set({ activeTrace: trace }),
 }));

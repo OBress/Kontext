@@ -18,10 +18,6 @@ import {
 import { ARCH_TYPE_COLORS, type ArchComponentType } from "@/types/architecture";
 import { useGraphStore } from "@/lib/store/graph-store";
 
-const ICON_MAP: Record<string, typeof Globe> = {
-  Globe, Server, Cog, Zap, Database, Settings, Package, Cloud,
-};
-
 const TYPE_ICON_MAP: Record<ArchComponentType, typeof Globe> = {
   page: Globe,
   api: Server,
@@ -46,10 +42,19 @@ export interface ArchNodeData {
 
 function ArchitectureNodeComponent({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as ArchNodeData;
-  const { collapsedNodes, toggleCollapsed, setSelectedElement, toggleGroup } = useGraphStore();
+  const {
+    collapsedNodes,
+    toggleCollapsed,
+    setSelectedElement,
+    toggleGroup,
+    highlightedNodeIds,
+    dimUnfocused,
+  } = useGraphStore();
   const isCollapsed = collapsedNodes.has(id);
   const color = ARCH_TYPE_COLORS[nodeData.componentType] || "#8B949E";
   const Icon = TYPE_ICON_MAP[nodeData.componentType] || Package;
+  const isHighlighted = highlightedNodeIds.includes(id);
+  const isDimmed = dimUnfocused && highlightedNodeIds.length > 0 && !isHighlighted;
 
   const handleHeaderClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -66,13 +71,16 @@ function ArchitectureNodeComponent({ id, data, selected }: NodeProps) {
 
   return (
     <div
-      className={`arch-node ${selected ? "arch-node--selected" : ""}`}
+      className={`arch-node ${selected ? "arch-node--selected" : ""} ${
+        isHighlighted ? "arch-node--highlighted" : ""
+      }`}
       style={{
-        borderColor: selected ? color : "var(--alpha-white-10)",
-        boxShadow: selected ? `0 0 20px ${color}30` : undefined,
+        borderColor: selected || isHighlighted ? color : "var(--alpha-white-10)",
+        boxShadow:
+          selected || isHighlighted ? `0 0 20px ${color}30` : undefined,
+        opacity: isDimmed ? 0.28 : 1,
       }}
     >
-      {/* Input handle */}
       <Handle
         type="target"
         position={Position.Left}
@@ -80,7 +88,6 @@ function ArchitectureNodeComponent({ id, data, selected }: NodeProps) {
         style={{ background: color }}
       />
 
-      {/* Header strip */}
       <div
         className="arch-node__header"
         style={{ background: `${color}20`, borderBottomColor: `${color}30` }}
@@ -91,7 +98,7 @@ function ArchitectureNodeComponent({ id, data, selected }: NodeProps) {
         <div className="arch-node__header-actions">
           {nodeData.hasChildren && (
             <span className="arch-node__expand-hint" style={{ color }}>
-              {nodeData.isExpanded ? "▼" : "►"}
+              {nodeData.isExpanded ? "▼" : "▶"}
             </span>
           )}
           <button
@@ -104,12 +111,10 @@ function ArchitectureNodeComponent({ id, data, selected }: NodeProps) {
         </div>
       </div>
 
-      {/* Body — hidden when collapsed */}
       {!isCollapsed && (
         <div className="arch-node__body">
           <p className="arch-node__description">{nodeData.description}</p>
 
-          {/* File list preview */}
           {nodeData.files.length > 0 && (
             <div className="arch-node__files">
               {nodeData.files.slice(0, 3).map((file) => (
@@ -126,9 +131,11 @@ function ArchitectureNodeComponent({ id, data, selected }: NodeProps) {
             </div>
           )}
 
-          {/* Stats bar */}
           <div className="arch-node__stats">
-            <span className="arch-node__stat-badge" style={{ color, borderColor: `${color}40` }}>
+            <span
+              className="arch-node__stat-badge"
+              style={{ color, borderColor: `${color}40` }}
+            >
               {nodeData.componentType}
             </span>
             <span className="arch-node__stat-count">{nodeData.fileCount} files</span>
@@ -136,7 +143,6 @@ function ArchitectureNodeComponent({ id, data, selected }: NodeProps) {
         </div>
       )}
 
-      {/* Output handle */}
       <Handle
         type="source"
         position={Position.Right}

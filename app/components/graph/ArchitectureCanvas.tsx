@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -11,6 +11,7 @@ import {
   BackgroundVariant,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Node,
   type Edge,
   type NodeTypes,
@@ -25,16 +26,26 @@ import { ArchitectureNode } from "./ArchitectureNode";
 import { GroupNode } from "./GroupNode";
 import { ArchitectureEdge } from "./ArchitectureEdge";
 import { DetailPanel } from "./DetailPanel";
-import type { ArchitectureAnalysis, ArchComponent } from "@/types/architecture";
+import {
+  getArchitectureView,
+  type ArchitectureBundle,
+  type ArchitectureLayerId,
+  type ArchitectureView,
+  type ArchComponent,
+} from "@/types/architecture";
 import {
   Brain,
   Loader2,
   RefreshCw,
   Clock,
+  Layers3,
+  MessageCircleMore,
+  Send,
+  X,
+  Sparkles,
 } from "lucide-react";
 import { useAppStore } from "@/lib/store/app-store";
 
-// Register custom node types
 const nodeTypes: NodeTypes = {
   architecture: ArchitectureNode,
   group: GroupNode,
@@ -44,7 +55,33 @@ const edgeTypes: EdgeTypes = {
   architecture: ArchitectureEdge,
 };
 
-// Dagre layout helper
+type AssistantAction =
+  | {
+      type: "switch_layer";
+      layerId: ArchitectureLayerId;
+    }
+  | {
+      type: "focus_nodes";
+      layerId: ArchitectureLayerId;
+      nodeIds: string[];
+      edgeIds: string[];
+      primaryNodeId: string | null;
+      dimOthers: boolean;
+    }
+  | {
+      type: "trace_path";
+      layerId: ArchitectureLayerId;
+      nodeIds: string[];
+      edgeIds: string[];
+      traceId: string | null;
+    };
+
+interface AssistantMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+}
+
 function getLayoutedElements(
   nodes: Node[],
   edges: Edge[],
@@ -62,7 +99,6 @@ function getLayoutedElements(
   });
 
   for (const node of nodes) {
-    // Only layout top-level nodes (no parentId)
     if (!node.parentId) {
       g.setNode(node.id, {
         width: node.measured?.width || 260,
@@ -79,71 +115,64 @@ function getLayoutedElements(
 
   dagre.layout(g);
 
-  const layoutedNodes = nodes.map((node) => {
-    if (node.parentId) return node;
-    const dagreNode = g.node(node.id);
-    if (!dagreNode) return node;
-    return {
-      ...node,
-      position: {
-        x: dagreNode.x - (node.measured?.width || 260) / 2,
-        y: dagreNode.y - (node.measured?.height || 180) / 2,
-      },
-    };
-  });
-
-  return { nodes: layoutedNodes, edges };
+  return {
+    nodes: nodes.map((node) => {
+      if (node.parentId) return node;
+      const dagreNode = g.node(node.id);
+      if (!dagreNode) return node;
+      return {
+        ...node,
+        position: {
+          x: dagreNode.x - (node.measured?.width || 260) / 2,
+          y: dagreNode.y - (node.measured?.height || 180) / 2,
+        },
+      };
+    }),
+    edges,
+  };
 }
 
-/**
- * Convert ArchitectureAnalysis into React Flow nodes + edges.
- */
-function analysisToFlowElements(
-  analysis: ArchitectureAnalysis,
-  expandedGroups: Set<string>,
-  collapsedNodes: Set<string>
+function viewToFlowElements(
+  view: ArchitectureView,
+  expandedGroups: Set<string>
 ): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
 
-  for (const comp of analysis.components) {
-    const hasChildren = !!comp.children && comp.children.length > 0;
-    const isExpanded = expandedGroups.has(comp.id);
-
-    // Count total files including children
-    let totalFiles = comp.files.length;
-    if (comp.children) {
-      for (const child of comp.children) {
+  for (const component of view.components) {
+    const hasChildren = !!component.children && component.children.length > 0;
+    const isExpanded = expandedGroups.has(component.id);
+    let totalFiles = component.files.length;
+    if (component.children) {
+      for (const child of component.children) {
         totalFiles += child.files.length;
       }
     }
 
     if (hasChildren && isExpanded) {
-      // Render as group node with children inside
       nodes.push({
-        id: comp.id,
+        id: component.id,
         type: "group",
         position: { x: 0, y: 0 },
         data: {
-          label: comp.label,
-          description: comp.description,
-          componentType: comp.type,
-          childCount: comp.children!.length,
+          label: component.label,
+          description: component.description,
+          componentType: component.type,
+          childCount: component.children!.length,
           isExpanded: true,
         },
         style: {
           width: 500,
-          height: 300 + (comp.children!.length * 100),
+          height: 300 + component.children!.length * 100,
         },
       });
 
-      // Add child nodes
-      comp.children!.forEach((child: ArchComponent, index: number) => {
+      component.children!.forEach((child: ArchComponent, index: number) => {
         nodes.push({
           id: child.id,
           type: "architecture",
           position: { x: 20, y: 60 + index * 120 },
-          parentId: comp.id,
+          parentId: component.id,
           extent: "parent" as const,
           data: {
             label: child.label,
@@ -157,25 +186,24 @@ function analysisToFlowElements(
         });
       });
     } else {
-      // Render as regular or collapsed group node
       const nodeType = hasChildren ? "group" : "architecture";
       nodes.push({
-        id: comp.id,
+        id: component.id,
         type: nodeType,
         position: { x: 0, y: 0 },
         data: hasChildren
           ? {
-              label: comp.label,
-              description: comp.description,
-              componentType: comp.type,
-              childCount: comp.children!.length,
+              label: component.label,
+              description: component.description,
+              componentType: component.type,
+              childCount: component.children!.length,
               isExpanded: false,
             }
           : {
-              label: comp.label,
-              description: comp.description,
-              componentType: comp.type,
-              files: comp.files,
+              label: component.label,
+              description: component.description,
+              componentType: component.type,
+              files: component.files,
               hasChildren: false,
               isExpanded: false,
               fileCount: totalFiles,
@@ -184,22 +212,202 @@ function analysisToFlowElements(
     }
   }
 
-  // Add edges
-  for (const conn of analysis.connections) {
+  for (const connection of view.connections) {
     edges.push({
-      id: conn.id,
-      source: conn.source,
-      target: conn.target,
+      id: connection.id,
+      source: connection.source,
+      target: connection.target,
       type: "architecture",
       data: {
-        label: conn.label,
-        description: conn.description,
-        connectionType: conn.type,
+        label: connection.label,
+        description: connection.description,
+        connectionType: connection.type,
       },
     });
   }
 
   return getLayoutedElements(nodes, edges, "LR");
+}
+
+interface ArchitectureAssistantProps {
+  repoFullName: string;
+  apiKey: string | null;
+  layer: ArchitectureLayerId;
+  open: boolean;
+  onClose: () => void;
+  onAction: (action: AssistantAction) => void;
+}
+
+function ArchitectureAssistant({
+  repoFullName,
+  apiKey,
+  layer,
+  open,
+  onClose,
+  onAction,
+}: ArchitectureAssistantProps) {
+  const [messages, setMessages] = useState<AssistantMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isStreaming]);
+
+  const sendPrompt = useCallback(
+    async (prompt: string) => {
+      if (!apiKey || !prompt.trim() || isStreaming) return;
+
+      setMessages((prev) => [
+        ...prev,
+        { id: `user-${Date.now()}`, role: "user", content: prompt.trim() },
+      ]);
+      setInput("");
+      setIsStreaming(true);
+
+      let assistantContent = "";
+      const assistantId = `assistant-${Date.now()}`;
+      setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
+
+      try {
+        const res = await fetch("/api/graph/assistant", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-google-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            repo_full_name: repoFullName,
+            message: prompt.trim(),
+            layer,
+          }),
+        });
+
+        if (!res.ok || !res.body) {
+          throw new Error("Assistant request failed");
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const dataLine = line.replace(/^data: /, "").trim();
+            if (!dataLine) continue;
+
+            const payload = JSON.parse(dataLine) as
+              | { type: "action"; action: AssistantAction }
+              | { type: "text"; content: string }
+              | { type: "done" };
+
+            if (payload.type === "action") {
+              onAction(payload.action);
+            }
+
+            if (payload.type === "text") {
+              assistantContent += payload.content;
+              setMessages((prev) =>
+                prev.map((message) =>
+                  message.id === assistantId
+                    ? { ...message, content: assistantContent }
+                    : message
+                )
+              );
+            }
+          }
+        }
+      } catch (error: unknown) {
+        const messageText =
+          error instanceof Error ? error.message : "Assistant request failed";
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === assistantId
+              ? { ...message, content: messageText }
+              : message
+          )
+        );
+      } finally {
+        setIsStreaming(false);
+      }
+    },
+    [apiKey, isStreaming, layer, onAction, repoFullName]
+  );
+
+  if (!open) return null;
+
+  return (
+    <div className="architecture-assistant">
+      <div className="architecture-assistant__header">
+        <div>
+          <div className="architecture-assistant__eyebrow">Architecture Assistant</div>
+          <div className="architecture-assistant__title">Graph-aware chat</div>
+        </div>
+        <button onClick={onClose} className="architecture-assistant__close">
+          <X size={16} />
+        </button>
+      </div>
+
+      <div className="architecture-assistant__messages">
+        {messages.length === 0 && (
+          <div className="architecture-assistant__empty">
+            <Sparkles size={16} />
+            <p>Ask about the flow, highlight a subsystem, or trace a request path.</p>
+            <div className="architecture-assistant__suggestions">
+              {[
+                "Explain the project architecture",
+                "Where is the user sending chat messages?",
+                "Trace the sync flow",
+              ].map((suggestion) => (
+                <button
+                  key={suggestion}
+                  onClick={() => void sendPrompt(suggestion)}
+                  className="architecture-assistant__suggestion"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {messages.map((message) => (
+          <div
+            key={message.id}
+            className={`architecture-assistant__message architecture-assistant__message--${message.role}`}
+          >
+            {message.content || (message.role === "assistant" && isStreaming ? "Thinking..." : "")}
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+
+      <div className="architecture-assistant__composer">
+        <textarea
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          placeholder={apiKey ? "Ask the architecture assistant..." : "Set your AI key to use the assistant"}
+          disabled={!apiKey || isStreaming}
+          rows={1}
+        />
+        <button
+          onClick={() => void sendPrompt(input)}
+          disabled={!apiKey || !input.trim() || isStreaming}
+          className="architecture-assistant__send"
+        >
+          {isStreaming ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 interface ArchitectureCanvasProps {
@@ -210,52 +418,112 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
   const {
     architectureData,
     setArchitectureData,
+    architectureBundle,
+    setArchitectureBundle,
+    activeLayer,
+    setActiveLayer,
     expandedGroups,
-    collapsedNodes,
+    setExpandedGroups,
+    setCollapsedNodes,
     setSelectedElement,
     isAnalyzing,
     setIsAnalyzing,
     analyzedAt,
     setAnalyzedAt,
+    setArchitectureStatus,
+    architectureStatus,
+    setArchitectureForSha,
+    setArchitectureError,
+    architectureError,
+    isArchitectureStale,
+    setIsArchitectureStale,
+    setHighlights,
+    clearHighlights,
+    setActiveTrace,
   } = useGraphStore();
 
-  const apiKey = useAppStore((s) => s.apiKey);
-
+  const apiKey = useAppStore((state) => state.apiKey);
+  const reactFlow = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const autoAnalyzeRef = useRef(false);
 
-  // Convert architecture data to flow elements whenever it changes
-  useEffect(() => {
-    if (architectureData) {
-      const { nodes: layoutedNodes, edges: layoutedEdges } = analysisToFlowElements(
-        architectureData,
-        expandedGroups,
-        collapsedNodes
-      );
-      setNodes(layoutedNodes);
-      setEdges(layoutedEdges);
+  const loadGraph = useCallback(async () => {
+    const response = await fetch(`/api/graph?repo=${encodeURIComponent(repoFullName)}`);
+    const data = await response.json();
+
+    if (data.architectureBundle) {
+      setArchitectureBundle(data.architectureBundle as ArchitectureBundle);
+    } else {
+      setArchitectureBundle(null);
+      setArchitectureData(null);
     }
-  }, [architectureData, expandedGroups, collapsedNodes, setNodes, setEdges]);
 
-  // Load cached data on mount
+    setAnalyzedAt(data.analyzedAt || null);
+    setArchitectureStatus(data.architectureStatus || "missing");
+    setArchitectureForSha(data.architectureForSha || null);
+    setArchitectureError(data.architectureError || null);
+    setIsArchitectureStale(Boolean(data.isStale));
+  }, [
+    repoFullName,
+    setAnalyzedAt,
+    setArchitectureBundle,
+    setArchitectureData,
+    setArchitectureError,
+    setArchitectureForSha,
+    setArchitectureStatus,
+    setIsArchitectureStale,
+  ]);
+
   useEffect(() => {
-    fetch(`/api/graph?repo=${encodeURIComponent(repoFullName)}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.architecture) {
-          setArchitectureData(data.architecture);
-          setAnalyzedAt(data.analyzedAt);
-        }
-      })
-      .catch(() => {});
-  }, [repoFullName, setArchitectureData, setAnalyzedAt]);
+    void loadGraph();
+  }, [loadGraph]);
+
+  useEffect(() => {
+    if (!architectureBundle) return;
+    const nextView = getArchitectureView(architectureBundle, activeLayer);
+    setArchitectureData(nextView);
+    setExpandedGroups(nextView?.defaultExpanded || []);
+    setCollapsedNodes([]);
+    clearHighlights();
+  }, [
+    activeLayer,
+    architectureBundle,
+    clearHighlights,
+    setArchitectureData,
+    setCollapsedNodes,
+    setExpandedGroups,
+  ]);
+
+  useEffect(() => {
+    if (!architectureData) return;
+    const { nodes: layoutedNodes, edges: layoutedEdges } = viewToFlowElements(
+      architectureData,
+      expandedGroups
+    );
+    setNodes(layoutedNodes);
+    setEdges(layoutedEdges);
+  }, [architectureData, expandedGroups, setEdges, setNodes]);
+
+  useEffect(() => {
+    if (!(architectureStatus === "queued" || architectureStatus === "analyzing")) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void loadGraph();
+    }, 4000);
+
+    return () => window.clearInterval(interval);
+  }, [architectureStatus, loadGraph]);
 
   const handleAnalyze = useCallback(async () => {
     if (!apiKey || isAnalyzing) return;
     setIsAnalyzing(true);
 
     try {
-      const res = await fetch("/api/graph/analyze", {
+      const response = await fetch("/api/graph/analyze", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -264,21 +532,46 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
         body: JSON.stringify({ repo_full_name: repoFullName }),
       });
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => null);
+      if (!response.ok) {
+        const errData = await response.json().catch(() => null);
         console.error("Analysis failed:", errData);
         return;
       }
 
-      const data = await res.json();
-      setArchitectureData(data.analysis);
-      setAnalyzedAt(data.analyzedAt);
-    } catch (err) {
-      console.error("Analysis error:", err);
+      const data = await response.json();
+      if (data.architectureBundle) {
+        setArchitectureBundle(data.architectureBundle);
+      }
+      setAnalyzedAt(data.analyzedAt || null);
+      setArchitectureStatus(data.architectureStatus || "ready");
+      setArchitectureForSha(data.architectureForSha || null);
+      setArchitectureError(null);
+      setIsArchitectureStale(false);
+    } catch (error) {
+      console.error("Analysis error:", error);
     } finally {
       setIsAnalyzing(false);
     }
-  }, [apiKey, repoFullName, isAnalyzing, setIsAnalyzing, setArchitectureData, setAnalyzedAt]);
+  }, [
+    apiKey,
+    isAnalyzing,
+    repoFullName,
+    setAnalyzedAt,
+    setArchitectureBundle,
+    setArchitectureError,
+    setArchitectureForSha,
+    setArchitectureStatus,
+    setIsAnalyzing,
+    setIsArchitectureStale,
+  ]);
+
+  useEffect(() => {
+    if (autoAnalyzeRef.current) return;
+    if (architectureBundle || !apiKey) return;
+    if (!["missing", "stale", "error"].includes(architectureStatus)) return;
+    autoAnalyzeRef.current = true;
+    void handleAnalyze();
+  }, [apiKey, architectureBundle, architectureStatus, handleAnalyze]);
 
   const onSelectionChange = useCallback(
     (params: OnSelectionChangeParams) => {
@@ -295,7 +588,56 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
     setSelectedElement(null);
   }, [setSelectedElement]);
 
-  // Format analyzed time
+  const focusNodes = useCallback(
+    (nodeIds: string[]) => {
+      window.setTimeout(() => {
+        const matchedNodes = nodeIds
+          .map((nodeId) => reactFlow.getNode(nodeId))
+          .filter((node): node is Node => Boolean(node));
+        if (matchedNodes.length > 0) {
+          reactFlow.fitView({
+            nodes: matchedNodes,
+            duration: 450,
+            padding: 0.24,
+          });
+        }
+      }, 120);
+    },
+    [reactFlow]
+  );
+
+  const applyAssistantAction = useCallback(
+    (action: AssistantAction) => {
+      if (action.type === "switch_layer") {
+        setActiveLayer(action.layerId);
+        return;
+      }
+
+      if (action.type === "focus_nodes") {
+        setActiveLayer(action.layerId);
+        setHighlights(action.nodeIds, action.edgeIds, action.dimOthers);
+        setSelectedElement(
+          action.primaryNodeId ? { type: "node", id: action.primaryNodeId } : null
+        );
+        focusNodes(action.nodeIds);
+        return;
+      }
+
+      if (action.type === "trace_path") {
+        setActiveLayer(action.layerId);
+        setHighlights(action.nodeIds, action.edgeIds, true);
+        setActiveTrace({
+          traceId: action.traceId,
+          nodeIds: action.nodeIds,
+          edgeIds: action.edgeIds,
+          layerId: action.layerId,
+        });
+        focusNodes(action.nodeIds);
+      }
+    },
+    [focusNodes, setActiveLayer, setActiveTrace, setHighlights, setSelectedElement]
+  );
+
   const analyzedTimeAgo = useMemo(() => {
     if (!analyzedAt) return null;
     const diff = Date.now() - new Date(analyzedAt).getTime();
@@ -334,10 +676,7 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
           size={1}
           color="rgba(255,255,255,0.04)"
         />
-        <Controls
-          showInteractive={false}
-          className="architecture-controls"
-        />
+        <Controls showInteractive={false} className="architecture-controls" />
         <MiniMap
           className="architecture-minimap"
           nodeColor={(node) => {
@@ -358,18 +697,24 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
           maskColor="rgba(0,0,0,0.7)"
         />
 
-        {/* Top-left analyze panel */}
-        <Panel position="top-left" className="architecture-panel">
-          {!architectureData && !isAnalyzing && (
-            <button
-              onClick={handleAnalyze}
-              disabled={!apiKey}
-              className="analyze-btn"
-            >
-              <Brain size={16} />
-              <span>Analyze Architecture</span>
-            </button>
-          )}
+        <Panel position="top-left" className="architecture-panel architecture-panel--stacked">
+          <div className="architecture-layer-switcher">
+            <div className="architecture-layer-switcher__label">
+              <Layers3 size={13} />
+              Layers
+            </div>
+            {(["overview", "system", "code"] as ArchitectureLayerId[]).map((layerId) => (
+              <button
+                key={layerId}
+                onClick={() => setActiveLayer(layerId)}
+                className={`architecture-layer-switcher__chip ${
+                  activeLayer === layerId ? "architecture-layer-switcher__chip--active" : ""
+                }`}
+              >
+                {layerId}
+              </button>
+            ))}
+          </div>
 
           {isAnalyzing && (
             <div className="analyze-status">
@@ -378,38 +723,67 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
             </div>
           )}
 
-          {architectureData && !isAnalyzing && (
+          {!isAnalyzing && (
             <div className="analyze-info">
               <div className="analyze-info__summary">
                 <span className="analyze-info__count">
-                  {architectureData.components.length} components · {architectureData.connections.length} connections
+                  {architectureData
+                    ? `${architectureData.components.length} components · ${architectureData.connections.length} connections`
+                    : "Architecture bundle not ready yet"}
                 </span>
-                {analyzedTimeAgo && (
-                  <span className="analyze-info__time">
-                    <Clock size={11} />
-                    {analyzedTimeAgo}
+                <div className="architecture-status-row">
+                  <span className={`architecture-status-pill architecture-status-pill--${architectureStatus}`}>
+                    {architectureStatus}
                   </span>
+                  {isArchitectureStale && (
+                    <span className="architecture-status-pill architecture-status-pill--stale">
+                      stale
+                    </span>
+                  )}
+                  {analyzedTimeAgo && (
+                    <span className="analyze-info__time">
+                      <Clock size={11} />
+                      {analyzedTimeAgo}
+                    </span>
+                  )}
+                </div>
+                {architectureError && (
+                  <span className="analyze-hint">{architectureError}</span>
                 )}
               </div>
               <button
                 onClick={handleAnalyze}
-                disabled={!apiKey}
+                disabled={!apiKey || isAnalyzing}
                 className="analyze-refresh-btn"
-                title="Re-analyze"
+                title="Refresh architecture"
               >
-                <RefreshCw size={13} />
+                {architectureData ? <RefreshCw size={13} /> : <Brain size={13} />}
               </button>
             </div>
           )}
 
-          {!apiKey && (
-            <p className="analyze-hint">Set your AI API key to analyze</p>
-          )}
+          {!apiKey && <p className="analyze-hint">Set your AI API key to analyze or chat</p>}
         </Panel>
       </ReactFlow>
 
-      {/* Detail panel overlay */}
       <DetailPanel />
+
+      <button
+        className="architecture-assistant-fab"
+        onClick={() => setAssistantOpen((value) => !value)}
+        title="Open architecture assistant"
+      >
+        {assistantOpen ? <X size={18} /> : <MessageCircleMore size={18} />}
+      </button>
+
+      <ArchitectureAssistant
+        repoFullName={repoFullName}
+        apiKey={apiKey}
+        layer={activeLayer}
+        open={assistantOpen}
+        onClose={() => setAssistantOpen(false)}
+        onAction={applyAssistantAction}
+      />
     </div>
   );
 }

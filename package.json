@@ -41,6 +41,7 @@
     "dagre": "^0.8.5",
     "framer-motion": "^12.23.25",
     "jiti": "latest",
+    "jszip": "^3.10.1",
     "lucide-react": "0.555.0",
     "next": "16.0.6",
     "prop-types": "latest",

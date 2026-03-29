@@ -16,6 +16,9 @@ import { logActivity } from "@/lib/api/activity";
  *   - chat_sessions (chat history)
  *   - generated_prompts (saved prompts)
  *   - mcp_api_keys (scoped MCP keys)
+ *   - repo_jobs (durable background work)
+ *   - repo_check_configs / repo_check_runs / repo_check_findings
+ *   - onboarding_templates / versions / assignments / attempts
  *   - team_invites (pending invites)
  *   - team_members (team memberships)
  *   - activity_events (activity log)
@@ -114,6 +117,60 @@ export async function DELETE(request: Request) {
     // 4f. mcp_api_keys (scoped to this repo)
     await adminDb
       .from("mcp_api_keys")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("repo_full_name", fullName);
+
+    await adminDb
+      .from("repo_jobs")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("repo_full_name", fullName);
+
+    await adminDb
+      .from("repo_check_findings")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("repo_full_name", fullName);
+
+    await adminDb
+      .from("repo_check_runs")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("repo_full_name", fullName);
+
+    await adminDb
+      .from("repo_check_configs")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("repo_full_name", fullName);
+
+    await adminDb
+      .from("onboarding_step_attempts")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("repo_full_name", fullName);
+
+    await adminDb
+      .from("onboarding_assignments")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("repo_full_name", fullName);
+
+    await adminDb
+      .from("onboarding_template_steps")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("repo_full_name", fullName);
+
+    await adminDb
+      .from("onboarding_template_versions")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("repo_full_name", fullName);
+
+    await adminDb
+      .from("onboarding_templates")
       .delete()
       .eq("user_id", user.id)
       .eq("repo_full_name", fullName);

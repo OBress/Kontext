@@ -8,6 +8,7 @@ import {
   MessageSquare,
   Network,
   History,
+  Shield,
   Wand2,
   Users,
   Settings,
@@ -18,6 +19,8 @@ const tabs = [
   { icon: MessageSquare, label: "Chat", segment: "chat" },
   { icon: Network, label: "Architecture", segment: "graph" },
   { icon: History, label: "Timeline", segment: "timeline" },
+  { icon: Shield, label: "Checks", segment: "checks" },
+
   { icon: Wand2, label: "Prompts", segment: "prompts" },
   { icon: Users, label: "Team", segment: "team" },
   { icon: Settings, label: "Settings", segment: "settings" },

@@ -3,6 +3,7 @@ export const ACTIVITY_EVENT_TYPES = [
   "repo_deleted",
   "repo_indexed",
   "repo_synced",
+  "repo_check_completed",
   "team_member_joined",
   "team_invite_sent",
   "push",
@@ -33,6 +34,7 @@ export const KONTEXT_ACTIVITY_EVENTS: ReadonlyArray<{
   { key: "repo_deleted", label: "Repo deleted" },
   { key: "repo_indexed", label: "Repo indexed" },
   { key: "repo_synced", label: "Repo synced" },
+  { key: "repo_check_completed", label: "Repo health checks" },
   { key: "team_member_joined", label: "Team member joined" },
   { key: "team_invite_sent", label: "Team invite sent" },
 ];

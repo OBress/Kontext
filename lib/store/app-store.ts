@@ -51,6 +51,56 @@ export interface IngestionState {
   error?: string;
 }
 
+export interface RepoCheckRunState {
+  id: number;
+  repoFullName: string;
+  status: "queued" | "running" | "completed" | "failed" | "skipped";
+  triggerMode: "manual" | "after_sync" | "daily" | "mcp";
+  summary?: string | null;
+  findingsTotal: number;
+  newFindings: number;
+  resolvedFindings: number;
+  unchangedFindings: number;
+  headSha?: string | null;
+  createdAt: string;
+}
+
+export interface RepoHealthSummaryState {
+  openCount: number;
+  criticalCount: number;
+  highCount: number;
+  resolvedRecently: number;
+  latestRun: RepoCheckRunState | null;
+}
+
+export interface RepoJobState {
+  id: number;
+  repoFullName: string;
+  jobType:
+    | "ingest"
+    | "sync"
+    | "repo_check"
+    | "onboarding_generate"
+    | "onboarding_assign"
+    | "architecture_refresh";
+  trigger:
+    | "manual"
+    | "webhook"
+    | "schedule"
+    | "mcp"
+    | "system"
+    | "invite"
+    | "sync";
+  status: "queued" | "running" | "completed" | "failed" | "skipped";
+  title?: string | null;
+  progressPercent: number;
+  resultSummary?: string | null;
+  errorMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  metadata?: Record<string, unknown>;
+}
+
 export type RepoSortMode = "recent" | "stars" | "name" | "added";
 
 interface AppState {
@@ -83,6 +133,24 @@ interface AppState {
   ingestionStatus: Record<string, IngestionState>;
   setIngestionStatus: (repoFullName: string, state: IngestionState) => void;
   clearIngestionStatus: (repoFullName: string) => void;
+
+  // Repo health + checks state
+  repoCheckRuns: Record<string, RepoCheckRunState>;
+  setRepoCheckRuns: (runs: RepoCheckRunState[]) => void;
+  setRepoCheckRun: (repoFullName: string, run: RepoCheckRunState) => void;
+  clearRepoCheckRun: (repoFullName: string) => void;
+  repoHealthSummaries: Record<string, RepoHealthSummaryState>;
+  setRepoHealthSummary: (
+    repoFullName: string,
+    summary: RepoHealthSummaryState
+  ) => void;
+  clearRepoHealthSummary: (repoFullName: string) => void;
+
+  // Generic repo job state
+  repoJobs: Record<number, RepoJobState>;
+  setRepoJobs: (jobs: RepoJobState[]) => void;
+  upsertRepoJob: (job: RepoJobState) => void;
+  clearRepoJob: (jobId: number) => void;
 
   // UI state
   apiKeyModalOpen: boolean;
@@ -122,6 +190,15 @@ export const useAppStore = create<AppState>()(
         set((prev) => ({
           repos: prev.repos.filter((r) => r.full_name !== fullName),
           pinnedRepos: prev.pinnedRepos.filter((fn) => fn !== fullName),
+          repoCheckRuns: Object.fromEntries(
+            Object.entries(prev.repoCheckRuns).filter(([key]) => key !== fullName)
+          ),
+          repoHealthSummaries: Object.fromEntries(
+            Object.entries(prev.repoHealthSummaries).filter(([key]) => key !== fullName)
+          ),
+          repoJobs: Object.fromEntries(
+            Object.entries(prev.repoJobs).filter(([, job]) => job.repoFullName !== fullName)
+          ) as Record<number, RepoJobState>,
         })),
 
       // Pinned repos
@@ -152,6 +229,71 @@ export const useAppStore = create<AppState>()(
           const next = { ...prev.ingestionStatus };
           delete next[repoFullName];
           return { ingestionStatus: next };
+        }),
+
+      repoCheckRuns: {},
+      setRepoCheckRuns: (runs) =>
+        set(() => {
+          const next: Record<string, RepoCheckRunState> = {};
+          for (const run of runs) {
+            const existing = next[run.repoFullName];
+            if (
+              !existing ||
+              new Date(run.createdAt).getTime() >= new Date(existing.createdAt).getTime()
+            ) {
+              next[run.repoFullName] = run;
+            }
+          }
+          return { repoCheckRuns: next };
+        }),
+      setRepoCheckRun: (repoFullName, run) =>
+        set((prev) => ({
+          repoCheckRuns: {
+            ...prev.repoCheckRuns,
+            [repoFullName]: run,
+          },
+        })),
+      clearRepoCheckRun: (repoFullName) =>
+        set((prev) => {
+          const next = { ...prev.repoCheckRuns };
+          delete next[repoFullName];
+          return { repoCheckRuns: next };
+        }),
+      repoHealthSummaries: {},
+      setRepoHealthSummary: (repoFullName, summary) =>
+        set((prev) => ({
+          repoHealthSummaries: {
+            ...prev.repoHealthSummaries,
+            [repoFullName]: summary,
+          },
+        })),
+      clearRepoHealthSummary: (repoFullName) =>
+        set((prev) => {
+          const next = { ...prev.repoHealthSummaries };
+          delete next[repoFullName];
+          return { repoHealthSummaries: next };
+        }),
+
+      repoJobs: {},
+      setRepoJobs: (jobs) =>
+        set(() => ({
+          repoJobs: Object.fromEntries(jobs.map((job) => [job.id, job])) as Record<
+            number,
+            RepoJobState
+          >,
+        })),
+      upsertRepoJob: (job) =>
+        set((prev) => ({
+          repoJobs: {
+            ...prev.repoJobs,
+            [job.id]: job,
+          },
+        })),
+      clearRepoJob: (jobId) =>
+        set((prev) => {
+          const next = { ...prev.repoJobs };
+          delete next[jobId];
+          return { repoJobs: next };
         }),
 
       apiKeyModalOpen: false,

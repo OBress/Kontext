@@ -37,9 +37,20 @@ function ArchitectureEdgeComponent({
   selected,
 }: EdgeProps) {
   const edgeData = data as unknown as ArchEdgeData;
-  const { setSelectedElement, selectedElement } = useGraphStore();
-  const isActive = selected || selectedElement?.id === id;
-  const color = CONNECTION_TYPE_COLORS[edgeData?.connectionType || "import"] || "#8B949E";
+  const {
+    setSelectedElement,
+    selectedElement,
+    highlightedEdgeIds,
+    dimUnfocused,
+    activeTrace,
+  } = useGraphStore();
+
+  const color =
+    CONNECTION_TYPE_COLORS[edgeData?.connectionType || "import"] || "#8B949E";
+  const isHighlighted = highlightedEdgeIds.includes(id);
+  const isTracing = activeTrace?.edgeIds.includes(id) || false;
+  const isActive = selected || selectedElement?.id === id || isHighlighted;
+  const isDimmed = dimUnfocused && highlightedEdgeIds.length > 0 && !isHighlighted;
 
   const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX,
@@ -57,18 +68,32 @@ function ArchitectureEdgeComponent({
 
   return (
     <>
+      <path id={`trace-path-${id}`} d={edgePath} fill="none" stroke="transparent" />
       <BaseEdge
         id={id}
         path={edgePath}
         style={{
           stroke: isActive ? color : `${color}60`,
-          strokeWidth: isActive ? 2.5 : 1.5,
-          strokeDasharray: isActive ? undefined : "6 3",
-          transition: "stroke 0.2s, stroke-width 0.2s",
+          strokeWidth: isActive ? 2.8 : 1.5,
+          strokeDasharray: isTracing ? "10 6" : isActive ? undefined : "6 3",
+          opacity: isDimmed ? 0.18 : 1,
+          transition: "stroke 0.2s, stroke-width 0.2s, opacity 0.2s",
           cursor: "pointer",
         }}
         interactionWidth={20}
       />
+
+      {isTracing && (
+        <>
+          <circle r="3.5" fill={color} className="arch-trace-dot">
+            <animateMotion dur="2.4s" repeatCount="indefinite" path={edgePath} />
+          </circle>
+          <circle r="2.5" fill={color} opacity="0.65" className="arch-trace-dot">
+            <animateMotion dur="2.4s" repeatCount="indefinite" begin="1.1s" path={edgePath} />
+          </circle>
+        </>
+      )}
+
       {edgeData?.label && (
         <EdgeLabelRenderer>
           <div
@@ -80,6 +105,7 @@ function ArchitectureEdgeComponent({
               background: isActive ? color : "var(--surface-1)",
               color: isActive ? "#000" : "var(--gray-400)",
               borderColor: isActive ? color : `${color}40`,
+              opacity: isDimmed ? 0.2 : 1,
             }}
             onClick={handleClick}
           >

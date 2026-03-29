@@ -32,6 +32,31 @@ async function markProcessed(adminDb: AdminDb, deliveryId: string) {
     .eq("delivery_id", deliveryId);
 }
 
+async function registerWebhookEvent(
+  adminDb: AdminDb,
+  deliveryId: string,
+  repoFullName: string,
+  event: string,
+  payload: unknown
+) {
+  if (!deliveryId) return true;
+
+  const { error } = await adminDb.from("webhook_events").insert({
+    delivery_id: deliveryId,
+    repo_full_name: repoFullName,
+    event_type: event,
+    payload,
+    processed: false,
+  });
+
+  if (!error) return true;
+  if ((error as { code?: string }).code === "23505") {
+    return false;
+  }
+
+  throw error;
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.text();
@@ -61,9 +86,23 @@ export async function POST(request: Request) {
 
     const payload = JSON.parse(body);
     const adminDb = await createAdminClient();
+    const repoFullName = payload.repository?.full_name || "unknown/unknown";
+
+    const shouldProcess = await registerWebhookEvent(
+      adminDb,
+      deliveryId,
+      repoFullName,
+      event,
+      payload
+    );
+
+    if (!shouldProcess) {
+      return NextResponse.json({ ok: true, duplicate: true, event });
+    }
 
     if (event === "ping") {
       console.log("[webhook] Ping received for repo:", payload.repository?.full_name);
+      await markProcessed(adminDb, deliveryId);
       return NextResponse.json({ ok: true, event: "ping" });
     }
 

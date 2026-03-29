@@ -1,4 +1,6 @@
 import { ApiError, validationError } from "./errors";
+import { VALID_TARGETS } from "./prompt-types";
+import type { PromptTarget } from "./prompt-types";
 
 const REPO_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
 
@@ -35,12 +37,11 @@ export function validateApiKey(request: Request): string {
   return key;
 }
 
-export function validateTarget(input: unknown): string {
-  const valid = ["cursor", "copilot", "claude", "gpt"];
-  if (typeof input !== "string" || !valid.includes(input)) {
+export function validateTarget(input: unknown): PromptTarget {
+  if (typeof input !== "string" || !VALID_TARGETS.includes(input as PromptTarget)) {
     return "cursor"; // default
   }
-  return input;
+  return input as PromptTarget;
 }
 
 export function validateRole(input: unknown): string {
