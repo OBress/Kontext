@@ -1,22 +1,20 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { resolveAuthOrigin } from "@/lib/supabase/auth-origin";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 
 export async function signInWithGitHub() {
   const supabase = await createClient();
   const headersList = await headers();
-  const origin =
-    process.env.NODE_ENV === "production"
-      ? process.env.NEXT_PUBLIC_SITE_URL || headersList.get("origin") || "http://localhost:3000"
-      : headersList.get("origin") || process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+  const origin = resolveAuthOrigin(headersList);
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "github",
     options: {
       redirectTo: `${origin}/auth/callback`,
-      scopes: "repo read:user",
+      scopes: "repo read:user user:email",
     },
   });
 

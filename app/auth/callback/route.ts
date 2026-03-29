@@ -1,13 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { storeGitHubToken } from "@/lib/api/auth";
+import { resolveAuthOrigin } from "@/lib/supabase/auth-origin";
 import { NextResponse } from "next/server";
 
 export async function GET(request: Request) {
-  const { searchParams, origin: requestOrigin } = new URL(request.url);
-  const origin =
-    process.env.NODE_ENV === "production"
-      ? process.env.NEXT_PUBLIC_SITE_URL || requestOrigin
-      : requestOrigin;
+  const { searchParams } = new URL(request.url);
+  const origin = resolveAuthOrigin(request.headers, request.url);
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/dashboard";
 

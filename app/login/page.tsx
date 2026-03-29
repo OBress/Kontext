@@ -155,9 +155,18 @@ function LoginContent() {
               >
                 read:user
               </span>
+              <span
+                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono text-muted-foreground"
+                style={{
+                  background: "var(--alpha-white-5)",
+                  border: "1px solid var(--alpha-white-10)",
+                }}
+              >
+                user:email
+              </span>
             </div>
             <p className="text-muted-foreground text-xs font-mono my-0 leading-relaxed opacity-70">
-              Required to read repository contents and your profile.
+              Required to read repository contents and complete sign-in reliably.
             </p>
           </div>
         </div>
