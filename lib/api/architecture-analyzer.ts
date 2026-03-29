@@ -244,6 +244,12 @@ export function buildAnalysisPrompt(
     "- Use unassignedFiles for meaningful leftovers that are not confidently grouped.",
     "- Keep connections between top-level components only.",
     "- Make descriptions concise and concrete.",
+    "",
+    "Return JSON matching this exact structure:",
+    '{ "summary": "...",',
+    '  "components": [{ "id": "unique_snake_case", "label": "Human Name", "description": "...", "type": "page|api|service|worker|database|config|shared|external", "files": ["path/to/file.ts"], "children": [{ "id": "...", "label": "...", "description": "...", "type": "...", "files": [...] }] }],',
+    '  "connections": [{ "id": "src_to_tgt", "source": "component_id", "target": "component_id", "label": "...", "description": "...", "type": "api_call|import|webhook|database_query|auth|event" }],',
+    '  "unassignedFiles": ["path/to/file.ts"] }',
   ].join("\n");
 }
 
@@ -257,6 +263,17 @@ function normalizeAnalysisResponse(value: unknown): ArchitectureAnalysis {
   }
 
   const record = value as Record<string, unknown>;
+  console.log("[arch-analyzer] Response keys:", Object.keys(record));
+  console.log("[arch-analyzer] components field type:", typeof record.components, Array.isArray(record.components) ? `(${(record.components as unknown[]).length} items)` : "");
+
+  // Helper to extract a string field with fallback names
+  const str = (obj: Record<string, unknown>, ...keys: string[]): string => {
+    for (const key of keys) {
+      if (typeof obj[key] === "string" && obj[key]) return (obj[key] as string).trim();
+    }
+    return "";
+  };
+
   const components = Array.isArray(record.components)
     ? record.components
         .filter(
@@ -264,13 +281,9 @@ function normalizeAnalysisResponse(value: unknown): ArchitectureAnalysis {
             !!component && typeof component === "object"
         )
         .map((component) => ({
-          id: typeof component.id === "string" ? component.id.trim() : "",
-          label:
-            typeof component.label === "string" ? component.label.trim() : "",
-          description:
-            typeof component.description === "string"
-              ? component.description.trim()
-              : "",
+          id: str(component, "id", "identifier", "key"),
+          label: str(component, "label", "name", "title"),
+          description: str(component, "description", "desc", "summary"),
           type: isArchComponentType(component.type)
             ? component.type
             : "shared",
@@ -287,13 +300,9 @@ function normalizeAnalysisResponse(value: unknown): ArchitectureAnalysis {
                     !!child && typeof child === "object"
                 )
                 .map((child) => ({
-                  id: typeof child.id === "string" ? child.id.trim() : "",
-                  label:
-                    typeof child.label === "string" ? child.label.trim() : "",
-                  description:
-                    typeof child.description === "string"
-                      ? child.description.trim()
-                      : "",
+                  id: str(child, "id", "identifier", "key"),
+                  label: str(child, "label", "name", "title"),
+                  description: str(child, "description", "desc", "summary"),
                   type: isArchComponentType(child.type)
                     ? child.type
                     : "shared",

@@ -11,6 +11,29 @@ import {
 } from "lucide-react";
 import { RepoCheckRunState, RepoHealthSummaryState, useAppStore } from "@/lib/store/app-store";
 
+/** How recently a run must have completed to show informational (non-warning) banners */
+const FRESH_RUN_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
+function getDismissKey(repoFullName: string, runId: number): string {
+  return `kontext:banner-dismissed:${repoFullName}:${runId}`;
+}
+
+function isBannerDismissed(repoFullName: string, runId: number): boolean {
+  try {
+    return sessionStorage.getItem(getDismissKey(repoFullName, runId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setBannerDismissed(repoFullName: string, runId: number): void {
+  try {
+    sessionStorage.setItem(getDismissKey(repoFullName, runId), "1");
+  } catch {
+    // sessionStorage unavailable
+  }
+}
+
 export function RepoCheckSummaryBanner({
   repoFullName,
   checksHref,
@@ -30,10 +53,23 @@ export function RepoCheckSummaryBanner({
   const [loading, setLoading] = useState(!cachedSummary);
   const [dismissed, setDismissed] = useState(false);
 
-  // Reset dismissed state when the underlying data changes
+  // Check sessionStorage on mount and when the run changes
   useEffect(() => {
-    setDismissed(false);
-  }, [summary?.latestRun?.id]);
+    const runId = summary?.latestRun?.id;
+    if (runId) {
+      setDismissed(isBannerDismissed(repoFullName, runId));
+    } else {
+      setDismissed(false);
+    }
+  }, [repoFullName, summary?.latestRun?.id]);
+
+  const handleDismiss = useCallback(() => {
+    const runId = summary?.latestRun?.id;
+    if (runId) {
+      setBannerDismissed(repoFullName, runId);
+    }
+    setDismissed(true);
+  }, [repoFullName, summary?.latestRun?.id]);
 
   const fetchSummary = useCallback(async () => {
     if (!repoFullName) return;
@@ -116,7 +152,17 @@ export function RepoCheckSummaryBanner({
       return null;
     }
 
+    // Check if the run is recent enough to show informational banners
+    const runAge = latestRun.createdAt
+      ? Date.now() - new Date(latestRun.createdAt).getTime()
+      : Infinity;
+    const isRecent = runAge < FRESH_RUN_THRESHOLD_MS;
+
     if (!summary.isCurrent) {
+      // Only show "catching up" warnings if a newer head exists AND the run is recent.
+      // Stale out-of-date warnings are noise when the user hasn't pushed recently.
+      if (!isRecent) return null;
+
       const isVerifyingCurrentHead =
         latestRun.status === "running" &&
         latestRun.headSha &&
@@ -147,6 +193,7 @@ export function RepoCheckSummaryBanner({
       return null;
     }
 
+    // Warning banners for actual issues — always show regardless of age
     if (latestRun.newFindings > 0 || summary.openCount > 0) {
       return {
         tone: "warn" as const,
@@ -157,6 +204,9 @@ export function RepoCheckSummaryBanner({
             : `${summary.openCount} open finding${summary.openCount === 1 ? "" : "s"} need review.`,
       };
     }
+
+    // Informational "all clear" banners — only show if the run is fresh
+    if (!isRecent) return null;
 
     if (latestRun.resolvedFindings > 0) {
       return {
@@ -231,7 +281,7 @@ export function RepoCheckSummaryBanner({
           Open Checks
         </Link>
         <button
-          onClick={() => setDismissed(true)}
+          onClick={handleDismiss}
           className="p-1 rounded-md text-[var(--gray-400)] hover:text-[var(--gray-200)] hover:bg-[var(--alpha-white-5)] transition-colors cursor-pointer"
           aria-label="Dismiss banner"
         >
@@ -241,3 +291,4 @@ export function RepoCheckSummaryBanner({
     </div>
   );
 }
+

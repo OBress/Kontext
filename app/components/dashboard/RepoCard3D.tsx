@@ -12,6 +12,7 @@ import {
   Zap,
   GripVertical,
   Pin,
+  RefreshCw,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import React from "react";
@@ -57,12 +58,22 @@ export function RepoCard3D({
   const router = useRouter();
   const langColor = langColors[repo.language || ""] || "#737373";
   const ingestionStatus = useAppStore((s) => s.ingestionStatus[repo.full_name]);
+  const syncJob = useAppStore((s) => {
+    const jobs = Object.values(s.repoJobs);
+    return jobs.find(
+      (j) =>
+        j.repoFullName === repo.full_name &&
+        j.jobType === "sync" &&
+        (j.status === "queued" || j.status === "running")
+    ) || null;
+  });
 
   const isIngesting =
     ingestionStatus &&
     ingestionStatus.status !== "done" &&
     ingestionStatus.status !== "error" &&
     ingestionStatus.status !== "idle";
+  const isSyncing = !!syncJob && !isIngesting;
 
   const handleCardClick = (e: React.MouseEvent) => {
     // Don't navigate if the user clicked on the drag handle or pin icon
@@ -121,7 +132,7 @@ export function RepoCard3D({
             )}
 
             {/* Status badge */}
-            {repo.indexed && !isIngesting && (
+            {repo.indexed && !isIngesting && !isSyncing && (
               <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20">
                 <Database size={10} />
                 Indexed
@@ -133,7 +144,13 @@ export function RepoCard3D({
                 {ingestionStatus.progress}%
               </span>
             )}
-            {!repo.indexed && !isIngesting && (
+            {isSyncing && (
+              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                <RefreshCw size={10} className="animate-spin" />
+                Syncing{syncJob.progressPercent > 0 ? ` ${syncJob.progressPercent}%` : '...'}
+              </span>
+            )}
+            {!repo.indexed && !isIngesting && !isSyncing && (
               <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-mono bg-[var(--alpha-white-5)] text-[var(--gray-400)] border border-[var(--alpha-white-8)]">
                 <Zap size={10} />
                 Pending
@@ -175,6 +192,27 @@ export function RepoCard3D({
             </div>
             <p className="font-mono text-xs text-[var(--gray-500)] mt-1.5 m-0">
               {ingestionStatus.message}
+            </p>
+          </div>
+        )}
+
+        {/* Background sync progress bar */}
+        {isSyncing && (
+          <div className="mb-4">
+            <div className="w-full h-1.5 rounded-full bg-[var(--alpha-white-8)] overflow-hidden">
+              <motion.div
+                className="h-full rounded-full"
+                style={{
+                  background:
+                    "linear-gradient(90deg, #1d4ed8, #3b82f6)",
+                }}
+                initial={{ width: "0%" }}
+                animate={{ width: `${syncJob.progressPercent}%` }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+              />
+            </div>
+            <p className="font-mono text-xs text-blue-400/70 mt-1.5 m-0">
+              {syncJob.title || 'Syncing repository...'}
             </p>
           </div>
         )}

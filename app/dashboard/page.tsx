@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useAppStore } from "@/lib/store/app-store";
 import { AppShell } from "../components/shell/AppShell";
 import { SortableRepoSection } from "../components/dashboard/SortableRepoSection";
 import { ActivityFeed } from "../components/dashboard/ActivityFeed";
 import { GlowCard } from "../components/shared/GlowCard";
 import { AnimatedCounter } from "../components/shared/AnimatedCounter";
-import { Database, Code2, Users, Plus, FolderGit2 } from "lucide-react";
+import { Database, Code2, Users, Plus, FolderGit2, RefreshCw } from "lucide-react";
 import dynamic from "next/dynamic";
 
 const ParticleField = dynamic(
@@ -17,6 +17,7 @@ const ParticleField = dynamic(
 
 export default function DashboardPage() {
   const { repos, setRepos, setAddRepoModalOpen } = useAppStore();
+  const repoJobs = useAppStore((s) => s.repoJobs);
 
   // Fetch repos on mount
   useEffect(() => {
@@ -30,6 +31,20 @@ export default function DashboardPage() {
 
   const indexedRepos = repos.filter((r) => r.indexed);
   const totalChunks = repos.reduce((sum, r) => sum + r.chunk_count, 0);
+
+  // Count repos that have active sync jobs
+  const activeSyncCount = useMemo(() => {
+    const syncingRepos = new Set<string>();
+    for (const job of Object.values(repoJobs)) {
+      if (
+        job.jobType === "sync" &&
+        (job.status === "queued" || job.status === "running")
+      ) {
+        syncingRepos.add(job.repoFullName);
+      }
+    }
+    return syncingRepos.size;
+  }, [repoJobs]);
 
   return (
     <AppShell>
@@ -92,15 +107,30 @@ export default function DashboardPage() {
             <GlowCard glowColor="green" className="p-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-[var(--accent-green)]/10">
-                  <Users size={18} className="text-[var(--accent-green)]" />
+                  {activeSyncCount > 0 ? (
+                    <RefreshCw size={18} className="text-blue-400 animate-spin" />
+                  ) : (
+                    <Users size={18} className="text-[var(--accent-green)]" />
+                  )}
                 </div>
                 <div>
                   <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0">
-                    Indexed
+                    {activeSyncCount > 0 ? 'Syncing' : 'Indexed'}
                   </p>
                   <p className="font-mono text-2xl font-semibold text-[var(--gray-100)] m-0">
-                    <AnimatedCounter value={indexedRepos.length} />
+                    {activeSyncCount > 0 ? (
+                      <span className="text-blue-400">
+                        <AnimatedCounter value={activeSyncCount} />
+                      </span>
+                    ) : (
+                      <AnimatedCounter value={indexedRepos.length} />
+                    )}
                   </p>
+                  {activeSyncCount > 0 && (
+                    <p className="font-mono text-xs text-blue-400/60 m-0 mt-0.5">
+                      {indexedRepos.length} indexed
+                    </p>
+                  )}
                 </div>
               </div>
             </GlowCard>

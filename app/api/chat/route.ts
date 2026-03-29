@@ -148,7 +148,13 @@ export async function POST(request: Request) {
           )
         );
 
-        if (context.dedupedCitations.length === 0 && attachedFiles.length === 0 && attachedImages.length === 0) {
+        const hasAnyContext =
+          context.dedupedCitations.length > 0 ||
+          context.hasSupplementalContext ||
+          attachedFiles.length > 0 ||
+          attachedImages.length > 0;
+
+        if (!hasAnyContext) {
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({
@@ -173,6 +179,11 @@ export async function POST(request: Request) {
             fileManifest: context.fileManifest,
             contextBlocks: context.contextBlocks,
             timelineBlocks: context.timelineBlocks,
+            recentCommitsBlock: context.recentCommitsBlock || undefined,
+            architectureBlock: context.architectureBlock || undefined,
+            healthFindingsBlock: context.healthFindingsBlock || undefined,
+            activityBlock: context.activityBlock || undefined,
+            repoMetadataBlock: context.repoMetadataBlock || undefined,
             attachedFileBlocks: attachedFileBlocks || undefined,
             imageParts: attachedImages.length > 0 ? attachedImages : undefined,
           });

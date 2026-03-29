@@ -178,17 +178,26 @@ export async function POST(request: Request) {
             matchCount: 12,
           });
 
-          const answer =
-            context.dedupedCitations.length === 0
-              ? "Insufficient evidence from the indexed repository."
-              : await answerRepoQuestion({
-                  apiKey,
-                  repoFullName: context.repoLabel,
-                  question: args.question,
-                  fileManifest: context.fileManifest,
-                  contextBlocks: context.contextBlocks,
-                  timelineBlocks: context.timelineBlocks,
-                });
+          const hasContext =
+            context.dedupedCitations.length > 0 ||
+            context.hasSupplementalContext;
+
+          const answer = !hasContext
+            ? "Insufficient evidence from the indexed repository."
+            : await answerRepoQuestion({
+                apiKey,
+                repoFullName: context.repoLabel,
+                question: args.question,
+                fileManifest: context.fileManifest,
+                contextBlocks: context.contextBlocks,
+                timelineBlocks: context.timelineBlocks,
+                recentCommitsBlock: context.recentCommitsBlock || undefined,
+                architectureBlock: context.architectureBlock || undefined,
+                healthFindingsBlock:
+                  context.healthFindingsBlock || undefined,
+                activityBlock: context.activityBlock || undefined,
+                repoMetadataBlock: context.repoMetadataBlock || undefined,
+              });
 
           result = {
             answer,

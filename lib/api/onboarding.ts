@@ -1022,12 +1022,19 @@ export function buildOnboardingPrompt(params: {
     evidencePack,
     "",
     "Walkthrough requirements:",
-    "- Return JSON matching the requested schema.",
+    "- Return JSON matching the structure below.",
     "- Produce 5 to 7 steps.",
     "- Include exactly 1 quiz step and exactly 1 acknowledgement step.",
     "- Sequence the walkthrough from orientation, to local workflow, to key systems, to practical exploration, then reinforcement.",
     "- Mention concrete directories, files, commands, or systems when supported by the evidence.",
     "- Keep each step concise and useful.",
+    "",
+    "Return JSON matching this exact structure:",
+    '{ "title": "...", "description": "...",',
+    '  "steps": [{ "step_type": "orientation|local_workflow|system_deep_dive|exploration|quiz|acknowledgement",',
+    '    "title": "...", "description": "...", "content": "markdown content...",',
+    '    "quiz_payload": { "question": "...", "options": ["A","B","C","D"], "correct_option_index": 0, "explanation": "..." } }] }',
+    "Note: quiz_payload is only required for quiz steps.",
   ].join("\n");
 }
 

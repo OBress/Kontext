@@ -1,13 +1,14 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { useAppStore } from "@/lib/store/app-store";
+import { useAppStore, type RepoJobState } from "@/lib/store/app-store";
 import { GlowCard } from "@/app/components/shared/GlowCard";
 import { AnimatedCounter } from "@/app/components/shared/AnimatedCounter";
 import { RepoHealthCard } from "@/app/components/repo/RepoHealthCard";
 import { RepoCheckSummaryBanner } from "@/app/components/repo/RepoCheckSummaryBanner";
 import { SyncStatusCard } from "@/app/components/repo/SyncPanel";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Database,
   MessageSquare,
@@ -19,6 +20,7 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  RefreshCw,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -32,6 +34,44 @@ export default function RepoOverviewPage() {
     s.repos.find((r) => r.full_name === fullName)
   );
   const ingestionStatus = useAppStore((s) => s.ingestionStatus[fullName]);
+  const repoJobs = useAppStore((s) => s.repoJobs);
+
+  // Find the latest sync job for this repo
+  const syncJob = useMemo(() => {
+    const jobs = Object.values(repoJobs)
+      .filter(
+        (j: RepoJobState) =>
+          j.repoFullName === fullName && j.jobType === "sync"
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      );
+    return jobs[0] || null;
+  }, [repoJobs, fullName]);
+
+  const isSyncRunning =
+    syncJob &&
+    (syncJob.status === "queued" || syncJob.status === "running");
+  const isSyncDone = syncJob?.status === "completed";
+  const isSyncFailed = syncJob?.status === "failed";
+
+  // Auto-dismiss sync completion toast after 8 seconds
+  const [showSyncDone, setShowSyncDone] = useState(false);
+  useEffect(() => {
+    if (isSyncDone) {
+      setShowSyncDone(true);
+      const timeout = setTimeout(() => setShowSyncDone(false), 8000);
+      return () => clearTimeout(timeout);
+    }
+    setShowSyncDone(false);
+  }, [isSyncDone, syncJob?.updatedAt]);
+
+  const syncMeta = syncJob?.metadata as Record<string, unknown> | undefined;
+  const syncBaseSha = (syncMeta?.baseSha as string) || null;
+  const syncHeadSha = (syncMeta?.headSha as string) || null;
+  const syncFilesChanged = (syncMeta?.filesChanged as number) || 0;
+  const syncPhase = (syncMeta?.phase as string) || null;
 
   const isIngesting =
     ingestionStatus &&
@@ -161,6 +201,121 @@ export default function RepoOverviewPage() {
         </motion.div>
       )}
 
+      {/* Background Sync Progress Banner */}
+      <AnimatePresence>
+        {isSyncRunning && !isIngesting && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.3 }}
+          >
+            <GlowCard glowColor="cyan" className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <RefreshCw size={18} className="text-blue-400 animate-spin" />
+                <h3 className="font-mono text-sm font-medium text-[var(--gray-200)] m-0">
+                  {syncJob.title || 'Syncing Repository...'}
+                </h3>
+                {syncJob.progressPercent > 0 && (
+                  <span className="ml-auto font-mono text-lg font-semibold text-blue-400">
+                    {syncJob.progressPercent}%
+                  </span>
+                )}
+              </div>
+
+              {/* Progress bar */}
+              <div className="w-full h-2 rounded-full bg-[var(--alpha-white-8)] overflow-hidden mb-4">
+                <motion.div
+                  className="h-full rounded-full"
+                  style={{
+                    background: "linear-gradient(90deg, #1d4ed8, #3b82f6)",
+                  }}
+                  initial={{ width: "0%" }}
+                  animate={{ width: `${syncJob.progressPercent}%` }}
+                  transition={{ duration: 0.4, ease: "easeOut" }}
+                />
+              </div>
+
+              {/* Metadata grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div>
+                  <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Phase</p>
+                  <p className="font-mono text-xs text-blue-300 m-0 capitalize">
+                    {syncPhase || syncJob.status}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Trigger</p>
+                  <p className="font-mono text-xs text-[var(--gray-200)] m-0 capitalize">
+                    {syncJob.trigger}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Files</p>
+                  <p className="font-mono text-xs text-[var(--gray-200)] m-0">
+                    {syncFilesChanged > 0 ? `${syncFilesChanged} changed` : '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Range</p>
+                  <p className="font-mono text-xs text-[var(--gray-200)] m-0">
+                    {syncBaseSha && syncHeadSha
+                      ? `${syncBaseSha.slice(0, 7)} → ${syncHeadSha.slice(0, 7)}`
+                      : '—'}
+                  </p>
+                </div>
+              </div>
+            </GlowCard>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Sync Complete Toast */}
+      <AnimatePresence>
+        {showSyncDone && !isIngesting && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.3 }}
+          >
+            <GlowCard glowColor="cyan" className="p-5">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 size={16} className="text-blue-400" />
+                <h3 className="font-mono text-sm font-medium text-blue-400 m-0">
+                  Sync Complete
+                </h3>
+                <span className="ml-auto font-mono text-xs text-[var(--gray-400)]">
+                  {syncJob?.resultSummary || `${syncFilesChanged} files synced`}
+                </span>
+              </div>
+            </GlowCard>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Sync Failed Alert */}
+      <AnimatePresence>
+        {isSyncFailed && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+          >
+            <GlowCard glowColor="none" className="p-5 border-[var(--accent-red)]/20">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertCircle size={16} className="text-[var(--accent-red)]" />
+                <h3 className="font-mono text-sm font-medium text-[var(--accent-red)] m-0">
+                  Sync Failed
+                </h3>
+              </div>
+              <p className="font-mono text-xs text-[var(--gray-400)] m-0">
+                {syncJob?.errorMessage || 'An unknown error occurred during sync.'}
+              </p>
+            </GlowCard>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {repo?.indexed && (
         <RepoCheckSummaryBanner
           repoFullName={fullName}

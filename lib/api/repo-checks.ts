@@ -685,7 +685,7 @@ export function buildRepoCheckPrompt(params: {
     evidencePack,
     "",
     "Output requirements:",
-    "- Return JSON matching the requested schema.",
+    "- Return JSON matching the structure below.",
     "- Only include requested lanes.",
     "- Cap each lane at 5 findings.",
     "- Prefer 0 findings over weak speculation.",
@@ -694,6 +694,16 @@ export function buildRepoCheckPrompt(params: {
     "- Severity reflects impact, not certainty.",
     "- For consistency, focus on duplicate patterns, mixed endpoint or data-access styles, or multiple ways of doing the same job.",
     "- For change_impact, focus on likely regressions, incomplete fixes, or missing follow-up work implied by the change.",
+    "",
+    "Return JSON matching this exact structure:",
+    '{ "overall_summary": "...",',
+    '  "checks": {',
+    '    "<lane_name>": {',
+    '      "summary": "...",',
+    '      "findings": [{ "fingerprint_key": "stable_id", "title": "...", "summary": "...", "severity": "low|medium|high|critical", "confidence": 0.7, "category": "...", "file_path": "...", "symbol": "...", "evidence": "...", "recommendation": "...", "related_files": ["..."] }]',
+    "    }",
+    "  }",
+    "}",
   ].join("\n");
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   IngestionState,
@@ -182,102 +182,97 @@ export function TaskIndicator() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
+  // Adaptive polling: 3s when active jobs exist, 15s when idle
+  const pollIntervalRef = useRef<number | null>(null);
+  const hasActiveRef = useRef(false);
 
-    const fetchTaskData = async () => {
-      try {
-        const [checkRes, jobRes] = await Promise.all([
-          fetch("/api/repos/checks/runs?limit=12"),
-          fetch("/api/jobs?limit=12"),
-        ]);
+  const fetchTaskData = useCallback(async () => {
+    try {
+      const [checkRes, jobRes] = await Promise.all([
+        fetch("/api/repos/checks/runs?limit=12"),
+        fetch("/api/jobs?limit=12"),
+      ]);
 
-        if (cancelled) return;
+      if (checkRes.ok) {
+        const data = await checkRes.json();
+        const runs = Array.isArray(data.runs)
+          ? data.runs.map(
+            (run: {
+              id: number;
+              repo_full_name: string;
+              status: RepoCheckRunState["status"];
+              trigger_mode: RepoCheckRunState["triggerMode"];
+              summary: string | null;
+              findings_total: number;
+              new_findings: number;
+              resolved_findings: number;
+              unchanged_findings: number;
+              head_sha: string | null;
+              created_at: string;
+            }): RepoCheckRunState => ({
+              id: run.id,
+              repoFullName: run.repo_full_name,
+              status: run.status,
+              triggerMode: run.trigger_mode,
+              summary: run.summary,
+              findingsTotal: run.findings_total || 0,
+              newFindings: run.new_findings || 0,
+              resolvedFindings: run.resolved_findings || 0,
+              unchangedFindings: run.unchanged_findings || 0,
+              headSha: run.head_sha,
+              createdAt: run.created_at,
+            })
+          )
+          : [];
 
-        if (checkRes.ok) {
-          const data = await checkRes.json();
-          const runs = Array.isArray(data.runs)
-            ? data.runs.map(
-              (run: {
+        setRepoCheckRuns(runs);
+      }
+
+      if (jobRes.ok) {
+        const data = await jobRes.json();
+        const jobs = Array.isArray(data.jobs)
+          ? data.jobs.map(
+              (job: {
                 id: number;
                 repo_full_name: string;
-                status: RepoCheckRunState["status"];
-                trigger_mode: RepoCheckRunState["triggerMode"];
-                summary: string | null;
-                findings_total: number;
-                new_findings: number;
-                resolved_findings: number;
-                unchanged_findings: number;
-                head_sha: string | null;
+                job_type: RepoJobState["jobType"];
+                trigger: RepoJobState["trigger"];
+                status: RepoJobState["status"];
+                title: string | null;
+                progress_percent: number;
+                result_summary: string | null;
+                error_message: string | null;
+                metadata: Record<string, unknown> | null;
                 created_at: string;
-              }): RepoCheckRunState => ({
-                id: run.id,
-                repoFullName: run.repo_full_name,
-                status: run.status,
-                triggerMode: run.trigger_mode,
-                summary: run.summary,
-                findingsTotal: run.findings_total || 0,
-                newFindings: run.new_findings || 0,
-                resolvedFindings: run.resolved_findings || 0,
-                unchangedFindings: run.unchanged_findings || 0,
-                headSha: run.head_sha,
-                createdAt: run.created_at,
+                updated_at: string;
+              }): RepoJobState => ({
+                id: job.id,
+                repoFullName: job.repo_full_name,
+                jobType: job.job_type,
+                trigger: job.trigger,
+                status: job.status,
+                title: job.title,
+                progressPercent: job.progress_percent || 0,
+                resultSummary: job.result_summary,
+                errorMessage: job.error_message,
+                createdAt: job.created_at,
+                updatedAt: job.updated_at,
+                metadata: job.metadata || {},
               })
             )
-            : [];
+          : [];
 
-          setRepoCheckRuns(runs);
-        }
-
-        if (jobRes.ok) {
-          const data = await jobRes.json();
-          const jobs = Array.isArray(data.jobs)
-            ? data.jobs.map(
-                (job: {
-                  id: number;
-                  repo_full_name: string;
-                  job_type: RepoJobState["jobType"];
-                  trigger: RepoJobState["trigger"];
-                  status: RepoJobState["status"];
-                  title: string | null;
-                  progress_percent: number;
-                  result_summary: string | null;
-                  error_message: string | null;
-                  metadata: Record<string, unknown> | null;
-                  created_at: string;
-                  updated_at: string;
-                }): RepoJobState => ({
-                  id: job.id,
-                  repoFullName: job.repo_full_name,
-                  jobType: job.job_type,
-                  trigger: job.trigger,
-                  status: job.status,
-                  title: job.title,
-                  progressPercent: job.progress_percent || 0,
-                  resultSummary: job.result_summary,
-                  errorMessage: job.error_message,
-                  createdAt: job.created_at,
-                  updatedAt: job.updated_at,
-                  metadata: job.metadata || {},
-                })
-              )
-            : [];
-
-          setRepoJobs(jobs);
-        }
-      } catch {
-        // Ignore polling errors for the task indicator.
+        setRepoJobs(jobs);
       }
-    };
-
-    fetchTaskData();
-    const interval = window.setInterval(fetchTaskData, 15000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
+    } catch {
+      // Ignore polling errors for the task indicator.
+    }
   }, [setRepoCheckRuns, setRepoJobs]);
+
+  // Initial fetch
+  useEffect(() => {
+    fetchTaskData();
+  }, [fetchTaskData]);
 
   // Poll for updates on repos without webhooks (5-minute interval)
   useEffect(() => {
@@ -346,6 +341,26 @@ export function TaskIndicator() {
         ? task.checkRun.status === "queued" || task.checkRun.status === "running"
         : task.repoJob.status === "queued" || task.repoJob.status === "running"
   );
+
+  // Adaptive polling: restart interval at 3s when active, 15s when idle
+  useEffect(() => {
+    const hasAny = activeTasks.length > 0;
+    if (hasAny === hasActiveRef.current && pollIntervalRef.current) return;
+    hasActiveRef.current = hasAny;
+
+    if (pollIntervalRef.current) {
+      window.clearInterval(pollIntervalRef.current);
+    }
+    const ms = hasAny ? 3000 : 15000;
+    pollIntervalRef.current = window.setInterval(fetchTaskData, ms);
+
+    return () => {
+      if (pollIntervalRef.current) {
+        window.clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, [activeTasks.length, fetchTaskData]);
   const completedTasks = tasks.filter((task) =>
     task.kind === "ingestion"
       ? task.ingestion.status === "done"
