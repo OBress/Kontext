@@ -90,7 +90,14 @@ export async function DELETE(request: Request) {
       .eq("user_id", user.id)
       .eq("repo_full_name", fullName);
 
-    // 4d. chat_sessions
+    // 4d. repo_commits (timeline / development history)
+    await adminDb
+      .from("repo_commits")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("repo_full_name", fullName);
+
+    // 4e. chat_sessions
     await adminDb
       .from("chat_sessions")
       .delete()

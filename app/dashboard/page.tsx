@@ -169,7 +169,12 @@ export default function DashboardPage() {
             </div>
 
             <div className="hidden lg:block">
-              <ActivityFeed />
+              <GlowCard
+                glowColor="green"
+                className="h-[min(72vh,760px)] min-h-[440px] overflow-hidden p-4"
+              >
+                <ActivityFeed />
+              </GlowCard>
             </div>
           </div>
         </div>

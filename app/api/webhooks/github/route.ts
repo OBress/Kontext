@@ -1,19 +1,37 @@
+import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/api/auth";
-import crypto from "crypto";
-import { logActivity } from "@/lib/api/activity";
 import { resolveAiKey } from "@/lib/api/ai-key";
+import { logActivity } from "@/lib/api/activity";
 import { summarizeAndEmbedCommits } from "@/lib/api/timeline-ai";
-
 
 const WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || "";
 
-/**
- * POST /api/webhooks/github — Receives GitHub push events
- *
- * Validates signature, deduplicates by delivery ID, and triggers
- * incremental sync for repos with auto_sync_enabled.
- */
+interface WebhookCommit {
+  id: string;
+  message: string;
+  timestamp: string;
+  author?: { name?: string };
+  added?: string[];
+  modified?: string[];
+  removed?: string[];
+}
+
+type AdminDb = Awaited<ReturnType<typeof createAdminClient>>;
+
+function formatWorkflowConclusion(conclusion?: string | null) {
+  return (conclusion || "completed").replace(/_/g, " ");
+}
+
+async function markProcessed(adminDb: AdminDb, deliveryId: string) {
+  if (!deliveryId) return;
+
+  await adminDb
+    .from("webhook_events")
+    .update({ processed: true })
+    .eq("delivery_id", deliveryId);
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.text();
@@ -21,22 +39,22 @@ export async function POST(request: Request) {
     const deliveryId = request.headers.get("x-github-delivery") || "";
     const event = request.headers.get("x-github-event") || "";
 
-    // ── Validate webhook secret ──
     if (!WEBHOOK_SECRET) {
       console.error("[webhook] GITHUB_WEBHOOK_SECRET not configured");
       return NextResponse.json({ error: "Webhook not configured" }, { status: 500 });
     }
 
-    // Verify HMAC-SHA256 signature
-    const expected = "sha256=" + crypto
-      .createHmac("sha256", WEBHOOK_SECRET)
-      .update(body)
-      .digest("hex");
+    const expected =
+      "sha256=" +
+      crypto.createHmac("sha256", WEBHOOK_SECRET).update(body).digest("hex");
 
     const sigBuffer = Buffer.from(signature);
     const expectedBuffer = Buffer.from(expected);
 
-    if (sigBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
+    if (
+      sigBuffer.length !== expectedBuffer.length ||
+      !crypto.timingSafeEqual(sigBuffer, expectedBuffer)
+    ) {
       console.warn("[webhook] Invalid signature for delivery:", deliveryId);
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }
@@ -44,41 +62,40 @@ export async function POST(request: Request) {
     const payload = JSON.parse(body);
     const adminDb = await createAdminClient();
 
-    // ── Handle ping (webhook health check) ──
     if (event === "ping") {
       console.log("[webhook] Ping received for repo:", payload.repository?.full_name);
       return NextResponse.json({ ok: true, event: "ping" });
     }
 
-    // ── Handle push events ──
     if (event === "push") {
       const repoFullName = payload.repository?.full_name;
       const branch = payload.ref?.replace("refs/heads/", "") || "";
       const headSHA = payload.after;
-      const commits = payload.commits || [];
+      const commits = (payload.commits || []) as WebhookCommit[];
       const pusher = payload.pusher?.name || payload.sender?.login || "Unknown";
 
       if (!repoFullName || !headSHA) {
         return NextResponse.json({ error: "Invalid push payload" }, { status: 400 });
       }
 
-      // Log activity for all users who have this repo
       const { data: repos } = await adminDb
         .from("repos")
-        .select("id, user_id, full_name, watched_branch, last_synced_sha, auto_sync_enabled")
+        .select(
+          "id, user_id, full_name, watched_branch, last_synced_sha, auto_sync_enabled"
+        )
         .eq("full_name", repoFullName);
 
       if (repos) {
         for (const repo of repos) {
-          // Log the push activity event
           const commitCount = commits.length;
           const latestMessage = commits[commits.length - 1]?.message || "";
+
           logActivity({
             userId: repo.user_id,
-            repoFullName: repoFullName,
+            repoFullName,
             source: "github",
             eventType: "push",
-            title: `${commitCount} commit${commitCount !== 1 ? "s" : ""} pushed to ${branch}`,
+            title: `${commitCount} commit${commitCount === 1 ? "" : "s"} pushed to ${branch}`,
             description: latestMessage.split("\n")[0].slice(0, 120),
             metadata: {
               sha: headSHA,
@@ -89,31 +106,28 @@ export async function POST(request: Request) {
             },
           });
 
-          // ── Store commits in repo_commits with push grouping ──
-          interface WebhookCommit {
-            id: string;
-            message: string;
-            timestamp: string;
-            author?: { name?: string };
-            added?: string[];
-            modified?: string[];
-            removed?: string[];
-          }
-          const commitRows = commits.map((c: WebhookCommit) => ({
+          const pushGroupId = deliveryId || `push-${Date.now()}`;
+          const commitRows = commits.map((commit) => ({
             user_id: repo.user_id,
             repo_full_name: repoFullName,
-            sha: c.id,
-            message: c.message,
-            author_name: c.author?.name || pusher,
+            sha: commit.id,
+            message: commit.message,
+            author_name: commit.author?.name || pusher,
             author_avatar_url: payload.sender?.avatar_url || null,
-            committed_at: c.timestamp || new Date().toISOString(),
+            committed_at: commit.timestamp || new Date().toISOString(),
             files_changed: [
-              ...(c.added || []).map((f: string) => ({ path: f, status: "added" })),
-              ...(c.modified || []).map((f: string) => ({ path: f, status: "modified" })),
-              ...(c.removed || []).map((f: string) => ({ path: f, status: "removed" })),
+              ...(commit.added || []).map((path) => ({ path, status: "added" })),
+              ...(commit.modified || []).map((path) => ({
+                path,
+                status: "modified",
+              })),
+              ...(commit.removed || []).map((path) => ({
+                path,
+                status: "removed",
+              })),
             ],
-            push_group_id: deliveryId || `push-${Date.now()}`,
-            sync_triggered: !!repo.auto_sync_enabled,
+            push_group_id: pushGroupId,
+            sync_triggered: Boolean(repo.auto_sync_enabled),
           }));
 
           if (commitRows.length > 0) {
@@ -123,21 +137,22 @@ export async function POST(request: Request) {
             });
           }
 
-          // ── AI Summarize commits (fire-and-forget) ──
           resolveAiKey(repo.user_id)
             .then(async (aiKey) => {
               if (!aiKey || commitRows.length === 0) return;
+
               try {
-                const commitsForAi = commitRows.map((r: { sha: string; message: string; files_changed: { path: string; status: string }[] }) => ({
-                  sha: r.sha,
-                  message: r.message,
-                  files_changed: r.files_changed,
+                const commitsForAi = commitRows.map((row) => ({
+                  sha: row.sha,
+                  message: row.message,
+                  files_changed: row.files_changed,
                 }));
                 const { summaries, embeddings } = await summarizeAndEmbedCommits(
                   aiKey,
                   commitsForAi
                 );
-                for (let i = 0; i < commitRows.length; i++) {
+
+                for (let i = 0; i < commitRows.length; i += 1) {
                   await adminDb
                     .from("repo_commits")
                     .update({
@@ -148,20 +163,24 @@ export async function POST(request: Request) {
                     .eq("repo_full_name", repoFullName)
                     .eq("sha", commitRows[i].sha);
                 }
+
                 console.log(
                   `[webhook] AI summaries generated for ${summaries.length} commits on ${repoFullName}`
                 );
-              } catch (err) {
-                console.warn("[webhook] AI summary generation failed:", err);
+              } catch (error) {
+                console.warn("[webhook] AI summary generation failed:", error);
               }
             })
             .catch(() => {});
 
-          // Trigger auto-sync if enabled
           if (repo.auto_sync_enabled) {
             const watchedBranch = repo.watched_branch || "main";
             if (branch === watchedBranch && repo.last_synced_sha !== headSHA) {
-              const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.VERCEL_URL || "http://localhost:3000";
+              const baseUrl =
+                process.env.NEXT_PUBLIC_SITE_URL ||
+                process.env.VERCEL_URL ||
+                "http://localhost:3000";
+
               fetch(`${baseUrl}/api/repos/sync`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -171,31 +190,30 @@ export async function POST(request: Request) {
                   head_sha: headSHA,
                   webhook_triggered: true,
                 }),
-              }).catch((err) => {
-                console.error("[webhook] Failed to trigger sync for", repoFullName, err.message);
+              }).catch((error) => {
+                console.error(
+                  "[webhook] Failed to trigger sync for",
+                  repoFullName,
+                  error.message
+                );
               });
             }
           }
         }
       }
 
-      // Mark webhook as processed
-      if (deliveryId) {
-        await adminDb
-          .from("webhook_events")
-          .update({ processed: true })
-          .eq("delivery_id", deliveryId);
-      }
+      await markProcessed(adminDb, deliveryId);
 
-      console.log(`[webhook] Push to ${repoFullName}/${branch} — ${commits.length} commits`);
+      console.log(
+        `[webhook] Push to ${repoFullName}/${branch} - ${commits.length} commits`
+      );
       return NextResponse.json({ ok: true, event: "push" });
     }
 
-    // ── Handle pull_request events ──
     if (event === "pull_request") {
       const pr = payload.pull_request;
       const repoFullName = payload.repository?.full_name;
-      const action = payload.action; // opened, closed, merged, etc.
+      const action = payload.action;
 
       if (repoFullName && pr) {
         const { data: repos } = await adminDb
@@ -206,6 +224,7 @@ export async function POST(request: Request) {
         if (repos) {
           const isMerged = action === "closed" && pr.merged;
           const verb = isMerged ? "merged" : action;
+
           for (const repo of repos) {
             logActivity({
               userId: repo.user_id,
@@ -226,13 +245,10 @@ export async function POST(request: Request) {
         }
       }
 
-      if (deliveryId) {
-        await adminDb.from("webhook_events").update({ processed: true }).eq("delivery_id", deliveryId);
-      }
+      await markProcessed(adminDb, deliveryId);
       return NextResponse.json({ ok: true, event: "pull_request" });
     }
 
-    // ── Handle issues events ──
     if (event === "issues") {
       const issue = payload.issue;
       const repoFullName = payload.repository?.full_name;
@@ -264,15 +280,12 @@ export async function POST(request: Request) {
         }
       }
 
-      if (deliveryId) {
-        await adminDb.from("webhook_events").update({ processed: true }).eq("delivery_id", deliveryId);
-      }
+      await markProcessed(adminDb, deliveryId);
       return NextResponse.json({ ok: true, event: "issues" });
     }
 
-    // ── Handle create events (branch/tag) ──
     if (event === "create") {
-      const refType = payload.ref_type; // branch or tag
+      const refType = payload.ref_type;
       const ref = payload.ref;
       const repoFullName = payload.repository?.full_name;
 
@@ -290,19 +303,20 @@ export async function POST(request: Request) {
               source: "github",
               eventType: "create",
               title: `${refType} "${ref}" created`,
-              metadata: { ref_type: refType, ref, sender: payload.sender?.login },
+              metadata: {
+                ref_type: refType,
+                ref,
+                sender: payload.sender?.login,
+              },
             });
           }
         }
       }
 
-      if (deliveryId) {
-        await adminDb.from("webhook_events").update({ processed: true }).eq("delivery_id", deliveryId);
-      }
+      await markProcessed(adminDb, deliveryId);
       return NextResponse.json({ ok: true, event: "create" });
     }
 
-    // ── Handle release events ──
     if (event === "release" && payload.action === "published") {
       const release = payload.release;
       const repoFullName = payload.repository?.full_name;
@@ -332,18 +346,54 @@ export async function POST(request: Request) {
         }
       }
 
-      if (deliveryId) {
-        await adminDb.from("webhook_events").update({ processed: true }).eq("delivery_id", deliveryId);
-      }
+      await markProcessed(adminDb, deliveryId);
       return NextResponse.json({ ok: true, event: "release" });
     }
 
-    // ── Unhandled event type — skip ──
-    if (deliveryId) {
-      await adminDb.from("webhook_events").update({ processed: true }).eq("delivery_id", deliveryId);
-    }
-    return NextResponse.json({ ok: true, event, skipped: true });
+    if (event === "workflow_run") {
+      const workflowRun = payload.workflow_run;
+      const repoFullName = payload.repository?.full_name;
 
+      if (repoFullName && workflowRun && payload.action === "completed") {
+        const { data: repos } = await adminDb
+          .from("repos")
+          .select("user_id")
+          .eq("full_name", repoFullName);
+
+        if (repos) {
+          const conclusion = formatWorkflowConclusion(workflowRun.conclusion);
+          const branch = workflowRun.head_branch || "unknown";
+
+          for (const repo of repos) {
+            logActivity({
+              userId: repo.user_id,
+              repoFullName,
+              source: "github",
+              eventType: "workflow_run",
+              title: `${workflowRun.name || "Workflow"} ${conclusion}`,
+              description:
+                workflowRun.display_title?.slice(0, 120) || `Branch: ${branch}`,
+              metadata: {
+                run_id: workflowRun.id,
+                branch,
+                status: workflowRun.status,
+                conclusion: workflowRun.conclusion,
+                event: workflowRun.event,
+                actor: payload.sender?.login,
+                avatar_url: payload.sender?.avatar_url,
+                html_url: workflowRun.html_url,
+              },
+            });
+          }
+        }
+      }
+
+      await markProcessed(adminDb, deliveryId);
+      return NextResponse.json({ ok: true, event: "workflow_run" });
+    }
+
+    await markProcessed(adminDb, deliveryId);
+    return NextResponse.json({ ok: true, event, skipped: true });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error("[webhook] Error:", message);

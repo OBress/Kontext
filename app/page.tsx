@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAppStore, Repo } from "@/lib/store/app-store";
 import { AppShell } from "./components/shell/AppShell";
-import { Database, Plus, GitBranch, Sparkles, LogIn } from "lucide-react";
+import { Database, Plus, GitBranch, Sparkles, LogIn, LayoutDashboard } from "lucide-react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { ConstellationNode } from "./components/dashboard/RepoConstellation";
@@ -107,7 +107,7 @@ export default function HomePage() {
   );
 
   return (
-    <AppShell>
+    <AppShell hideRail>
       <ParticleField />
       <div className="relative z-10 mx-auto">
         {/* Always show the constellation hero */}
@@ -122,23 +122,34 @@ export default function HomePage() {
               3D architecture visualization, and team onboarding.
             </p>
 
-            {isAuthenticated ? (
-              <button
-                onClick={() => setAddRepoModalOpen(true)}
-                className="flex items-center gap-2 px-6 py-3 rounded-xl font-mono text-sm bg-[var(--accent-green)] text-black font-medium hover:opacity-90 transition-all cursor-pointer border-none hover:shadow-[0_0_30px_rgba(63,185,80,0.2)] active:scale-[0.98] mb-12"
-              >
-                <Plus size={16} />
-                Add Repository
-              </button>
-            ) : (
-              <button
-                onClick={() => router.push("/login")}
-                className="flex items-center gap-2 px-6 py-3 rounded-xl font-mono text-sm bg-[var(--accent-green)] text-black font-medium hover:opacity-90 transition-all cursor-pointer border-none hover:shadow-[0_0_30px_rgba(63,185,80,0.2)] active:scale-[0.98] mb-12"
-              >
-                <LogIn size={16} />
-                Sign in with GitHub
-              </button>
-            )}
+            <div className="flex items-center gap-3 mb-12">
+              {isAuthenticated ? (
+                <>
+                  <button
+                    onClick={() => setAddRepoModalOpen(true)}
+                    className="flex items-center gap-2 px-6 py-3 rounded-xl font-mono text-sm bg-[var(--accent-green)] text-black font-medium hover:opacity-90 transition-all cursor-pointer border-none hover:shadow-[0_0_30px_rgba(63,185,80,0.2)] active:scale-[0.98]"
+                  >
+                    <Plus size={16} />
+                    Add Repository
+                  </button>
+                  <button
+                    onClick={() => router.push("/dashboard")}
+                    className="flex items-center gap-2 px-6 py-3 rounded-xl font-mono text-sm bg-[var(--alpha-white-10)] text-[var(--gray-100)] font-medium hover:bg-[var(--alpha-white-15)] transition-all cursor-pointer border border-[var(--alpha-white-10)] hover:border-[var(--alpha-white-20)] active:scale-[0.98]"
+                  >
+                    <LayoutDashboard size={16} />
+                    Dashboard
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => router.push("/login")}
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl font-mono text-sm bg-[var(--accent-green)] text-black font-medium hover:opacity-90 transition-all cursor-pointer border-none hover:shadow-[0_0_30px_rgba(63,185,80,0.2)] active:scale-[0.98]"
+                >
+                  <LogIn size={16} />
+                  Sign in with GitHub
+                </button>
+              )}
+            </div>
 
             {/* Feature hints */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">

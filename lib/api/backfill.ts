@@ -2,7 +2,7 @@ import { logActivity } from "./activity";
 
 /**
  * Backfill recent GitHub activity for a newly added repo.
- * Fetches recent commits, PRs, and issues via the GitHub REST API
+ * Fetches recent commits, PRs, issues, and workflow runs via the GitHub REST API
  * and logs them as activity events so the feed isn't empty.
  *
  * Fire-and-forget — errors are logged but never thrown.
@@ -21,11 +21,12 @@ export async function backfillRepoActivity(params: {
   };
 
   try {
-    // Fetch recent commits, PRs, and issues in parallel
-    const [commitsRes, prsRes, issuesRes] = await Promise.allSettled([
+    // Fetch recent commits, PRs, issues, and workflow runs in parallel
+    const [commitsRes, prsRes, issuesRes, workflowRunsRes] = await Promise.allSettled([
       fetch(`https://api.github.com/repos/${owner}/${name}/commits?per_page=${limit}`, { headers }),
       fetch(`https://api.github.com/repos/${owner}/${name}/pulls?state=all&sort=updated&per_page=${limit}`, { headers }),
       fetch(`https://api.github.com/repos/${owner}/${name}/issues?state=all&sort=updated&per_page=${limit}&filter=all`, { headers }),
+      fetch(`https://api.github.com/repos/${owner}/${name}/actions/runs?per_page=${limit}`, { headers }),
     ]);
 
     // Process commits
@@ -96,6 +97,49 @@ export async function backfillRepoActivity(params: {
             action: verb,
             author: issue.user?.login,
             avatar_url: issue.user?.avatar_url,
+            backfilled: true,
+          },
+        });
+      }
+    }
+
+    // Process workflow runs
+    if (workflowRunsRes.status === "fulfilled" && workflowRunsRes.value.ok) {
+      const data: {
+        workflow_runs?: Array<{
+          id: number;
+          name?: string;
+          display_title?: string;
+          status?: string;
+          conclusion?: string | null;
+          head_branch?: string;
+          event?: string;
+          actor?: { login?: string; avatar_url?: string };
+        }>;
+      } = await workflowRunsRes.value.json();
+
+      const workflowRuns = (data.workflow_runs || []).filter(
+        (run) => run.status === "completed"
+      );
+
+      for (const run of workflowRuns.slice(0, 5)) {
+        const conclusion = (run.conclusion || "completed").replace(/_/g, " ");
+        const branch = run.head_branch || "unknown";
+
+        logActivity({
+          userId,
+          repoFullName,
+          source: "github",
+          eventType: "workflow_run",
+          title: `${run.name || "Workflow"} ${conclusion}`,
+          description: run.display_title?.slice(0, 120) || `Branch: ${branch}`,
+          metadata: {
+            run_id: run.id,
+            branch,
+            conclusion: run.conclusion,
+            event: run.event,
+            actor: run.actor?.login,
+            avatar_url: run.actor?.avatar_url,
             backfilled: true,
           },
         });

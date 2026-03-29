@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAppStore } from "@/lib/store/app-store";
 import { useCurrentRepo } from "@/hooks/use-current-repo";
 import {
@@ -15,9 +15,7 @@ import {
   ChevronRight,
   BarChart3,
   History,
-  Sparkles,
   Search,
-  RefreshCw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -72,6 +70,7 @@ export default function TimelinePage() {
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [backfilling, setBackfilling] = useState(false);
+  const autoBackfillTriggered = useRef(false);
 
   const fetchTimeline = useCallback(
     async (newOffset = 0, append = false) => {
@@ -107,15 +106,7 @@ export default function TimelinePage() {
     [activeRepo, apiKey]
   );
 
-  useEffect(() => {
-    fetchTimeline(0);
-  }, [fetchTimeline]);
-
-  const loadMore = () => {
-    fetchTimeline(offset, true);
-  };
-
-  const handleBackfill = async () => {
+  const handleBackfill = useCallback(async () => {
     if (!activeRepo || !apiKey) return;
     setBackfilling(true);
     try {
@@ -134,6 +125,28 @@ export default function TimelinePage() {
     } finally {
       setBackfilling(false);
     }
+  }, [activeRepo, apiKey, fetchTimeline]);
+
+  useEffect(() => {
+    fetchTimeline(0);
+  }, [fetchTimeline]);
+
+  // Auto-trigger AI summary backfill when pending summaries are detected
+  useEffect(() => {
+    if (
+      stats.pendingSummaries > 0 &&
+      !backfilling &&
+      !autoBackfillTriggered.current &&
+      activeRepo &&
+      apiKey
+    ) {
+      autoBackfillTriggered.current = true;
+      handleBackfill();
+    }
+  }, [stats.pendingSummaries, backfilling, activeRepo, apiKey, handleBackfill]);
+
+  const loadMore = () => {
+    fetchTimeline(offset, true);
   };
 
   const toggleGroup = (groupId: string) => {
@@ -271,7 +284,7 @@ export default function TimelinePage() {
               </span>
             </div>
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--alpha-white-3)] border border-[var(--alpha-white-5)]">
-              <Sparkles size={13} className="text-purple-400" />
+              <Zap size={13} className="text-purple-400" />
               <span className="text-xs font-mono text-[var(--gray-300)]">
                 <span className="text-white font-semibold">
                   {stats.totalCommits - stats.pendingSummaries}
@@ -285,22 +298,12 @@ export default function TimelinePage() {
         {/* Backfill banner */}
         {stats.pendingSummaries > 0 && (
           <div className="mt-4 flex items-center gap-3 px-4 py-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
-            <Sparkles size={14} className="text-purple-400 shrink-0" />
+            <Loader2 size={14} className="text-purple-400 shrink-0 animate-spin" />
             <span className="text-xs font-mono text-[var(--gray-300)] flex-1">
-              {stats.pendingSummaries} commits pending AI summary
+              {backfilling
+                ? `Generating AI summaries for ${stats.pendingSummaries} commits…`
+                : `${stats.pendingSummaries} commits pending AI summary`}
             </span>
-            <button
-              onClick={handleBackfill}
-              disabled={backfilling}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-mono bg-purple-500/20 text-purple-300 border border-purple-500/30 hover:bg-purple-500/30 disabled:opacity-50 cursor-pointer transition-colors"
-            >
-              {backfilling ? (
-                <Loader2 size={12} className="animate-spin" />
-              ) : (
-                <RefreshCw size={12} />
-              )}
-              {backfilling ? "Generating..." : "Generate Now"}
-            </button>
           </div>
         )}
 

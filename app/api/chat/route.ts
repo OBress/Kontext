@@ -11,7 +11,6 @@ import {
   generateChatStream,
   generateQueryEmbedding,
 } from "@/lib/api/embeddings";
-import { logActivity } from "@/lib/api/activity";
 import {
   buildGitHubBlobUrl,
   detectCodeLanguage,
@@ -95,15 +94,6 @@ export async function POST(request: Request) {
     const repoFullName = validateRepoFullName(body.repo_full_name);
     const apiKey = validateApiKey(request);
 
-    logActivity({
-      userId: user.id,
-      repoFullName,
-      source: "kontext",
-      eventType: "chat_session",
-      title: `Chat with ${repoFullName}`,
-      description: message.slice(0, 100),
-    });
-
     const { data: repo } = await supabase
       .from("repos")
       .select("last_synced_sha, last_indexed_at")
@@ -113,15 +103,47 @@ export async function POST(request: Request) {
 
     const queryEmbedding = await generateQueryEmbedding(apiKey, message);
 
-    const { data: chunks, error } = await supabase.rpc("match_chunks", {
+    // Hybrid search: combines vector similarity + BM25 keyword matching via RRF
+    const { data: chunks, error } = await supabase.rpc("hybrid_match_chunks", {
+      query_text: message,
       query_embedding: JSON.stringify(queryEmbedding),
-      match_count: 6,
+      match_count: 25,
       filter_repo: repoFullName,
       filter_user_id: user.id,
     });
 
     if (error) {
-      console.error("match_chunks error:", error);
+      console.error("hybrid_match_chunks error:", error);
+    }
+
+    // Fetch file manifest for repo awareness
+    const { data: repoFiles } = await supabase
+      .from("repo_files")
+      .select("file_path")
+      .eq("user_id", user.id)
+      .eq("repo_full_name", repoFullName)
+      .order("file_path");
+
+    const allFilePaths = (repoFiles || []).map((f: { file_path: string }) => f.file_path);
+    let fileManifest: string;
+
+    if (allFilePaths.length <= 200) {
+      fileManifest = allFilePaths.join("\n");
+    } else {
+      // For large repos: show directory tree + top matched file paths
+      const dirs = new Set<string>();
+      for (const fp of allFilePaths) {
+        const parts = fp.split("/");
+        for (let i = 1; i < parts.length; i++) {
+          dirs.add(parts.slice(0, i).join("/") + "/");
+        }
+      }
+      const matchedPaths = new Set(
+        (chunks || []).map((c: MatchChunk) => c.file_path)
+      );
+      const dirTree = [...dirs].sort().join("\n");
+      const matchedFiles = [...matchedPaths].sort().join("\n");
+      fileManifest = `Directory tree (${allFilePaths.length} files total):\n${dirTree}\n\nTop matched files:\n${matchedFiles}`;
     }
 
     // Timeline vector search — find relevant development events
@@ -189,7 +211,24 @@ export async function POST(request: Request) {
       };
     });
 
-    const answerMode = classifyAnswerMode(citations);
+    // Deduplicate citations by file_path — one chip per unique file for the client.
+    // The LLM context blocks below still use the raw `citations` array for full retrieval quality.
+    const fileMap = new Map<string, (typeof citations)[0]>();
+    for (const citation of citations) {
+      const existing = fileMap.get(citation.file_path);
+      if (!existing || citation.retrieval_score > existing.retrieval_score) {
+        fileMap.set(citation.file_path, {
+          ...citation,
+          // Bottom-of-message chips open Full File mode — no snippet or line highlight needed
+          snippet: "",
+          line_start: 1,
+          line_end: 1,
+        });
+      }
+    }
+    const dedupedCitations = [...fileMap.values()];
+
+    const answerMode = classifyAnswerMode(dedupedCitations);
 
     const contextBlocks = citations
       .map(
@@ -224,16 +263,21 @@ export async function POST(request: Request) {
       )
       .join("\n");
 
-    const systemPrompt = `You are Kontext, an AI assistant that helps developers understand their codebase. You are analyzing the repository "${repoFullName}".
+    const systemPrompt = `You are Kontext, a concise code assistant for the repository "${repoFullName}".
 
-Answer the user's question using only the retrieved repository evidence below.
+Rules:
+- Be brief and direct. No filler, no preambles, no "Great question!" or "Let me explain...". Get straight to the answer.
+- Use short sentences. Prefer bullet points and code references over prose.
+- ALWAYS wrap file paths in backticks exactly as indexed, e.g. \`app/api/chat/route.ts\`. This creates clickable links in the UI.
+- Only state facts supported by the retrieved context or file manifest.
+- When listing items (endpoints, files, etc.), be thorough — check ALL citations and the manifest.
+- Use timeline context for questions about when things were implemented or changed.
+- If evidence is incomplete, say so briefly and suggest which files to check.
+- If there is no relevant evidence, say "Insufficient evidence" and suggest next steps.
 
-Grounding rules:
-- Do not claim repository facts unless they are supported by the retrieved citations.
-- Reference file paths and line ranges when relevant.
-- When answering questions about WHEN something was implemented or changed, use the Development Timeline Context to provide specific dates and commits.
-- If the evidence is incomplete, clearly say the answer is partial.
-- If there is not enough repository evidence, say "Insufficient evidence from the indexed repository" and suggest what files or symbols to inspect next.
+## Repository File Manifest
+
+${fileManifest}
 
 ## Retrieved Code Context
 
@@ -242,7 +286,7 @@ ${
   "No retrieved repository code context was found."
 }${
   timelineBlocks
-    ? `\n\n## Development Timeline Context\n\nThe following development events matched the user's query:\n\n${timelineBlocks}`
+    ? `\n\n## Development Timeline Context\n\n${timelineBlocks}`
     : ""
 }`;
 
@@ -253,14 +297,14 @@ ${
           encoder.encode(
             `data: ${JSON.stringify({
               type: "context",
-              citations,
+              citations: dedupedCitations,
               timelineCitations,
               answerMode,
             })}\n\n`
           )
         );
 
-        if (citations.length === 0) {
+        if (dedupedCitations.length === 0) {
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({

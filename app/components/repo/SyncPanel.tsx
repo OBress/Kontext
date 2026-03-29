@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useAppStore } from "@/lib/store/app-store";
 import { useCurrentRepo } from "@/hooks/use-current-repo";
+import { BranchDropdown } from "@/app/components/shared/BranchDropdown";
 import {
   RefreshCw,
   CheckCircle2,
@@ -301,6 +302,25 @@ export function SyncSettingsCard() {
   const [tier, setTier] = useState<number>(activeRepo?.understanding_tier || 2);
   const [branch, setBranch] = useState(activeRepo?.watched_branch || activeRepo?.default_branch || "main");
   const [message, setMessage] = useState<string | null>(null);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+
+  // Fetch branches from GitHub on mount
+  useEffect(() => {
+    if (!activeRepo?.full_name) return;
+    setBranchesLoading(true);
+    fetch(`/api/repos/branches?repo=${encodeURIComponent(activeRepo.full_name)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.branches) {
+          setBranches(data.branches.map((b: { name: string }) => b.name));
+        }
+      })
+      .catch(() => {
+        // Fallback: show current branch as only option
+      })
+      .finally(() => setBranchesLoading(false));
+  }, [activeRepo?.full_name]);
 
   const saveSettings = useCallback(async (updates: Record<string, unknown>) => {
     if (!activeRepo) return;
@@ -337,6 +357,12 @@ export function SyncSettingsCard() {
   }, [activeRepo, updateRepo]);
 
   if (!activeRepo?.indexed) return null;
+
+  // Build the branch list: fetched branches, or fallback to current + default
+  const branchOptions =
+    branches.length > 0
+      ? branches
+      : [...new Set([branch, activeRepo.default_branch].filter((b): b is string => !!b))];
 
   return (
     <div className="rounded-xl border border-[var(--alpha-white-5)] bg-[var(--alpha-white-3)] p-5">
@@ -375,28 +401,15 @@ export function SyncSettingsCard() {
       {/* Branch */}
       <div className="mb-4 pb-4 border-b border-[var(--alpha-white-5)]">
         <label className="text-xs font-mono text-[var(--gray-300)] block mb-1.5">Watched Branch</label>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={branch}
-            onChange={(e) => setBranch(e.target.value)}
-            className="flex-1 px-3 py-1.5 text-xs font-mono rounded-lg
-              bg-[var(--alpha-white-5)] border border-[var(--alpha-white-10)]
-              text-[var(--gray-200)] placeholder:text-[var(--gray-600)]
-              focus:outline-none focus:border-[var(--accent-green)]/50"
-            placeholder="main"
-          />
-          <button
-            onClick={() => saveSettings({ watched_branch: branch })}
-            disabled={saving}
-            className="px-3 py-1.5 text-xs font-mono rounded-lg
-              bg-[var(--alpha-white-5)] border border-[var(--alpha-white-10)]
-              text-[var(--gray-400)] hover:text-white transition-colors
-              disabled:opacity-50"
-          >
-            Save
-          </button>
-        </div>
+        <BranchDropdown
+          value={branch}
+          onChange={(newBranch) => {
+            setBranch(newBranch);
+            saveSettings({ watched_branch: newBranch });
+          }}
+          branches={branchOptions}
+          loading={branchesLoading}
+        />
       </div>
 
       {/* Understanding Tier */}
@@ -441,3 +454,4 @@ export function SyncSettingsCard() {
     </div>
   );
 }
+

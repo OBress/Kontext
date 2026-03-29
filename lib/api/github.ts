@@ -19,6 +19,14 @@ const BINARY_EXTENSIONS = new Set([
 ]);
 
 const MAX_FILE_SIZE = 100_000; // 100KB
+const REPO_ACTIVITY_WEBHOOK_EVENTS = [
+  "push",
+  "pull_request",
+  "issues",
+  "create",
+  "release",
+  "workflow_run",
+] as const;
 
 function headers(token: string): Record<string, string> {
   return {
@@ -216,6 +224,42 @@ export function shouldIndexFile(path: string): boolean {
 // ─── New: Sync & Webhook Functions ─────────────────────────────────
 
 /**
+ * Fetch the N most recent commits on a branch (for initial timeline backfill).
+ * Unlike fetchCommitsSince, this does NOT require a base SHA or date filter —
+ * it simply lists the latest commits in reverse chronological order.
+ */
+export async function fetchRecentCommits(
+  token: string,
+  owner: string,
+  name: string,
+  branch: string,
+  maxCommits = 50
+): Promise<GitHubCommit[]> {
+  const allCommits: GitHubCommit[] = [];
+  let page = 1;
+  const perPage = Math.min(maxCommits, 100);
+
+  while (allCommits.length < maxCommits) {
+    const res = await fetch(
+      `${GITHUB_API}/repos/${owner}/${name}/commits?sha=${encodeURIComponent(branch)}&per_page=${perPage}&page=${page}`,
+      { headers: headers(token) }
+    );
+
+    if (!res.ok) break;
+
+    const commits: GitHubCommit[] = await res.json();
+    if (commits.length === 0) break;
+
+    allCommits.push(...commits);
+
+    if (commits.length < perPage) break;
+    page++;
+  }
+
+  return allCommits.slice(0, maxCommits);
+}
+
+/**
  * Fetch the latest commit on a branch.
  */
 export async function fetchLatestCommit(
@@ -368,7 +412,7 @@ async function fetchChangedFilesFromIndividualCommits(
 }
 
 /**
- * Register a push webhook on a GitHub repository.
+ * Register a repository activity webhook on a GitHub repository.
  * Returns the webhook ID for later cleanup.
  */
 export async function registerWebhook(
@@ -389,7 +433,7 @@ export async function registerWebhook(
       body: JSON.stringify({
         name: "web",
         active: true,
-        events: ["push"],
+        events: REPO_ACTIVITY_WEBHOOK_EVENTS,
         config: {
           url: webhookUrl,
           content_type: "json",
@@ -408,7 +452,10 @@ export async function registerWebhook(
     if (res.status === 422 && msg.includes("already exists")) {
       // List hooks and find existing one
       const existing = await findExistingWebhook(token, owner, name, webhookUrl);
-      if (existing) return existing;
+      if (existing) {
+        await updateWebhook(token, owner, name, existing, webhookUrl, secret);
+        return existing;
+      }
     }
 
     throw githubError(`Failed to register webhook: ${msg}`);
@@ -437,6 +484,40 @@ async function findExistingWebhook(
   const hooks: Array<{ id: number; config: { url: string } }> = await res.json();
   const match = hooks.find((h) => h.config.url === webhookUrl);
   return match?.id ?? null;
+}
+
+async function updateWebhook(
+  token: string,
+  owner: string,
+  name: string,
+  hookId: number,
+  webhookUrl: string,
+  secret: string
+): Promise<void> {
+  const res = await fetch(
+    `${GITHUB_API}/repos/${owner}/${name}/hooks/${hookId}`,
+    {
+      method: "PATCH",
+      headers: {
+        ...headers(token),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        active: true,
+        events: REPO_ACTIVITY_WEBHOOK_EVENTS,
+        config: {
+          url: webhookUrl,
+          content_type: "json",
+          secret,
+          insecure_ssl: "0",
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    throw githubError(`Failed to update webhook: ${res.status}`);
+  }
 }
 
 /**

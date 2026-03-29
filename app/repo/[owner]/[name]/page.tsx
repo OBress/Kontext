@@ -4,7 +4,7 @@ import { useParams } from "next/navigation";
 import { useAppStore } from "@/lib/store/app-store";
 import { GlowCard } from "@/app/components/shared/GlowCard";
 import { AnimatedCounter } from "@/app/components/shared/AnimatedCounter";
-import { SyncStatusCard, SyncSettingsCard } from "@/app/components/repo/SyncPanel";
+import { SyncStatusCard } from "@/app/components/repo/SyncPanel";
 import { motion } from "framer-motion";
 import {
   Database,
@@ -249,11 +249,10 @@ export default function RepoOverviewPage() {
         />
       </div>
 
-      {/* Sync Panel — shown after indexing */}
+      {/* Sync Status — shown after indexing */}
       {repo?.indexed && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="max-w-xl">
           <SyncStatusCard />
-          <SyncSettingsCard />
         </div>
       )}
     </div>

@@ -8,14 +8,15 @@ import { AddRepoModal } from "../dashboard/AddRepoModal";
 
 interface AppShellProps {
   children: ReactNode;
+  hideRail?: boolean;
 }
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children, hideRail }: AppShellProps) {
   return (
     <>
       <TopBar />
-      <IconRail />
-      <main className="pl-14 pt-12 min-h-screen overflow-visible">
+      {!hideRail && <IconRail />}
+      <main className="pt-12 min-h-screen overflow-visible">
         <div className="p-6">
           {children}
         </div>

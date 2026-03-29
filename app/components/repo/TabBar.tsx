@@ -9,7 +9,6 @@ import {
   Network,
   History,
   Wand2,
-  Server,
   Users,
   Settings,
 } from "lucide-react";
@@ -20,7 +19,6 @@ const tabs = [
   { icon: Network, label: "Architecture", segment: "graph" },
   { icon: History, label: "Timeline", segment: "timeline" },
   { icon: Wand2, label: "Prompts", segment: "prompts" },
-  { icon: Server, label: "MCP Server", segment: "mcp" },
   { icon: Users, label: "Team", segment: "team" },
   { icon: Settings, label: "Settings", segment: "settings" },
 ];
@@ -33,7 +31,7 @@ export function TabBar({ basePath }: TabBarProps) {
   const pathname = usePathname();
 
   return (
-    <nav className="flex items-center gap-1 border-b border-[var(--alpha-white-5)] overflow-x-auto no-scrollbar">
+    <nav className="flex items-center gap-1 overflow-x-auto no-scrollbar">
       {tabs.map((tab) => {
         const href = tab.segment ? `${basePath}/${tab.segment}` : basePath;
         const isActive =

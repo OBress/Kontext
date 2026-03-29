@@ -24,11 +24,16 @@ import {
   X,
   GitCommit,
   History,
+  ArrowDown,
+  GripVertical,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { atomDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+
+// Regex to detect file paths in backtick-wrapped inline code
+const FILE_PATH_REGEX = /^[\w@.-]+(?:\/[\w@.-]+)+\.[a-zA-Z]{1,10}(?::L?(\d+)(?:[-–](\d+))?)?$/;
 
 type InspectorMode = "snippet" | "file";
 
@@ -184,22 +189,21 @@ function CitationChip({
   return (
     <button
       onClick={() => onSelect(citation)}
-      className={`flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition-all ${
+      className={`flex items-start gap-2 rounded-lg border px-2.5 py-2 text-left transition-all ${
         isSelected
           ? "border-[var(--accent-green)]/35 bg-[var(--accent-green)]/8 shadow-[0_0_30px_rgba(63,185,80,0.06)]"
           : "border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] hover:border-[var(--accent-green)]/25"
       }`}
     >
-      <div className="mt-0.5 rounded-lg bg-[var(--alpha-white-8)] p-2">
-        <FileCode size={14} className="text-[var(--accent-green)]" />
+      <div className="mt-0.5 shrink-0 rounded-md bg-[var(--alpha-white-8)] p-1.5">
+        <FileCode size={12} className="text-[var(--accent-green)]" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate font-mono text-xs text-[var(--gray-100)]">
+        <div className="truncate font-mono text-[11px] text-[var(--gray-100)]">
           {citation.file_path}
         </div>
-        <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--gray-500)]">
-          <span>{formatLineRange(citation.line_start, citation.line_end)}</span>
-          <span>{Math.round(citation.retrieval_score * 100)}% match</span>
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--gray-500)]">
+          <span>{Math.round(citation.retrieval_score * 100)}%</span>
           <span>{citation.language}</span>
         </div>
       </div>
@@ -215,38 +219,29 @@ function TimelineCitationChip({
   const params = useParams<{ owner: string; name: string }>();
 
   return (
-    <div className="flex w-full items-start gap-3 rounded-xl border border-purple-500/20 bg-purple-500/5 px-3 py-3 text-left">
-      <div className="mt-0.5 rounded-lg bg-purple-500/15 p-2">
-        <History size={14} className="text-purple-400" />
+    <div className="flex items-start gap-2 rounded-lg border border-purple-500/20 bg-purple-500/5 px-2.5 py-2 text-left">
+      <div className="mt-0.5 shrink-0 rounded-md bg-purple-500/15 p-1.5">
+        <History size={12} className="text-purple-400" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="font-mono text-xs text-[var(--gray-200)] leading-relaxed">
+        <div className="font-mono text-[11px] text-[var(--gray-200)] leading-snug line-clamp-2">
           {citation.ai_summary}
         </div>
-        <div className="mt-1.5 flex flex-wrap items-center gap-2 font-mono text-[10px] text-[var(--gray-500)]">
-          <span className="inline-flex items-center gap-1 rounded bg-purple-500/10 px-1.5 py-0.5 text-purple-400">
-            <GitCommit size={10} />
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[9px] text-[var(--gray-500)]">
+          <span className="inline-flex items-center gap-1 rounded bg-purple-500/10 px-1 py-0.5 text-purple-400">
+            <GitCommit size={9} />
             {citation.sha.slice(0, 7)}
           </span>
           <span>{citation.date}</span>
-          <span>by {citation.author}</span>
-          <span>{Math.round(citation.similarity * 100)}% match</span>
+          <span>{Math.round(citation.similarity * 100)}%</span>
         </div>
-        {params?.owner && params?.name && (
-          <a
-            href={`/repo/${params.owner}/${params.name}/timeline`}
-            className="mt-1.5 inline-flex items-center gap-1 font-mono text-[10px] text-purple-400 hover:text-purple-300 transition-colors no-underline"
-          >
-            View in Timeline →
-          </a>
-        )}
       </div>
       {citation.author_avatar_url && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={citation.author_avatar_url}
           alt={citation.author}
-          className="w-6 h-6 rounded-full shrink-0 mt-0.5"
+          className="w-5 h-5 rounded-full shrink-0 mt-0.5"
         />
       )}
     </div>
@@ -257,10 +252,12 @@ function MessageBubble({
   message,
   selectedCitationId,
   onSelectCitation,
+  onOpenFilePath,
 }: {
   message: ChatMessage;
   selectedCitationId: string | null;
   onSelectCitation: (citation: ChatCitation) => void;
+  onOpenFilePath: (filePath: string, lineStart?: number, lineEnd?: number) => void;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -299,7 +296,24 @@ function MessageBubble({
                 const match = /language-(\w+)/.exec(className || "");
                 const codeString = String(children).replace(/\n$/, "");
 
+                // Inline code (no language class) — check for file path
                 if (!match) {
+                  const pathMatch = FILE_PATH_REGEX.exec(codeString);
+                  if (pathMatch) {
+                    const cleanPath = codeString.replace(/:L?\d+.*$/, "");
+                    const lineStart = pathMatch[1] ? parseInt(pathMatch[1], 10) : undefined;
+                    const lineEnd = pathMatch[2] ? parseInt(pathMatch[2], 10) : undefined;
+                    return (
+                      <button
+                        onClick={() => onOpenFilePath(cleanPath, lineStart, lineEnd)}
+                        className="inline-flex items-center gap-1 rounded bg-[var(--accent-green)]/10 border border-[var(--accent-green)]/20 px-1.5 py-0.5 text-[var(--accent-green)] hover:bg-[var(--accent-green)]/18 hover:border-[var(--accent-green)]/35 transition-all cursor-pointer font-mono text-[0.85em] no-underline"
+                      >
+                        <FileCode size={11} className="shrink-0" />
+                        {codeString}
+                      </button>
+                    );
+                  }
+
                   return (
                     <code
                       className="rounded bg-[var(--alpha-white-5)] px-1 py-0.5 text-[var(--accent-green)]"
@@ -332,36 +346,7 @@ function MessageBubble({
           </ReactMarkdown>
         </div>
 
-        {message.citations && message.citations.length > 0 && (
-          <div className="mt-4 space-y-2">
-            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--gray-500)]">
-              Citations
-            </div>
-            <div className="space-y-2">
-              {message.citations.map((citation) => (
-                <CitationChip
-                  key={citation.citation_id}
-                  citation={citation}
-                  isSelected={selectedCitationId === citation.citation_id}
-                  onSelect={onSelectCitation}
-                />
-              ))}
-            </div>
-          </div>
-        )}
 
-        {message.timelineCitations && message.timelineCitations.length > 0 && (
-          <div className="mt-4 space-y-2">
-            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--gray-500)]">
-              Timeline
-            </div>
-            <div className="space-y-2">
-              {message.timelineCitations.map((tc) => (
-                <TimelineCitationChip key={tc.sha} citation={tc} />
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -390,7 +375,7 @@ function ChatInput({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       handleSend();
     }
@@ -407,7 +392,7 @@ function ChatInput({
 
   return (
     <div className="border-t border-[var(--alpha-white-8)] p-4">
-      <div className="rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--surface-1)] px-4 py-3">
+      <div className="flex items-end gap-3 rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--surface-1)] px-4 py-3">
         <textarea
           ref={textareaRef}
           value={input}
@@ -415,37 +400,32 @@ function ChatInput({
           onInput={handleInput}
           onKeyDown={handleKeyDown}
           rows={1}
-          placeholder="Ask about this codebase... (Cmd/Ctrl + Enter to send)"
-          className="min-h-[28px] w-full resize-none bg-transparent font-mono text-sm text-[var(--gray-200)] outline-none placeholder:text-[var(--gray-600)]"
+          placeholder="Ask about this codebase..."
+          className="min-h-[28px] flex-1 resize-none bg-transparent font-mono text-sm text-[var(--gray-200)] outline-none placeholder:text-[var(--gray-600)]"
           style={{ maxHeight: 180 }}
         />
-        <div className="mt-3 flex items-center justify-between">
-          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--gray-600)]">
-            Grounded answers with code citations
-          </span>
-          {isStreaming ? (
-            <button
-              onClick={onStop}
-              className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent-red)]/12 px-3 py-2 font-mono text-xs text-[var(--accent-red)] transition-colors hover:bg-[var(--accent-red)]/18"
-            >
-              <Square size={12} />
-              Stop
-            </button>
-          ) : (
-            <button
-              onClick={handleSend}
-              disabled={!input.trim()}
-              className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 font-mono text-xs transition-all ${
-                input.trim()
-                  ? "bg-[var(--accent-green)] text-black shadow-[0_0_30px_rgba(63,185,80,0.18)]"
-                  : "bg-[var(--alpha-white-5)] text-[var(--gray-600)]"
-              }`}
-            >
-              <Send size={12} />
-              Send
-            </button>
-          )}
-        </div>
+        {isStreaming ? (
+          <button
+            onClick={onStop}
+            className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-[var(--accent-red)]/12 px-3 py-2 font-mono text-xs text-[var(--accent-red)] transition-colors hover:bg-[var(--accent-red)]/18"
+          >
+            <Square size={12} />
+            Stop
+          </button>
+        ) : (
+          <button
+            onClick={handleSend}
+            disabled={!input.trim()}
+            className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 font-mono text-xs transition-all ${
+              input.trim()
+                ? "bg-[var(--accent-green)] text-black shadow-[0_0_30px_rgba(63,185,80,0.18)]"
+                : "bg-[var(--alpha-white-5)] text-[var(--gray-600)]"
+            }`}
+          >
+            <Send size={12} />
+            Send
+          </button>
+        )}
       </div>
     </div>
   );
@@ -477,7 +457,9 @@ function InspectorPanel({
   }, [citation, fileData, mode]);
 
   const language = fileData?.language || citation?.language || "text";
-  const selectedRange = citation
+  // Only highlight when there's a meaningful line range (not the neutral 1,1 from deduped citations)
+  const hasRealRange = citation && !(citation.line_start === 1 && citation.line_end === 1);
+  const selectedRange = hasRealRange
     ? { start: citation.line_start, end: citation.line_end }
     : null;
 
@@ -495,7 +477,9 @@ function InspectorPanel({
                   {citation.file_path}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--gray-500)]">
-                  <span>{formatLineRange(citation.line_start, citation.line_end)}</span>
+                  {!(citation.line_start === 1 && citation.line_end === 1) && (
+                    <span>{formatLineRange(citation.line_start, citation.line_end)}</span>
+                  )}
                   <span>{citation.language}</span>
                   {commitSha && <span>commit {commitSha.slice(0, 7)}</span>}
                 </div>
@@ -607,22 +591,48 @@ export default function ChatPage() {
   const { apiKey, repos } = useAppStore();
   const repo = repos.find((entry) => entry.full_name === repoFullName);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [selectedCitation, setSelectedCitation] = useState<ChatCitation | null>(null);
   const [inspectorMode, setInspectorMode] = useState<InspectorMode>("snippet");
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
   const [fileCache, setFileCache] = useState<Record<string, LoadedFile>>({});
   const [fileErrors, setFileErrors] = useState<Record<string, string>>({});
   const [loadingFileKey, setLoadingFileKey] = useState<string | null>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
+  // Resizable panel state
+  const [splitRatio, setSplitRatio] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("kontext:chat-split-ratio");
+      return saved ? parseFloat(saved) : 0.6;
+    }
+    return 0.6;
+  });
+  const isDragging = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // IntersectionObserver for scroll-to-latest button
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    const sentinel = messagesEndRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setShowScrollButton(!entry.isIntersecting && messages.length > 0);
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [messages.length]);
 
   useEffect(() => {
     clearChat();
     setSelectedCitation(null);
     setInspectorMode("snippet");
+    setInspectorOpen(false);
     setMobileInspectorOpen(false);
     setFileCache({});
     setFileErrors({});
@@ -671,7 +681,8 @@ export default function ChatPage() {
   const selectCitation = useCallback(
     (citation: ChatCitation, openMobile = false) => {
       setSelectedCitation(citation);
-      setInspectorMode("snippet");
+      setInspectorMode("file");
+      setInspectorOpen(true);
       void loadCitationFile(citation);
       if (openMobile) setMobileInspectorOpen(true);
     },
@@ -800,8 +811,77 @@ export default function ChatPage() {
     clearChat();
     setSelectedCitation(null);
     setInspectorMode("snippet");
+    setInspectorOpen(false);
     setMobileInspectorOpen(false);
   };
+
+  const handleOpenFilePath = useCallback(
+    (filePath: string, lineStart?: number, lineEnd?: number) => {
+      // Create a synthetic citation-like object from the file path
+      const syntheticCitation: ChatCitation = {
+        citation_id: `file-${filePath}`,
+        index_version_id: repo?.last_indexed_at || null,
+        commit_sha: null,
+        file_path: filePath,
+        line_start: lineStart ?? 1,
+        line_end: lineEnd ?? lineStart ?? 1,
+        language: filePath.split(".").pop() || "text",
+        snippet: "",
+        retrieval_score: 1,
+        github_url: null,
+      };
+      setSelectedCitation(syntheticCitation);
+      setInspectorMode("file");
+      setInspectorOpen(true);
+      void loadCitationFile(syntheticCitation);
+      if (window.innerWidth < 1024) setMobileInspectorOpen(true);
+    },
+    [loadCitationFile, repo?.last_indexed_at]
+  );
+
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  // Drag handle handlers for resizable panels
+  const handleDragStart = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, []);
+
+  useEffect(() => {
+    const handleDragMove = (e: PointerEvent) => {
+      if (!isDragging.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const ratio = Math.min(0.75, Math.max(0.4, x / rect.width));
+      setSplitRatio(ratio);
+    };
+    const handleDragEnd = () => {
+      if (!isDragging.current) return;
+      isDragging.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      // Persist
+      setSplitRatio((r) => {
+        localStorage.setItem("kontext:chat-split-ratio", String(r));
+        return r;
+      });
+    };
+    window.addEventListener("pointermove", handleDragMove);
+    window.addEventListener("pointerup", handleDragEnd);
+    return () => {
+      window.removeEventListener("pointermove", handleDragMove);
+      window.removeEventListener("pointerup", handleDragEnd);
+    };
+  }, []);
+
+  const handleCloseInspector = useCallback(() => {
+    setInspectorOpen(false);
+    setSelectedCitation(null);
+  }, []);
 
   const selectedFile = selectedCitation
     ? fileCache[citationCacheKey(selectedCitation)] || null
@@ -815,14 +895,21 @@ export default function ChatPage() {
 
   return (
     <>
-      <div className="grid min-h-[620px] gap-4 lg:h-[calc(100vh-200px)] lg:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[var(--alpha-white-8)] bg-[radial-gradient(circle_at_top,rgba(63,185,80,0.08),transparent_42%),var(--surface-0)] shadow-[0_24px_80px_rgba(0,0,0,0.2)]">
-          <div className="flex items-center justify-between gap-3 border-b border-[var(--alpha-white-8)] px-4 py-4">
+      <div
+        ref={containerRef}
+        className="flex h-[calc(100vh-172px)] min-h-0 gap-0"
+      >
+        {/* Chat Panel */}
+        <div
+          className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-[var(--alpha-white-8)] bg-[radial-gradient(circle_at_top,rgba(63,185,80,0.08),transparent_42%),var(--surface-0)] shadow-[0_24px_80px_rgba(0,0,0,0.2)] transition-all duration-200"
+          style={{ flex: inspectorOpen ? `0 0 ${splitRatio * 100}%` : "1 1 100%" }}
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-[var(--alpha-white-8)] px-4 py-3">
             <div>
               <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--gray-500)]">
                 Repo Chat
               </div>
-              <h2 className="m-0 mt-2 font-mono text-sm text-[var(--gray-100)]">
+              <h2 className="m-0 mt-1 font-mono text-sm text-[var(--gray-100)]">
                 Grounded answers with clickable citations
               </h2>
             </div>
@@ -848,7 +935,7 @@ export default function ChatPage() {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
+          <div ref={messagesContainerRef} className="relative min-h-0 flex-1 overflow-y-auto px-4 py-5">
             {messages.length === 0 && (
               <div className="mx-auto max-w-2xl py-12">
                 <h3 className="m-0 font-mono text-xl text-[var(--gray-100)]">
@@ -856,7 +943,7 @@ export default function ChatPage() {
                 </h3>
                 <p className="mb-6 mt-3 font-mono text-sm leading-relaxed text-[var(--gray-500)]">
                   Kontext will answer from indexed code, attach citations, and
-                  open the relevant span in the inspector on the right.
+                  let you inspect the code in a side panel.
                 </p>
                 <SuggestedQuestions onSelect={handleSend} />
               </div>
@@ -871,6 +958,7 @@ export default function ChatPage() {
                   onSelectCitation={(citation) =>
                     selectCitation(citation, window.innerWidth < 1024)
                   }
+                  onOpenFilePath={handleOpenFilePath}
                 />
               ))}
             </div>
@@ -889,6 +977,17 @@ export default function ChatPage() {
             )}
 
             <div ref={messagesEndRef} />
+
+            {/* Scroll to latest button */}
+            {showScrollButton && (
+              <button
+                onClick={scrollToBottom}
+                className="sticky bottom-4 left-1/2 -translate-x-1/2 z-10 inline-flex items-center gap-2 rounded-full border border-[var(--alpha-white-8)] bg-[var(--surface-2)] px-4 py-2 font-mono text-xs text-[var(--gray-300)] shadow-[0_8px_30px_rgba(0,0,0,0.3)] transition-all hover:border-[var(--accent-green)]/30 hover:text-[var(--accent-green)]"
+              >
+                <ArrowDown size={12} />
+                Scroll to latest
+              </button>
+            )}
           </div>
 
           <ChatInput
@@ -898,19 +997,49 @@ export default function ChatPage() {
           />
         </div>
 
-        <div className="hidden min-h-0 overflow-hidden rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--surface-0)] shadow-[0_24px_80px_rgba(0,0,0,0.2)] lg:flex">
-          <InspectorPanel
-            citation={selectedCitation}
-            mode={inspectorMode}
-            onModeChange={setInspectorMode}
-            fileData={selectedFile}
-            isLoading={selectedFileLoading}
-            error={selectedFileError}
-            lastIndexedAt={repo?.last_indexed_at}
-          />
-        </div>
+        {/* Drag Handle */}
+        {inspectorOpen && (
+          <div
+            onPointerDown={handleDragStart}
+            className="hidden lg:flex flex-col items-center justify-center w-2 cursor-col-resize group shrink-0 mx-1"
+          >
+            <div className="h-12 w-1 rounded-full bg-[var(--alpha-white-8)] group-hover:bg-[var(--accent-green)]/40 transition-colors flex items-center justify-center">
+              <GripVertical size={10} className="text-[var(--gray-600)] group-hover:text-[var(--accent-green)] transition-colors" />
+            </div>
+          </div>
+        )}
+
+        {/* Inspector Panel (desktop) */}
+        {inspectorOpen && (
+          <div
+            className="hidden lg:flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--surface-0)] shadow-[0_24px_80px_rgba(0,0,0,0.2)] transition-all duration-200"
+            style={{ flex: `0 0 ${(1 - splitRatio) * 100 - 1}%` }}
+          >
+            <div className="flex items-center justify-between border-b border-[var(--alpha-white-8)] px-3 py-2">
+              <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--gray-500)]">Inspector</span>
+              <button
+                onClick={handleCloseInspector}
+                className="rounded-lg border border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] p-1.5 text-[var(--gray-400)] hover:text-[var(--gray-100)] transition-colors"
+              >
+                <X size={12} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1">
+              <InspectorPanel
+                citation={selectedCitation}
+                mode={inspectorMode}
+                onModeChange={setInspectorMode}
+                fileData={selectedFile}
+                isLoading={selectedFileLoading}
+                error={selectedFileError}
+                lastIndexedAt={repo?.last_indexed_at}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
+      {/* Mobile inspector overlay */}
       {mobileInspectorOpen && selectedCitation && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm lg:hidden">
           <div className="absolute inset-x-0 bottom-0 top-16 overflow-hidden rounded-t-[1.5rem] border border-[var(--alpha-white-8)] bg-[var(--surface-0)] shadow-[0_-24px_80px_rgba(0,0,0,0.35)]">
@@ -937,12 +1066,6 @@ export default function ChatPage() {
               />
             </div>
           </div>
-        </div>
-      )}
-
-      {currentCitations.length > 0 && !selectedCitation && (
-        <div className="mt-3 font-mono text-xs text-[var(--gray-500)]">
-          Select a citation to inspect the code.
         </div>
       )}
     </>

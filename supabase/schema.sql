@@ -59,6 +59,51 @@ CREATE EXTENSION IF NOT EXISTS "vector" WITH SCHEMA "extensions";
 
 
 
+CREATE OR REPLACE FUNCTION "public"."hybrid_match_chunks"("query_text" "text", "query_embedding" "extensions"."vector", "match_count" integer DEFAULT 25, "filter_repo" "text" DEFAULT NULL::"text", "filter_user_id" "uuid" DEFAULT NULL::"uuid", "full_text_weight" double precision DEFAULT 1.0, "semantic_weight" double precision DEFAULT 1.0, "rrf_k" integer DEFAULT 60) RETURNS TABLE("id" bigint, "file_path" "text", "content" "text", "similarity" double precision)
+    LANGUAGE "sql" STABLE
+    AS $$
+WITH full_text_search AS (
+  SELECT rc.id,
+    ROW_NUMBER() OVER (
+      ORDER BY ts_rank(rc.fts, websearch_to_tsquery('english', query_text)) DESC
+    ) AS rank
+  FROM public.repo_chunks rc
+  WHERE rc.fts @@ websearch_to_tsquery('english', query_text)
+    AND (filter_user_id IS NULL OR rc.user_id = filter_user_id)
+    AND (filter_repo IS NULL OR rc.repo_full_name = filter_repo)
+  LIMIT match_count * 2
+),
+semantic_search AS (
+  SELECT rc.id,
+    ROW_NUMBER() OVER (
+      ORDER BY rc.embedding <=> query_embedding
+    ) AS rank
+  FROM public.repo_chunks rc
+  WHERE (filter_user_id IS NULL OR rc.user_id = filter_user_id)
+    AND (filter_repo IS NULL OR rc.repo_full_name = filter_repo)
+  ORDER BY rc.embedding <=> query_embedding
+  LIMIT match_count * 2
+)
+SELECT
+  rc.id,
+  rc.file_path,
+  rc.content,
+  (
+    COALESCE(full_text_weight / (rrf_k + fts.rank), 0.0) +
+    COALESCE(semantic_weight / (rrf_k + sem.rank), 0.0)
+  ) AS similarity
+FROM public.repo_chunks rc
+LEFT JOIN full_text_search fts ON rc.id = fts.id
+LEFT JOIN semantic_search sem ON rc.id = sem.id
+WHERE fts.id IS NOT NULL OR sem.id IS NOT NULL
+ORDER BY similarity DESC
+LIMIT match_count;
+$$;
+
+
+ALTER FUNCTION "public"."hybrid_match_chunks"("query_text" "text", "query_embedding" "extensions"."vector", "match_count" integer, "filter_repo" "text", "filter_user_id" "uuid", "full_text_weight" double precision, "semantic_weight" double precision, "rrf_k" integer) OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."match_chunks"("query_embedding" "extensions"."vector", "match_count" integer DEFAULT 5, "filter_repo" "text" DEFAULT NULL::"text", "filter_user_id" "uuid" DEFAULT NULL::"uuid") RETURNS TABLE("id" bigint, "file_path" "text", "content" "text", "similarity" double precision)
     LANGUAGE "plpgsql"
     AS $$
@@ -343,7 +388,7 @@ CREATE TABLE IF NOT EXISTS "public"."activity_events" (
     "metadata" "jsonb" DEFAULT '{}'::"jsonb",
     "created_at" timestamp with time zone DEFAULT "now"(),
     CONSTRAINT "activity_events_source_check" CHECK (("source" = ANY (ARRAY['kontext'::"text", 'github'::"text"]))),
-    CONSTRAINT "activity_events_type_check" CHECK (("event_type" = ANY (ARRAY['repo_added'::"text", 'repo_indexed'::"text", 'team_member_joined'::"text", 'team_invite_sent'::"text", 'chat_session'::"text", 'prompt_generated'::"text", 'push'::"text", 'pull_request'::"text", 'issue'::"text", 'create'::"text", 'release'::"text"])))
+    CONSTRAINT "activity_events_type_check" CHECK (("event_type" = ANY (ARRAY['repo_added'::"text", 'repo_deleted'::"text", 'repo_indexed'::"text", 'repo_synced'::"text", 'team_member_joined'::"text", 'team_invite_sent'::"text", 'chat_session'::"text", 'prompt_generated'::"text", 'push'::"text", 'pull_request'::"text", 'issue'::"text", 'create'::"text", 'release'::"text", 'workflow_run'::"text"])))
 );
 
 
@@ -494,7 +539,8 @@ CREATE TABLE IF NOT EXISTS "public"."repo_chunks" (
     "token_count" integer DEFAULT 0 NOT NULL,
     "embedding" "extensions"."vector"(1536),
     "metadata" "jsonb" DEFAULT '{}'::"jsonb",
-    "created_at" timestamp with time zone DEFAULT "now"()
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "fts" "tsvector" GENERATED ALWAYS AS ("to_tsvector"('"english"'::"regconfig", "content")) STORED
 );
 
 
@@ -706,7 +752,7 @@ ALTER SEQUENCE "public"."team_members_id_seq" OWNED BY "public"."team_members"."
 CREATE TABLE IF NOT EXISTS "public"."user_preferences" (
     "id" bigint NOT NULL,
     "user_id" "uuid" NOT NULL,
-    "activity_filters" "jsonb" DEFAULT '{"push": true, "issue": true, "create": true, "release": true, "repo_added": true, "chat_session": true, "pull_request": true, "repo_indexed": true, "prompt_generated": true, "team_invite_sent": true, "team_member_joined": true}'::"jsonb",
+    "activity_filters" "jsonb" DEFAULT '{"push": true, "issue": true, "create": true, "release": true, "repo_added": true, "repo_synced": true, "pull_request": true, "repo_deleted": true, "repo_indexed": true, "workflow_run": true, "team_invite_sent": true, "team_member_joined": true}'::"jsonb",
     "created_at" timestamp with time zone DEFAULT "now"(),
     "updated_at" timestamp with time zone DEFAULT "now"()
 );
@@ -968,6 +1014,10 @@ CREATE INDEX "idx_repo_chunks_embedding" ON "public"."repo_chunks" USING "hnsw" 
 
 
 
+CREATE INDEX "idx_repo_chunks_fts" ON "public"."repo_chunks" USING "gin" ("fts");
+
+
+
 CREATE INDEX "idx_repo_chunks_user_repo" ON "public"."repo_chunks" USING "btree" ("user_id", "repo_full_name");
 
 
@@ -1221,6 +1271,9 @@ GRANT USAGE ON SCHEMA "public" TO "postgres";
 GRANT USAGE ON SCHEMA "public" TO "anon";
 GRANT USAGE ON SCHEMA "public" TO "authenticated";
 GRANT USAGE ON SCHEMA "public" TO "service_role";
+
+
+
 
 
 

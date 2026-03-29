@@ -20,6 +20,7 @@ import {
   History,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { SyncSettingsCard } from "@/app/components/repo/SyncPanel";
 
 export default function RepoSettingsPage() {
   const params = useParams<{ owner: string; name: string }>();
@@ -148,6 +149,9 @@ export default function RepoSettingsPage() {
           <span className="text-[var(--gray-300)]">{fullName}</span>
         </p>
       </div>
+
+      {/* Sync Settings */}
+      <SyncSettingsCard />
 
       {/* Danger Zone */}
       <GlowCard glowColor="none" className="p-0 overflow-hidden border-red-500/20">

@@ -1,23 +1,24 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import type { LucideIcon } from "lucide-react";
 import {
+  CircleDot,
   Database,
-  MessageSquare,
-  Wand2,
-  Users,
+  GitBranch,
   GitCommitHorizontal,
   GitPullRequest,
-  CircleDot,
-  GitBranch,
-  Tag,
+  Play,
   Plus,
-  X,
+  RefreshCw,
+  Tag,
   Trash2,
+  Users,
+  X,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { isActivityEventType } from "@/lib/activity";
+import { createClient } from "@/lib/supabase/client";
 
 interface ActivityEvent {
   id: number;
@@ -31,7 +32,6 @@ interface ActivityEvent {
   created_at: string;
 }
 
-// ── Event type → icon + color mapping ──
 const EVENT_CONFIG: Record<
   string,
   { icon: LucideIcon; color: string; label: string }
@@ -41,10 +41,20 @@ const EVENT_CONFIG: Record<
     color: "var(--accent-green)",
     label: "Repo Added",
   },
+  repo_deleted: {
+    icon: Trash2,
+    color: "var(--accent-red)",
+    label: "Repo Deleted",
+  },
   repo_indexed: {
     icon: Database,
     color: "var(--accent-green)",
     label: "Indexed",
+  },
+  repo_synced: {
+    icon: RefreshCw,
+    color: "#58A6FF",
+    label: "Synced",
   },
   team_member_joined: {
     icon: Users,
@@ -55,16 +65,6 @@ const EVENT_CONFIG: Record<
     icon: Users,
     color: "var(--accent-amber)",
     label: "Invite",
-  },
-  chat_session: {
-    icon: MessageSquare,
-    color: "var(--accent-green)",
-    label: "Chat",
-  },
-  prompt_generated: {
-    icon: Wand2,
-    color: "var(--accent-muted)",
-    label: "Prompt",
   },
   push: {
     icon: GitCommitHorizontal,
@@ -91,6 +91,11 @@ const EVENT_CONFIG: Record<
     color: "#D29922",
     label: "Release",
   },
+  workflow_run: {
+    icon: Play,
+    color: "#3FB950",
+    label: "Actions",
+  },
 };
 
 function getEventConfig(eventType: string) {
@@ -103,7 +108,6 @@ function getEventConfig(eventType: string) {
   );
 }
 
-// ── Relative time formatter ──
 function timeAgo(dateStr: string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
@@ -122,11 +126,10 @@ function timeAgo(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-// ── Source badge component ──
 function SourceBadge({ source }: { source: "kontext" | "github" }) {
   if (source === "github") {
     return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-white/8 text-[var(--gray-300)] border border-white/5">
+      <span className="inline-flex items-center gap-1 rounded border border-white/5 bg-white/8 px-1.5 py-0.5 font-mono text-[9px] font-medium text-[var(--gray-300)]">
         <svg
           viewBox="0 0 16 16"
           width="9"
@@ -142,23 +145,22 @@ function SourceBadge({ source }: { source: "kontext" | "github" }) {
   }
 
   return (
-    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/10">
-      <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-green)]" />
+    <span className="inline-flex items-center gap-1 rounded border border-[var(--accent-green)]/10 bg-[var(--accent-green)]/10 px-1.5 py-0.5 font-mono text-[9px] font-medium text-[var(--accent-green)]">
+      <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-green)]" />
       Kontext
     </span>
   );
 }
 
-// ── Loading skeleton ──
 function ActivitySkeleton() {
   return (
     <div className="space-y-3">
       {[...Array(4)].map((_, i) => (
         <div key={i} className="flex items-start gap-3 animate-pulse">
-          <div className="w-6 h-6 rounded-full bg-[var(--alpha-white-8)] shrink-0" />
+          <div className="h-6 w-6 shrink-0 rounded-full bg-[var(--alpha-white-8)]" />
           <div className="flex-1 space-y-1.5 pt-0.5">
-            <div className="h-3 bg-[var(--alpha-white-5)] rounded w-3/4" />
-            <div className="h-2 bg-[var(--alpha-white-5)] rounded w-1/2" />
+            <div className="h-3 w-3/4 rounded bg-[var(--alpha-white-5)]" />
+            <div className="h-2 w-1/2 rounded bg-[var(--alpha-white-5)]" />
           </div>
         </div>
       ))}
@@ -172,16 +174,15 @@ export function ActivityFeed() {
   const [clearConfirm, setClearConfirm] = useState(false);
   const router = useRouter();
 
-  // Fetch initial events
   const fetchEvents = useCallback(async () => {
     try {
-      const res = await fetch("/api/activity?limit=15");
+      const res = await fetch("/api/activity?limit=50");
       if (res.ok) {
         const data = await res.json();
         setEvents(data.events || []);
       }
     } catch {
-      // Silent fail
+      // Silent fail.
     } finally {
       setLoading(false);
     }
@@ -191,7 +192,6 @@ export function ActivityFeed() {
     fetchEvents();
   }, [fetchEvents]);
 
-  // Subscribe to Supabase Realtime for new events
   useEffect(() => {
     const supabase = createClient();
 
@@ -206,11 +206,11 @@ export function ActivityFeed() {
         },
         (payload) => {
           const newEvent = payload.new as ActivityEvent;
+          if (!isActivityEventType(newEvent.event_type)) return;
+
           setEvents((prev) => {
-            // Deduplicate
-            if (prev.find((e) => e.id === newEvent.id)) return prev;
-            // Add at the top, keep max 15
-            return [newEvent, ...prev].slice(0, 15);
+            if (prev.find((event) => event.id === newEvent.id)) return prev;
+            return [newEvent, ...prev].slice(0, 50);
           });
         }
       )
@@ -221,30 +221,27 @@ export function ActivityFeed() {
     };
   }, []);
 
-  // ── Clear individual event ──
   const handleDismiss = async (eventId: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    // Optimistic removal
-    setEvents((prev) => prev.filter((ev) => ev.id !== eventId));
+    setEvents((prev) => prev.filter((event) => event.id !== eventId));
+
     try {
       await fetch(`/api/activity?id=${eventId}`, { method: "DELETE" });
     } catch {
-      // Re-fetch on error
       fetchEvents();
     }
   };
 
-  // ── Clear all events (double-click) ──
   const handleClearAll = async () => {
     if (!clearConfirm) {
       setClearConfirm(true);
-      // Auto-reset after 3 seconds
       setTimeout(() => setClearConfirm(false), 3000);
       return;
     }
-    // Second click — actually clear
+
     setEvents([]);
     setClearConfirm(false);
+
     try {
       await fetch("/api/activity", { method: "DELETE" });
     } catch {
@@ -253,23 +250,21 @@ export function ActivityFeed() {
   };
 
   const handleClick = (event: ActivityEvent) => {
-    if (event.repo_full_name) {
-      const [owner, name] = event.repo_full_name.split("/");
-      router.push(`/repo/${owner}/${name}`);
-    }
+    if (!event.repo_full_name) return;
+    const [owner, name] = event.repo_full_name.split("/");
+    router.push(`/repo/${owner}/${name}`);
   };
 
   return (
-    <div className="space-y-1">
-      {/* Header row with clear button */}
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-mono text-xs uppercase tracking-wider text-[var(--gray-500)] m-0">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="mb-3 flex shrink-0 items-center justify-between">
+        <h3 className="m-0 font-mono text-xs uppercase tracking-wider text-[var(--gray-500)]">
           Recent Activity
         </h3>
         {events.length > 0 && (
           <button
             onClick={handleClearAll}
-            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono transition-all border-none cursor-pointer ${
+            className={`flex cursor-pointer items-center gap-1 rounded border-none px-2 py-0.5 font-mono text-[10px] transition-all ${
               clearConfirm
                 ? "bg-[var(--accent-red)]/15 text-[var(--accent-red)]"
                 : "bg-transparent text-[var(--gray-600)] hover:text-[var(--gray-400)]"
@@ -281,103 +276,97 @@ export function ActivityFeed() {
         )}
       </div>
 
-      {loading ? (
-        <ActivitySkeleton />
-      ) : events.length === 0 ? (
-        <div className="text-center py-8">
-          <div className="w-8 h-8 rounded-full bg-[var(--alpha-white-5)] flex items-center justify-center mx-auto mb-2">
-            <Database size={14} className="text-[var(--gray-600)]" />
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1 overscroll-contain">
+        {loading ? (
+          <ActivitySkeleton />
+        ) : events.length === 0 ? (
+          <div className="flex h-full min-h-[240px] items-center justify-center text-center">
+            <div>
+              <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--alpha-white-5)]">
+                <Database size={14} className="text-[var(--gray-600)]" />
+              </div>
+              <p className="m-0 font-mono text-[11px] text-[var(--gray-600)]">
+                No activity yet
+              </p>
+              <p className="m-0 mt-0.5 font-mono text-[10px] text-[var(--gray-700)]">
+                Repo and GitHub activity will appear here
+              </p>
+            </div>
           </div>
-          <p className="font-mono text-[11px] text-[var(--gray-600)] m-0">
-            No activity yet
-          </p>
-          <p className="font-mono text-[10px] text-[var(--gray-700)] m-0 mt-0.5">
-            Add a repo to get started
-          </p>
-        </div>
-      ) : (
-        <div className="relative">
-          {/* Vertical timeline line */}
-          <div className="absolute left-[11px] top-2 bottom-2 w-px bg-[var(--alpha-white-8)]" />
+        ) : (
+          <div className="relative">
+            <div className="absolute bottom-2 left-[11px] top-2 w-px bg-[var(--alpha-white-8)]" />
 
-          <div className="space-y-1">
-            {events.map((event, i) => {
-              const config = getEventConfig(event.event_type);
-              const IconComponent = config.icon;
+            <div className="space-y-1">
+              {events.map((event, i) => {
+                const config = getEventConfig(event.event_type);
+                const IconComponent = config.icon;
 
-              return (
-                <div
-                  key={event.id}
-                  className={`relative flex items-start gap-3 animate-fade-in-up group ${
-                    event.repo_full_name
-                      ? "cursor-pointer hover:bg-[var(--alpha-white-5)]"
-                      : ""
-                  } -mx-2 px-2 py-1.5 rounded-lg transition-colors`}
-                  style={{
-                    animationDelay: `${i * 40}ms`,
-                    animationFillMode: "backwards",
-                  }}
-                  onClick={() => handleClick(event)}
-                >
-                  {/* Dismiss button — visible on hover */}
-                  <button
-                    onClick={(e) => handleDismiss(event.id, e)}
-                    className="absolute right-1 top-1 p-0.5 rounded opacity-0 group-hover:opacity-100 bg-transparent text-[var(--gray-600)] hover:text-[var(--gray-300)] border-none cursor-pointer transition-opacity"
-                    title="Dismiss"
-                  >
-                    <X size={10} />
-                  </button>
-
-                  {/* Icon */}
+                return (
                   <div
-                    className="relative z-10 w-6 h-6 rounded-full flex items-center justify-center shrink-0"
-                    style={{ background: `${config.color}15` }}
+                    key={event.id}
+                    className={`group relative -mx-2 flex items-start gap-3 rounded-lg px-2 py-1.5 transition-colors animate-fade-in-up ${
+                      event.repo_full_name
+                        ? "cursor-pointer hover:bg-[var(--alpha-white-5)]"
+                        : ""
+                    }`}
+                    style={{
+                      animationDelay: `${i * 40}ms`,
+                      animationFillMode: "backwards",
+                    }}
+                    onClick={() => handleClick(event)}
                   >
-                    <IconComponent
-                      size={11}
-                      style={{ color: config.color }}
-                    />
-                  </div>
+                    <button
+                      onClick={(e) => handleDismiss(event.id, e)}
+                      className="absolute right-1 top-1 cursor-pointer rounded bg-transparent p-0.5 text-[var(--gray-600)] opacity-0 transition-opacity hover:text-[var(--gray-300)] group-hover:opacity-100 border-none"
+                      title="Dismiss"
+                    >
+                      <X size={10} />
+                    </button>
 
-                  {/* Content */}
-                  <div className="min-w-0 flex-1 pr-4">
-                    {/* Source badge */}
-                    <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
-                      <SourceBadge source={event.source} />
+                    <div
+                      className="relative z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                      style={{ background: `${config.color}15` }}
+                    >
+                      <IconComponent size={11} style={{ color: config.color }} />
                     </div>
 
-                    <p className="font-mono text-[11px] text-[var(--gray-200)] m-0 leading-relaxed line-clamp-2">
-                      {event.title}
-                    </p>
+                    <div className="min-w-0 flex-1 pr-4">
+                      <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
+                        <SourceBadge source={event.source} />
+                      </div>
 
-                    {/* Description */}
-                    {event.description && (
-                      <p className="font-mono text-[10px] text-[var(--gray-500)] m-0 mt-0.5 line-clamp-1">
-                        {event.description}
+                      <p className="m-0 line-clamp-2 font-mono text-[11px] leading-relaxed text-[var(--gray-200)]">
+                        {event.title}
                       </p>
-                    )}
 
-                    {/* Repo + time */}
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      {event.repo_full_name && (
-                        <>
-                          <span className="font-mono text-[10px] text-[var(--gray-500)] group-hover:text-[var(--accent-green)] transition-colors">
-                            {event.repo_full_name}
-                          </span>
-                          <span className="text-[var(--gray-600)]">·</span>
-                        </>
+                      {event.description && (
+                        <p className="m-0 mt-0.5 line-clamp-1 font-mono text-[10px] text-[var(--gray-500)]">
+                          {event.description}
+                        </p>
                       )}
-                      <span className="font-mono text-[10px] text-[var(--gray-600)]">
-                        {timeAgo(event.created_at)}
-                      </span>
+
+                      <div className="mt-0.5 flex items-center gap-1.5">
+                        {event.repo_full_name && (
+                          <>
+                            <span className="font-mono text-[10px] text-[var(--gray-500)] transition-colors group-hover:text-[var(--accent-green)]">
+                              {event.repo_full_name}
+                            </span>
+                            <span className="text-[var(--gray-600)]">·</span>
+                          </>
+                        )}
+                        <span className="font-mono text-[10px] text-[var(--gray-600)]">
+                          {timeAgo(event.created_at)}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

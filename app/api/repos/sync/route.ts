@@ -3,6 +3,7 @@ import { TaskType } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 import { createAdminClient, getAuthenticatedUser } from "@/lib/api/auth";
 import { ApiError, getApiErrorPayload, handleApiError } from "@/lib/api/errors";
+import { logActivity } from "@/lib/api/activity";
 import { chunkFile } from "@/lib/api/chunker";
 import { generateEmbeddings, generateFileSummary } from "@/lib/api/embeddings";
 import {
@@ -422,6 +423,24 @@ export async function POST(request: Request) {
             .select("id", { count: "exact", head: true })
             .eq("user_id", userId)
             .eq("repo_full_name", fullName);
+
+          if (indexableFiles.length > 0 || newCommits.length > 0) {
+            logActivity({
+              userId,
+              repoFullName: fullName,
+              source: "kontext",
+              eventType: "repo_synced",
+              title: `${fullName} synced to ${branch}`,
+              description: `${indexableFiles.length} file${indexableFiles.length === 1 ? "" : "s"} refreshed from ${newCommits.length} commit${newCommits.length === 1 ? "" : "s"}`,
+              metadata: {
+                branch,
+                head_sha: targetHeadSHA,
+                files_changed: indexableFiles.length,
+                commits_tracked: newCommits.length,
+                webhook_triggered: isWebhookTriggered,
+              },
+            });
+          }
 
           send({
             status: "done",

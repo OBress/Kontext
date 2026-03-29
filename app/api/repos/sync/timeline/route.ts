@@ -69,14 +69,20 @@ export async function GET(request: Request) {
       .eq("repo_full_name", repoFullName)
       .is("ai_summary", null);
 
-    // Group commits by push_group_id
+    // Group commits by push_group_id.
+    // Legacy fix: old ingestions assigned one shared ingest-* group to all
+    // historical commits.  Treat those as individual (ungrouped) entries so
+    // each commit appears on its own card.
     const rawCommits = (commits || []) as CommitRow[];
     const groupMap = new Map<string, PushGroup>();
     const ungrouped: CommitRow[] = [];
 
     for (const commit of rawCommits) {
       const groupId = commit.push_group_id;
-      if (groupId) {
+      // Treat null / ingest-* groups as individual commits
+      if (!groupId || groupId.startsWith("ingest-")) {
+        ungrouped.push(commit);
+      } else {
         if (!groupMap.has(groupId)) {
           groupMap.set(groupId, {
             push_group_id: groupId,
@@ -94,8 +100,6 @@ export async function GET(request: Request) {
         if (new Date(commit.committed_at) > new Date(group.committed_at)) {
           group.committed_at = commit.committed_at;
         }
-      } else {
-        ungrouped.push(commit);
       }
     }
 

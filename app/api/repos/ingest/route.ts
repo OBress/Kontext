@@ -6,7 +6,7 @@ import { getApiErrorPayload, handleApiError, ApiError } from "@/lib/api/errors";
 import { logActivity } from "@/lib/api/activity";
 import { chunkFile } from "@/lib/api/chunker";
 import { generateEmbeddings, generateFileSummary } from "@/lib/api/embeddings";
-import { fetchFileContent, fetchLatestCommit, fetchRepoTree, fetchCommitsSince } from "@/lib/api/github";
+import { fetchFileContent, fetchLatestCommit, fetchRepoTree, fetchRecentCommits } from "@/lib/api/github";
 import { extractImports } from "@/lib/api/graph-builder";
 import { getAiBlockedStatus } from "@/lib/api/gemini";
 import { rateLimit } from "@/lib/api/rate-limit";
@@ -281,16 +281,17 @@ export async function POST(request: Request) {
 
             try {
               // Fetch actual commit history from GitHub
-              const historicalCommits = await fetchCommitsSince(
+              const historicalCommits = await fetchRecentCommits(
                 effectiveToken,
                 owner,
                 name,
                 defaultBranch,
-                headSHA,
                 timelineCommitDepth
               ).catch(() => []);
 
-              const ingestGroupId = `ingest-${Date.now()}`;
+              // Filter out the head commit (we'll create a baseline entry for it)
+              const filteredHistorical = historicalCommits.filter(c => c.sha !== headSHA);
+
               const commitRows = [
                 // Baseline commit
                 {
@@ -301,11 +302,12 @@ export async function POST(request: Request) {
                   author_name: "system",
                   committed_at: promotedAt,
                   sync_triggered: true,
-                  push_group_id: ingestGroupId,
+                  push_group_id: `ingest-baseline-${Date.now()}`,
                   files_changed: [] as { path: string; status: string }[],
                 },
-                // Historical commits
-                ...historicalCommits.map((c) => ({
+                // Historical commits — each gets its own group so they
+                // appear as individual items on the timeline
+                ...filteredHistorical.map((c) => ({
                   user_id: user.id,
                   repo_full_name: fullName,
                   sha: c.sha,
@@ -314,7 +316,7 @@ export async function POST(request: Request) {
                   author_avatar_url: c.author?.avatar_url || null,
                   committed_at: c.commit.author.date,
                   sync_triggered: false,
-                  push_group_id: ingestGroupId,
+                  push_group_id: null as string | null,
                   files_changed: [] as { path: string; status: string }[],
                 })),
               ];

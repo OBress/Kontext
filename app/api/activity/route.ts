@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/api/rate-limit";
 import { handleApiError } from "@/lib/api/errors";
+import { ACTIVITY_EVENT_TYPES, isActivityEventType } from "@/lib/activity";
 
 /**
  * GET /api/activity — Fetch the authenticated user's recent activity events.
  * Supports: ?limit=20 (default 20, max 50)
- *           &event_types=push,repo_indexed (optional comma-separated filter)
+ *           &event_types=push,repo_synced (optional comma-separated filter)
  */
 export async function GET(request: NextRequest) {
   try {
@@ -30,13 +31,11 @@ export async function GET(request: NextRequest) {
       .eq("user_id", user.id)
       .single();
 
-    // Build list of enabled event types from preferences
-    let enabledTypes: string[] | null = null;
+    // Build list of enabled event types from preferences, ignoring deprecated keys.
+    let enabledTypes = [...ACTIVITY_EVENT_TYPES];
     if (prefs?.activity_filters) {
       const filters = prefs.activity_filters as Record<string, boolean>;
-      enabledTypes = Object.entries(filters)
-        .filter(([, enabled]) => enabled)
-        .map(([type]) => type);
+      enabledTypes = ACTIVITY_EVENT_TYPES.filter((type) => filters[type] !== false);
 
       // If user disabled everything, return empty
       if (enabledTypes.length === 0) {
@@ -47,13 +46,12 @@ export async function GET(request: NextRequest) {
     // Also allow client-side type filter override
     const eventTypesParam = request.nextUrl.searchParams.get("event_types");
     if (eventTypesParam) {
-      const requestedTypes = eventTypesParam.split(",").map((t) => t.trim());
-      // Intersect with user preferences if they exist
-      if (enabledTypes) {
-        enabledTypes = requestedTypes.filter((t) => enabledTypes!.includes(t));
-      } else {
-        enabledTypes = requestedTypes;
-      }
+      const requestedTypes = eventTypesParam
+        .split(",")
+        .map((type) => type.trim())
+        .filter(isActivityEventType);
+
+      enabledTypes = requestedTypes.filter((type) => enabledTypes.includes(type));
     }
 
     let query = supabase
@@ -63,7 +61,7 @@ export async function GET(request: NextRequest) {
       .order("created_at", { ascending: false })
       .limit(limit);
 
-    if (enabledTypes && enabledTypes.length > 0) {
+    if (enabledTypes.length > 0) {
       query = query.in("event_type", enabledTypes);
     }
 

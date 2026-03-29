@@ -1,20 +1,10 @@
 import { createAdminClient } from "./auth";
+import {
+  DEFAULT_ACTIVITY_FILTERS,
+  type ActivityEventType,
+} from "@/lib/activity";
 
 export type ActivitySource = "kontext" | "github";
-
-export type ActivityEventType =
-  | "repo_added"
-  | "repo_deleted"
-  | "repo_indexed"
-  | "team_member_joined"
-  | "team_invite_sent"
-  | "chat_session"
-  | "prompt_generated"
-  | "push"
-  | "pull_request"
-  | "issue"
-  | "create"
-  | "release";
 
 export interface LogActivityParams {
   userId: string;
@@ -52,20 +42,4 @@ export async function logActivity(params: LogActivityParams): Promise<void> {
   }
 }
 
-/**
- * Default activity filter preferences — all event types enabled.
- */
-export const DEFAULT_ACTIVITY_FILTERS: Record<ActivityEventType, boolean> = {
-  repo_added: true,
-  repo_deleted: true,
-  repo_indexed: true,
-  team_member_joined: true,
-  team_invite_sent: true,
-  chat_session: true,
-  prompt_generated: true,
-  push: true,
-  pull_request: true,
-  issue: true,
-  create: true,
-  release: true,
-};
+export { DEFAULT_ACTIVITY_FILTERS };

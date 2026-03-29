@@ -78,12 +78,17 @@ export async function generateEmbeddings(
 
 /**
  * Generate embeddings optimized for retrieval queries.
+ *
+ * Use TaskType.CODE_RETRIEVAL_QUERY when the query is a natural language
+ * question about code (e.g. "list all API endpoints"). This aligns the
+ * query embedding with RETRIEVAL_DOCUMENT code chunks for better recall.
  */
 export async function generateQueryEmbedding(
   apiKey: string,
-  query: string
+  query: string,
+  taskType: TaskType = TaskType.RETRIEVAL_QUERY
 ): Promise<number[]> {
-  const results = await generateEmbeddings(apiKey, [query], TaskType.RETRIEVAL_QUERY);
+  const results = await generateEmbeddings(apiKey, [query], taskType);
   return results[0];
 }
 
