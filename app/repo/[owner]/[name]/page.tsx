@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useAppStore, type RepoJobState } from "@/lib/store/app-store";
 import { GlowCard } from "@/app/components/shared/GlowCard";
@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   AlertCircle,
   RefreshCw,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -53,19 +54,44 @@ export default function RepoOverviewPage() {
   const isSyncRunning =
     syncJob &&
     (syncJob.status === "queued" || syncJob.status === "running");
-  const isSyncDone = syncJob?.status === "completed";
-  const isSyncFailed = syncJob?.status === "failed";
 
-  // Auto-dismiss sync completion toast after 8 seconds
-  const [showSyncDone, setShowSyncDone] = useState(false);
+  // Only show completed/failed banners for syncs that finished recently (60s)
+  const RECENCY_WINDOW_MS = 60_000;
+  const syncFinishedRecently = syncJob?.updatedAt
+    ? Date.now() - new Date(syncJob.updatedAt).getTime() < RECENCY_WINDOW_MS
+    : false;
+  const isSyncDone = syncJob?.status === "completed" && syncFinishedRecently;
+  const isSyncFailed = syncJob?.status === "failed" && syncFinishedRecently;
+
+  // Track whether we witnessed this sync running — prevents the completion
+  // toast from flashing in when navigating to a page with an already-done sync
+  const witnessedSyncIdRef = useRef<number | null>(null);
+  if (isSyncRunning && syncJob) {
+    witnessedSyncIdRef.current = syncJob.id;
+  }
+  const witnessedThisSync = syncJob
+    ? witnessedSyncIdRef.current === syncJob.id
+    : false;
+
+  // Show sync completion toast — click-to-dismiss or auto-dismiss after 15s
+  const [syncDoneDismissed, setSyncDoneDismissed] = useState(false);
+  const showSyncDone = isSyncDone && witnessedThisSync && !syncDoneDismissed;
+
+  // Reset dismissed state when a new sync completes
+  const syncDoneKey = syncJob?.id ?? 0;
   useEffect(() => {
-    if (isSyncDone) {
-      setShowSyncDone(true);
-      const timeout = setTimeout(() => setShowSyncDone(false), 8000);
-      return () => clearTimeout(timeout);
-    }
-    setShowSyncDone(false);
-  }, [isSyncDone, syncJob?.updatedAt]);
+    setSyncDoneDismissed(false);
+  }, [syncDoneKey]);
+
+  // Auto-dismiss after 15s
+  useEffect(() => {
+    if (!showSyncDone) return;
+    const timeout = setTimeout(() => setSyncDoneDismissed(true), 15_000);
+    return () => clearTimeout(timeout);
+  }, [showSyncDone]);
+
+  // Show sync failed — only if witnessed running
+  const showSyncFailed = isSyncFailed && witnessedThisSync;
 
   const syncMeta = syncJob?.metadata as Record<string, unknown> | undefined;
   const syncBaseSha = (syncMeta?.baseSha as string) || null;
@@ -279,7 +305,7 @@ export default function RepoOverviewPage() {
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.3 }}
           >
-            <GlowCard glowColor="cyan" className="p-5">
+            <GlowCard glowColor="cyan" className="p-5 cursor-pointer hover:border-blue-500/30 transition-colors" onClick={() => setSyncDoneDismissed(true)}>
               <div className="flex items-center gap-2">
                 <CheckCircle2 size={16} className="text-blue-400" />
                 <h3 className="font-mono text-sm font-medium text-blue-400 m-0">
@@ -288,6 +314,7 @@ export default function RepoOverviewPage() {
                 <span className="ml-auto font-mono text-xs text-[var(--gray-400)]">
                   {syncJob?.resultSummary || `${syncFilesChanged} files synced`}
                 </span>
+                <X size={14} className="text-[var(--gray-500)] hover:text-[var(--gray-300)] ml-2 shrink-0" />
               </div>
             </GlowCard>
           </motion.div>
@@ -296,7 +323,7 @@ export default function RepoOverviewPage() {
 
       {/* Sync Failed Alert */}
       <AnimatePresence>
-        {isSyncFailed && (
+        {showSyncFailed && (
           <motion.div
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
