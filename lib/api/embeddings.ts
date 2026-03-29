@@ -126,6 +126,9 @@ export async function generateEmbeddings(
   const ai = createGeminiClient(apiKey);
   const results: number[][] = [];
 
+  const MAX_RETRIES = 4;
+  const BASE_BACKOFF_MS = 2000;
+
   for (let i = 0; i < texts.length; i += GEMINI_EMBEDDING_BATCH_SIZE) {
     const batch = texts.slice(i, i + GEMINI_EMBEDDING_BATCH_SIZE);
     let attempts = 0;
@@ -153,14 +156,20 @@ export async function generateEmbeddings(
       } catch (error: unknown) {
         const normalized = normalizeGeminiError(error, "embedding");
         const shouldRetry =
-          normalized.code === "AI_TRANSIENT" && attempts === 0;
+          normalized.code === "AI_TRANSIENT" && attempts < MAX_RETRIES;
 
         if (!shouldRetry) {
           throw normalized;
         }
 
         attempts += 1;
-        await delay(GEMINI_EMBEDDING_BATCH_DELAY_MS);
+        // Exponential backoff: 2s, 4s, 8s, 16s
+        const backoff = BASE_BACKOFF_MS * Math.pow(2, attempts - 1);
+        console.warn(
+          `[embeddings] Rate limited on batch ${Math.floor(i / GEMINI_EMBEDDING_BATCH_SIZE) + 1}, ` +
+          `retry ${attempts}/${MAX_RETRIES} after ${backoff}ms`
+        );
+        await delay(backoff);
       }
     }
 

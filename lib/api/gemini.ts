@@ -129,25 +129,34 @@ export function normalizeGeminiError(
   }
 
   if (effectiveStatus === 429) {
-    if (getRetryHint(message) && !lower.includes("quota")) {
+    // Only classify as a hard quota block if the error message
+    // explicitly mentions "quota" — this separates genuine quota
+    // exhaustion from per-minute rate limiting that can be retried.
+    const isHardQuota =
+      lower.includes("quota") &&
+      (lower.includes("exceeded") || lower.includes("exhausted") || lower.includes("limit"));
+
+    if (isHardQuota) {
       return new ApiError(
-        503,
-        "AI_TRANSIENT",
-        `Gemini is temporarily unavailable for ${operationLabel}.`,
+        429,
+        "AI_QUOTA_EXCEEDED",
+        `The Google project behind this API key has hit its Gemini quota for ${operationLabel}.`,
         {
           recoverable: true,
-          action: "Retry in a moment. If this keeps happening, verify project quota and service status.",
+          action: "Retry later, or verify quota and billing for the Google project behind this key in AI Studio / Google Cloud.",
         }
       );
     }
 
+    // All other 429s are transient rate limits — the caller should
+    // back off and retry.
     return new ApiError(
-      429,
-      "AI_QUOTA_EXCEEDED",
-      `The Google project behind this API key has hit its Gemini quota for ${operationLabel}.`,
+      503,
+      "AI_TRANSIENT",
+      `Gemini rate-limited ${operationLabel}. Will retry automatically.`,
       {
         recoverable: true,
-        action: "Retry later, or verify quota and billing for the Google project behind this key in AI Studio / Google Cloud.",
+        action: "Retry in a moment. If this keeps happening, verify project quota and service status.",
       }
     );
   }
