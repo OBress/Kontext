@@ -55,6 +55,9 @@ export function SyncStatusCard() {
   const [checkResult, setCheckResult] = useState<SyncCheckResult | null>(null);
   const [syncProgress, setSyncProgress] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [registeringWebhook, setRegisteringWebhook] = useState(false);
+
+  const hasWebhook = !!activeRepo?.webhook_id;
 
   const checkForUpdates = useCallback(async () => {
     if (!activeRepo) return;
@@ -149,6 +152,44 @@ export function SyncStatusCard() {
     }
   }, [activeRepo, apiKey, updateRepo]);
 
+  const tryRegisterWebhook = useCallback(async () => {
+    if (!activeRepo) return;
+    setRegisteringWebhook(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/repos/sync/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repo_full_name: activeRepo.full_name,
+          auto_sync_enabled: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to register webhook");
+      }
+
+      // Refresh repo data to pick up webhook_id
+      const settingsRes = await fetch(
+        `/api/repos/sync/settings?repo=${encodeURIComponent(activeRepo.full_name)}`
+      );
+      if (settingsRes.ok) {
+        const settings = await settingsRes.json();
+        updateRepo(activeRepo.full_name, {
+          auto_sync_enabled: true,
+          webhook_id: settings.hasWebhook ? 1 : null, // simplified — just track presence
+        });
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setRegisteringWebhook(false);
+    }
+  }, [activeRepo, updateRepo]);
+
   if (!activeRepo?.indexed) return null;
 
   const hasSha = !!activeRepo.last_synced_sha;
@@ -161,11 +202,23 @@ export function SyncStatusCard() {
           <Radio size={15} className="text-[var(--accent-green)]" />
           Sync Status
         </h3>
-        {activeRepo.auto_sync_enabled && (
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-            Auto-sync ON
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {activeRepo.auto_sync_enabled && hasWebhook && (
+            <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              Webhook
+            </span>
+          )}
+          {activeRepo.auto_sync_enabled && !hasWebhook && (
+            <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              Polling
+            </span>
+          )}
+          {!activeRepo.auto_sync_enabled && (
+            <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-[var(--alpha-white-5)] text-[var(--gray-500)] border border-[var(--alpha-white-8)]">
+              Manual
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Current state */}
@@ -180,11 +233,32 @@ export function SyncStatusCard() {
         </div>
       )}
 
+      {/* Polling mode notice with re-register option */}
+      {activeRepo.auto_sync_enabled && !hasWebhook && (
+        <div className="mb-3 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-3 text-xs font-mono text-amber-200">
+          <p className="m-0">
+            Webhook unavailable — checking for updates every 5 minutes.
+            This may happen if you don&apos;t have admin access to this repository.
+          </p>
+          <button
+            onClick={tryRegisterWebhook}
+            disabled={registeringWebhook}
+            className="mt-2 flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono rounded-md
+              bg-amber-500/10 border border-amber-500/30
+              text-amber-300 hover:bg-amber-500/20
+              disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+          >
+            {registeringWebhook ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />}
+            Try Register Webhook
+          </button>
+        </div>
+      )}
+
       {blockedMessage && (
         <div className="mb-3 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-3 text-xs font-mono text-amber-200">
           <p className="m-0">{blockedMessage}</p>
           {activeRepo.pending_sync_head_sha && (
-            <p className="m-0 mt-1 text-[10px] text-amber-300/80">
+            <p className="m-0 mt-1 text-xs text-amber-300/80">
               Pending head: {activeRepo.pending_sync_head_sha.slice(0, 7)}
             </p>
           )}
@@ -204,7 +278,7 @@ export function SyncStatusCard() {
               <AlertCircle size={14} className="mt-0.5 shrink-0" />
               <div>
                 <p className="font-semibold">{checkResult.newCommitCount} new commit{checkResult.newCommitCount !== 1 ? "s" : ""}</p>
-                <p className="text-[10px] mt-1 opacity-75">
+                <p className="text-xs mt-1 opacity-75">
                   Latest: &quot;{checkResult.latestMessage.slice(0, 60)}&quot; by {checkResult.latestAuthor}
                 </p>
               </div>
@@ -375,7 +449,7 @@ export function SyncSettingsCard() {
       <div className="flex items-center justify-between mb-4 pb-4 border-b border-[var(--alpha-white-5)]">
         <div>
           <p className="text-xs font-mono text-[var(--gray-300)]">Auto-sync</p>
-          <p className="text-[10px] font-mono text-[var(--gray-500)] mt-0.5">
+          <p className="text-xs font-mono text-[var(--gray-500)] mt-0.5">
             Webhook monitors pushes to the watched branch
           </p>
         </div>
@@ -434,9 +508,9 @@ export function SyncSettingsCard() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-mono font-semibold text-[var(--gray-200)]">{t.label}</span>
-                  <span className="text-[10px] font-mono text-[var(--gray-500)]">{t.cost}</span>
+                  <span className="text-xs font-mono text-[var(--gray-500)]">{t.cost}</span>
                 </div>
-                <p className="text-[10px] font-mono text-[var(--gray-500)] mt-0.5">{t.description}</p>
+                <p className="text-xs font-mono text-[var(--gray-500)] mt-0.5">{t.description}</p>
               </div>
             </button>
           ))}

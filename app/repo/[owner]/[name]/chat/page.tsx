@@ -6,7 +6,7 @@ import {
   useChatStore,
   ChatCitation,
   ChatMessage,
-  TimelineCitation,
+  ChatAttachedImage,
 } from "@/lib/store/chat-store";
 import { useAppStore } from "@/lib/store/app-store";
 import { formatLineRange } from "@/lib/code";
@@ -21,15 +21,20 @@ import {
   Loader2,
   PanelRightOpen,
   X,
-  GitCommit,
-  History,
   ArrowDown,
   GripVertical,
+  FolderOpen,
+  FolderClosed,
+  Plus,
+  Paperclip,
+  ChevronRight,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { atomDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { ChatVisualBlock } from "@/app/components/chat/ChatVisualBlocks";
+import { isChatVisualLanguage } from "@/types/chat-visuals";
 
 // Regex to detect file paths in backtick-wrapped inline code
 const FILE_PATH_REGEX = /^[\w@.-]+(?:\/[\w@.-]+)+\.[a-zA-Z]{1,10}(?::L?(\d+)(?:[-–](\d+))?)?$/;
@@ -42,6 +47,242 @@ interface LoadedFile {
   github_url: string | null;
   commit_sha: string | null;
   last_indexed_at?: string | null;
+}
+
+interface RepoFileEntry {
+  file_path: string;
+  extension: string | null;
+  line_count: number | null;
+}
+
+interface TreeNode {
+  name: string;
+  path: string;
+  isDir: boolean;
+  children: TreeNode[];
+}
+
+function buildFileTree(files: RepoFileEntry[]): TreeNode[] {
+  const root: TreeNode[] = [];
+  for (const file of files) {
+    const parts = file.file_path.split("/");
+    let current = root;
+    for (let i = 0; i < parts.length; i++) {
+      const name = parts[i];
+      const isLast = i === parts.length - 1;
+      const path = parts.slice(0, i + 1).join("/");
+      let existing = current.find((n) => n.name === name);
+      if (!existing) {
+        existing = { name, path, isDir: !isLast, children: [] };
+        current.push(existing);
+      }
+      current = existing.children;
+    }
+  }
+  // Sort: dirs first, then alphabetical
+  const sortTree = (nodes: TreeNode[]) => {
+    nodes.sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    for (const n of nodes) if (n.isDir) sortTree(n.children);
+  };
+  sortTree(root);
+  return root;
+}
+
+function FileTreeNode({
+  node,
+  depth,
+  onOpenFile,
+  onAttachFile,
+}: {
+  node: TreeNode;
+  depth: number;
+  onOpenFile: (path: string) => void;
+  onAttachFile: (path: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(depth < 1);
+
+  if (node.isDir) {
+    return (
+      <div>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="group flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left font-mono text-xs text-[var(--gray-300)] hover:bg-[var(--alpha-white-5)] transition-colors"
+          style={{ paddingLeft: `${depth * 12 + 8}px` }}
+        >
+          <ChevronRight
+            size={10}
+            className={`shrink-0 text-[var(--gray-500)] transition-transform ${expanded ? "rotate-90" : ""}`}
+          />
+          {expanded ? (
+            <FolderOpen size={12} className="shrink-0 text-[var(--accent-green)]" />
+          ) : (
+            <FolderClosed size={12} className="shrink-0 text-[var(--gray-500)]" />
+          )}
+          <span className="truncate">{node.name}</span>
+        </button>
+        {expanded && node.children.map((child) => (
+          <FileTreeNode
+            key={child.path}
+            node={child}
+            depth={depth + 1}
+            onOpenFile={onOpenFile}
+            onAttachFile={onAttachFile}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="group flex items-center gap-1.5 rounded-lg px-2 py-1 font-mono text-xs text-[var(--gray-400)] hover:bg-[var(--alpha-white-5)] transition-colors"
+      style={{ paddingLeft: `${depth * 12 + 8}px` }}
+    >
+      <FileCode size={11} className="shrink-0 text-[var(--gray-500)]" />
+      <button
+        onClick={() => onOpenFile(node.path)}
+        className="flex-1 truncate text-left hover:text-[var(--accent-green)] transition-colors"
+      >
+        {node.name}
+      </button>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onAttachFile(node.path);
+        }}
+        className="shrink-0 rounded p-0.5 text-[var(--gray-600)] opacity-0 group-hover:opacity-100 hover:text-[var(--accent-green)] hover:bg-[var(--accent-green)]/10 transition-all"
+        title="Add to chat context"
+      >
+        <Plus size={10} />
+      </button>
+    </div>
+  );
+}
+
+function FileTreePanel({
+  repoFullName,
+  onOpenFile,
+  onAttachFile,
+}: {
+  repoFullName: string;
+  onOpenFile: (path: string) => void;
+  onAttachFile: (path: string) => void;
+}) {
+  const [files, setFiles] = useState<RepoFileEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+    fetch(`/api/repos/files?repo=${encodeURIComponent(repoFullName)}`)
+      .then((r) => r.json())
+      .then((data) => setFiles(data.files || []))
+      .catch(() => setFiles([]))
+      .finally(() => setLoading(false));
+  }, [repoFullName]);
+
+  const filteredFiles = useMemo(() => {
+    if (!search.trim()) return files;
+    const q = search.toLowerCase();
+    return files.filter((f) => f.file_path.toLowerCase().includes(q));
+  }, [files, search]);
+
+  const tree = useMemo(() => buildFileTree(filteredFiles), [filteredFiles]);
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="border-b border-[var(--alpha-white-8)] px-3 py-3">
+        <div className="font-mono text-xs uppercase tracking-[0.16em] text-[var(--gray-500)]">
+          Repository Files
+        </div>
+        <div className="mt-1 font-mono text-xs text-[var(--gray-600)]">
+          {files.length} indexed files
+        </div>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Filter files..."
+          className="mt-2 w-full rounded-lg border border-[var(--alpha-white-8)] bg-[var(--surface-1)] px-2.5 py-1.5 font-mono text-xs text-[var(--gray-200)] outline-none placeholder:text-[var(--gray-600)] focus:border-[var(--accent-green)]/30"
+        />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {loading && (
+          <div className="flex items-center justify-center gap-2 py-8 font-mono text-xs text-[var(--gray-500)]">
+            <Loader2 size={12} className="animate-spin" />
+            Loading file tree...
+          </div>
+        )}
+        {!loading && tree.length === 0 && (
+          <div className="py-8 text-center font-mono text-xs text-[var(--gray-600)]">
+            {search ? "No files match filter" : "No indexed files found"}
+          </div>
+        )}
+        {!loading && tree.map((node) => (
+          <FileTreeNode
+            key={node.path}
+            node={node}
+            depth={0}
+            onOpenFile={onOpenFile}
+            onAttachFile={onAttachFile}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FileMentionDropdown({
+  query,
+  files,
+  onSelect,
+  onClose,
+  selectedIndex,
+}: {
+  query: string;
+  files: RepoFileEntry[];
+  onSelect: (path: string) => void;
+  onClose: () => void;
+  selectedIndex: number;
+}) {
+  const q = query.toLowerCase();
+  const matches = useMemo(
+    () => files.filter((f) => f.file_path.toLowerCase().includes(q)).slice(0, 12),
+    [files, q]
+  );
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = listRef.current?.children[selectedIndex] as HTMLElement | undefined;
+    el?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
+
+  if (matches.length === 0) return null;
+
+  return (
+    <div
+      ref={listRef}
+      className="absolute bottom-full left-0 right-0 z-20 mb-1 max-h-52 overflow-y-auto rounded-xl border border-[var(--alpha-white-10)] bg-[var(--surface-2)] shadow-[0_12px_40px_rgba(0,0,0,0.4)]"
+    >
+      {matches.map((file, idx) => (
+        <button
+          key={file.file_path}
+          onClick={() => onSelect(file.file_path)}
+          className={`flex w-full items-center gap-2 px-3 py-2 font-mono text-xs transition-colors ${
+            idx === selectedIndex
+              ? "bg-[var(--accent-green)]/12 text-[var(--accent-green)]"
+              : "text-[var(--gray-300)] hover:bg-[var(--alpha-white-5)]"
+          }`}
+        >
+          <FileCode size={11} className="shrink-0" />
+          <span className="truncate">{file.file_path}</span>
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function citationCacheKey(citation: ChatCitation): string {
@@ -149,151 +390,11 @@ function SuggestedQuestions({ onSelect }: { onSelect: (question: string) => void
   );
 }
 
-function ContextBlock({
-  citations,
-  timelineCitations,
-  selectedCitationId,
-  onSelectCitation,
-  timestamp,
-}: {
-  citations?: ChatCitation[];
-  timelineCitations?: TimelineCitation[];
-  selectedCitationId: string | null;
-  onSelectCitation: (citation: ChatCitation) => void;
-  timestamp: Date;
-}) {
-  const hasCitations = (citations && citations.length > 0) || (timelineCitations && timelineCitations.length > 0);
-  if (!hasCitations) return null;
-
-  return (
-    <div className="flex justify-start">
-      <div className="w-full max-w-[92%] rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--surface-1)] px-4 py-4 shadow-[0_18px_60px_rgba(0,0,0,0.18)]">
-        {/* Header: Kontext branding */}
-        <div className="mb-3 flex items-center gap-2">
-          <div className="flex h-5 w-5 items-center justify-center">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <path d="M6 0L11.196 6L6 12L0.804 6L6 0Z" fill="#3fb950" />
-            </svg>
-          </div>
-          <span className="font-mono text-sm font-medium text-[var(--gray-100)]">
-            Kontext
-          </span>
-          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--gray-600)]">
-            {timestamp.toLocaleTimeString()}
-          </span>
-        </div>
-
-        <div className="font-mono text-xs text-[var(--gray-400)] mb-3">
-          Retrieved context from indexed codebase
-        </div>
-
-        {/* Code citations */}
-        {citations && citations.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {citations.map((citation) => (
-              <CitationChip
-                key={citation.citation_id}
-                citation={citation}
-                isSelected={selectedCitationId === citation.citation_id}
-                onSelect={onSelectCitation}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Timeline citations */}
-        {timelineCitations && timelineCitations.length > 0 && (
-          <div className={`flex flex-col gap-2 ${citations && citations.length > 0 ? "mt-3" : ""}`}>
-            {timelineCitations.map((tc) => (
-              <TimelineCitationChip key={tc.sha} citation={tc} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CitationChip({
-  citation,
-  isSelected,
-  onSelect,
-}: {
-  citation: ChatCitation;
-  isSelected: boolean;
-  onSelect: (citation: ChatCitation) => void;
-}) {
-  return (
-    <button
-      onClick={() => onSelect(citation)}
-      className={`flex items-start gap-2 rounded-lg border px-2.5 py-2 text-left transition-all ${
-        isSelected
-          ? "border-[var(--accent-green)]/35 bg-[var(--accent-green)]/8 shadow-[0_0_30px_rgba(63,185,80,0.06)]"
-          : "border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] hover:border-[var(--accent-green)]/25"
-      }`}
-    >
-      <div className="mt-0.5 shrink-0 rounded-md bg-[var(--alpha-white-8)] p-1.5">
-        <FileCode size={12} className="text-[var(--accent-green)]" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-mono text-[11px] text-[var(--gray-100)]">
-          {citation.file_path}
-        </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--gray-500)]">
-          <span>{Math.round(citation.retrieval_score * 100)}%</span>
-          <span>{citation.language}</span>
-        </div>
-      </div>
-    </button>
-  );
-}
-
-function TimelineCitationChip({
-  citation,
-}: {
-  citation: TimelineCitation;
-}) {
-  const params = useParams<{ owner: string; name: string }>();
-
-  return (
-    <div className="flex items-start gap-2 rounded-lg border border-purple-500/20 bg-purple-500/5 px-2.5 py-2 text-left">
-      <div className="mt-0.5 shrink-0 rounded-md bg-purple-500/15 p-1.5">
-        <History size={12} className="text-purple-400" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="font-mono text-[11px] text-[var(--gray-200)] leading-snug line-clamp-2">
-          {citation.ai_summary}
-        </div>
-        <div className="mt-1 flex flex-wrap items-center gap-1.5 font-mono text-[9px] text-[var(--gray-500)]">
-          <span className="inline-flex items-center gap-1 rounded bg-purple-500/10 px-1 py-0.5 text-purple-400">
-            <GitCommit size={9} />
-            {citation.sha.slice(0, 7)}
-          </span>
-          <span>{citation.date}</span>
-          <span>{Math.round(citation.similarity * 100)}%</span>
-        </div>
-      </div>
-      {citation.author_avatar_url && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={citation.author_avatar_url}
-          alt={citation.author}
-          className="w-5 h-5 rounded-full shrink-0 mt-0.5"
-        />
-      )}
-    </div>
-  );
-}
-
 function MessageBubble({
   message,
-  selectedCitationId,
-  onSelectCitation,
   onOpenFilePath,
 }: {
   message: ChatMessage;
-  selectedCitationId: string | null;
-  onSelectCitation: (citation: ChatCitation) => void;
   onOpenFilePath: (filePath: string, lineStart?: number, lineEnd?: number) => void;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
@@ -307,8 +408,38 @@ function MessageBubble({
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl bg-[var(--surface-3)] px-4 py-3 font-mono text-sm text-[var(--gray-100)]">
-          {message.content}
+        <div className="max-w-[80%] rounded-2xl bg-[var(--surface-3)] px-4 py-3">
+          {/* Attached files */}
+          {message.attachedFiles && message.attachedFiles.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {message.attachedFiles.map((fp) => (
+                <span
+                  key={fp}
+                  className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent-green)]/10 border border-[var(--accent-green)]/20 px-2 py-0.5 font-mono text-xs text-[var(--accent-green)]"
+                >
+                  <FileCode size={10} />
+                  {fp.split("/").pop()}
+                </span>
+              ))}
+            </div>
+          )}
+          {/* Attached images */}
+          {message.attachedImages && message.attachedImages.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {message.attachedImages.map((img, idx) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={idx}
+                  src={img.dataUrl}
+                  alt={img.name}
+                  className="h-20 w-auto rounded-lg border border-[var(--alpha-white-8)] object-cover"
+                />
+              ))}
+            </div>
+          )}
+          <div className="font-mono text-sm text-[var(--gray-100)]">
+            {message.content}
+          </div>
         </div>
       </div>
     );
@@ -316,15 +447,6 @@ function MessageBubble({
 
   return (
     <>
-      {/* Context block — rendered as a separate message-like element */}
-      <ContextBlock
-        citations={message.citations}
-        timelineCitations={message.timelineCitations}
-        selectedCitationId={selectedCitationId}
-        onSelectCitation={onSelectCitation}
-        timestamp={message.timestamp}
-      />
-
       {/* Assistant response */}
       <div className="flex justify-start">
         <div className="w-full max-w-[92%] rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--surface-1)] px-4 py-4 shadow-[0_18px_60px_rgba(0,0,0,0.18)]">
@@ -337,7 +459,7 @@ function MessageBubble({
             <span className="font-mono text-sm font-medium text-[var(--gray-100)]">
               Kontext
             </span>
-            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--gray-600)]">
+            <span className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--gray-600)]">
               {message.timestamp.toLocaleTimeString()}
             </span>
           </div>
@@ -348,7 +470,7 @@ function MessageBubble({
               components={{
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 code({ className, children, ...props }: any) {
-                  const match = /language-(\w+)/.exec(className || "");
+                  const match = /language-([A-Za-z0-9_-]+)/.exec(className || "");
                   const codeString = String(children).replace(/\n$/, "");
 
                   // Inline code (no language class) — check for file path
@@ -376,6 +498,15 @@ function MessageBubble({
                       >
                         {children}
                       </code>
+                    );
+                  }
+
+                  if (isChatVisualLanguage(match[1])) {
+                    return (
+                      <ChatVisualBlock
+                        language={match[1]}
+                        codeString={codeString}
+                      />
                     );
                   }
 
@@ -410,51 +541,254 @@ function ChatInput({
   onSend,
   isStreaming,
   onStop,
+  repoFiles,
+  attachedFilesFromTree,
+  onClearTreeAttachment,
 }: {
-  onSend: (message: string) => void;
+  onSend: (message: string, files: string[], images: ChatAttachedImage[]) => void;
   isStreaming: boolean;
   onStop: () => void;
+  repoFiles: RepoFileEntry[];
+  attachedFilesFromTree: string[];
+  onClearTreeAttachment: (path: string) => void;
 }) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
+  const [attachedImages, setAttachedImages] = useState<Array<{ file: File; preview: string }>>([]);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionIndex, setMentionIndex] = useState(0);
+
+  // Merge tree-attached files with inline-attached files
+  const allAttachedFiles = useMemo(() => {
+    const set = new Set([...attachedFilesFromTree, ...attachedFiles]);
+    return [...set];
+  }, [attachedFilesFromTree, attachedFiles]);
 
   const handleSend = () => {
-    if (!input.trim() || isStreaming) return;
-    onSend(input.trim());
-    setInput("");
+    if ((!input.trim() && attachedImages.length === 0) || isStreaming) return;
 
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
+    const images: ChatAttachedImage[] = attachedImages.map((img) => ({
+      name: img.file.name,
+      mimeType: img.file.type,
+      dataUrl: img.preview,
+    }));
+
+    onSend(input.trim(), allAttachedFiles, images);
+    setInput("");
+    setAttachedFiles([]);
+    setAttachedImages([]);
+    setMentionOpen(false);
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionOpen) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setMentionIndex((i) => i + 1);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setMentionIndex((i) => Math.max(0, i - 1));
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        // Select is handled by the dropdown
+        const q = mentionQuery.toLowerCase();
+        const matches = repoFiles.filter((f) => f.file_path.toLowerCase().includes(q)).slice(0, 12);
+        if (matches[mentionIndex]) {
+          handleMentionSelect(matches[mentionIndex].file_path);
+        }
+        return;
+      }
+      if (event.key === "Escape") {
+        setMentionOpen(false);
+        return;
+      }
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       handleSend();
     }
   };
 
+  const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = event.target.value;
+    setInput(val);
+
+    // Detect @ trigger
+    const cursorPos = event.target.selectionStart || 0;
+    const beforeCursor = val.slice(0, cursorPos);
+    const atIdx = beforeCursor.lastIndexOf("@");
+    if (atIdx >= 0 && (atIdx === 0 || beforeCursor[atIdx - 1] === " " || beforeCursor[atIdx - 1] === "\n")) {
+      const query = beforeCursor.slice(atIdx + 1);
+      if (!query.includes(" ") && !query.includes("\n")) {
+        setMentionOpen(true);
+        setMentionQuery(query);
+        setMentionIndex(0);
+        return;
+      }
+    }
+    setMentionOpen(false);
+  };
+
+  const handleMentionSelect = (path: string) => {
+    // Remove the @query from input
+    const cursorPos = textareaRef.current?.selectionStart || input.length;
+    const beforeCursor = input.slice(0, cursorPos);
+    const atIdx = beforeCursor.lastIndexOf("@");
+    const newInput = input.slice(0, atIdx) + input.slice(cursorPos);
+    setInput(newInput);
+    setMentionOpen(false);
+    if (!attachedFiles.includes(path)) {
+      setAttachedFiles((prev) => [...prev, path]);
+    }
+    textareaRef.current?.focus();
+  };
+
   const handleInput = () => {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = "auto";
-    textareaRef.current.style.height = `${Math.min(
-      textareaRef.current.scrollHeight,
-      180
-    )}px`;
+    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
+  };
+
+  const addImages = (fileList: FileList | File[]) => {
+    const newImages: Array<{ file: File; preview: string }> = [];
+    const files = Array.from(fileList);
+    for (const file of files) {
+      if (!file.type.startsWith("image/")) continue;
+      if (file.size > 4 * 1024 * 1024) continue; // 4MB limit
+      if (attachedImages.length + newImages.length >= 3) break;
+      const reader = new FileReader();
+      reader.onload = () => {
+        setAttachedImages((prev) => {
+          if (prev.length >= 3) return prev;
+          return [...prev, { file, preview: reader.result as string }];
+        });
+      };
+      reader.readAsDataURL(file);
+      newImages.push({ file, preview: "" });
+    }
+  };
+
+  const handlePaste = (event: React.ClipboardEvent) => {
+    const items = event.clipboardData.items;
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith("image/")) {
+        const file = items[i].getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+    if (imageFiles.length > 0) {
+      event.preventDefault();
+      addImages(imageFiles);
+    }
+  };
+
+  const handleDrop = (event: React.DragEvent) => {
+    event.preventDefault();
+    if (event.dataTransfer.files.length > 0) {
+      addImages(event.dataTransfer.files);
+    }
+  };
+
+  const removeImage = (idx: number) => {
+    setAttachedImages((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const removeFile = (path: string) => {
+    setAttachedFiles((prev) => prev.filter((p) => p !== path));
+    onClearTreeAttachment(path);
   };
 
   return (
     <div className="border-t border-[var(--alpha-white-8)] p-4">
-      <div className="flex items-end gap-3 rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--surface-1)] px-4 py-3">
+      {/* Attached files chips */}
+      {allAttachedFiles.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {allAttachedFiles.map((fp) => (
+            <span
+              key={fp}
+              className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent-green)]/10 border border-[var(--accent-green)]/20 px-2 py-1 font-mono text-xs text-[var(--accent-green)]"
+            >
+              <FileCode size={10} />
+              <span className="max-w-[200px] truncate">{fp}</span>
+              <button onClick={() => removeFile(fp)} className="ml-0.5 hover:text-white transition-colors">
+                <X size={9} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {/* Image previews */}
+      {attachedImages.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {attachedImages.map((img, idx) => (
+            <div key={idx} className="group relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={img.preview}
+                alt={img.file.name}
+                className="h-16 w-auto rounded-lg border border-[var(--alpha-white-8)] object-cover"
+              />
+              <button
+                onClick={() => removeImage(idx)}
+                className="absolute -right-1.5 -top-1.5 rounded-full bg-[var(--surface-3)] border border-[var(--alpha-white-8)] p-0.5 text-[var(--gray-400)] hover:text-[var(--accent-red)] transition-colors"
+              >
+                <X size={9} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div
+        className="relative flex items-end gap-3 rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--surface-1)] px-4 py-3"
+        onDrop={handleDrop}
+        onDragOver={(e) => e.preventDefault()}
+      >
+        {/* @-mention dropdown */}
+        {mentionOpen && (
+          <FileMentionDropdown
+            query={mentionQuery}
+            files={repoFiles}
+            onSelect={handleMentionSelect}
+            onClose={() => setMentionOpen(false)}
+            selectedIndex={mentionIndex}
+          />
+        )}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="shrink-0 rounded-lg p-1.5 text-[var(--gray-500)] hover:text-[var(--accent-green)] hover:bg-[var(--alpha-white-5)] transition-colors"
+          title="Attach image"
+        >
+          <Paperclip size={14} />
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files) addImages(e.target.files);
+            e.target.value = "";
+          }}
+        />
         <textarea
           ref={textareaRef}
           value={input}
-          onChange={(event) => setInput(event.target.value)}
+          onChange={handleChange}
           onInput={handleInput}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           rows={1}
-          placeholder="Ask about this codebase..."
+          placeholder="Ask about this codebase... (type @ to mention a file)"
           className="min-h-[28px] flex-1 resize-none bg-transparent font-mono text-sm text-[var(--gray-200)] outline-none placeholder:text-[var(--gray-600)]"
           style={{ maxHeight: 180 }}
         />
@@ -469,9 +803,9 @@ function ChatInput({
         ) : (
           <button
             onClick={handleSend}
-            disabled={!input.trim()}
+            disabled={!input.trim() && attachedImages.length === 0}
             className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 font-mono text-xs transition-all ${
-              input.trim()
+              input.trim() || attachedImages.length > 0
                 ? "bg-[var(--accent-green)] text-black shadow-[0_0_30px_rgba(63,185,80,0.18)]"
                 : "bg-[var(--alpha-white-5)] text-[var(--gray-600)]"
             }`}
@@ -522,7 +856,7 @@ function InspectorPanel({
       <div className="border-b border-[var(--alpha-white-8)] px-4 py-4">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--gray-500)]">
+            <div className="font-mono text-xs uppercase tracking-[0.16em] text-[var(--gray-500)]">
               Code Inspector
             </div>
             {citation ? (
@@ -530,7 +864,7 @@ function InspectorPanel({
                 <div className="mt-2 truncate font-mono text-sm text-[var(--gray-100)]">
                   {citation.file_path}
                 </div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--gray-500)]">
+                <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-xs uppercase tracking-[0.12em] text-[var(--gray-500)]">
                   {!(citation.line_start === 1 && citation.line_end === 1) && (
                     <span>{formatLineRange(citation.line_start, citation.line_end)}</span>
                   )}
@@ -579,7 +913,7 @@ function InspectorPanel({
           >
             Full File
           </button>
-          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--gray-600)]">
+          <span className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--gray-600)]">
             {formatTimestamp(fileData?.last_indexed_at || lastIndexedAt)}
           </span>
         </div>
@@ -633,7 +967,6 @@ export default function ChatPage() {
   const {
     messages,
     isStreaming,
-    currentCitations,
     addMessage,
     updateLastMessage,
     setLastAssistantContext,
@@ -649,12 +982,14 @@ export default function ChatPage() {
   const abortRef = useRef<AbortController | null>(null);
   const [selectedCitation, setSelectedCitation] = useState<ChatCitation | null>(null);
   const [inspectorMode, setInspectorMode] = useState<InspectorMode>("snippet");
-  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [rightPanelMode, setRightPanelMode] = useState<"tree" | "inspector">("tree");
   const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
   const [fileCache, setFileCache] = useState<Record<string, LoadedFile>>({});
   const [fileErrors, setFileErrors] = useState<Record<string, string>>({});
   const [loadingFileKey, setLoadingFileKey] = useState<string | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [repoFiles, setRepoFiles] = useState<RepoFileEntry[]>([]);
+  const [treeAttachedFiles, setTreeAttachedFiles] = useState<string[]>([]);
 
   // Resizable panel state
   const [splitRatio, setSplitRatio] = useState(() => {
@@ -686,11 +1021,20 @@ export default function ChatPage() {
     clearChat();
     setSelectedCitation(null);
     setInspectorMode("snippet");
-    setInspectorOpen(false);
+    setRightPanelMode("tree");
     setMobileInspectorOpen(false);
     setFileCache({});
     setFileErrors({});
+    setTreeAttachedFiles([]);
   }, [clearChat, repoFullName]);
+
+  // Fetch repo files for tree and @-mention
+  useEffect(() => {
+    fetch(`/api/repos/files?repo=${encodeURIComponent(repoFullName)}`)
+      .then((r) => r.json())
+      .then((data) => setRepoFiles(data.files || []))
+      .catch(() => setRepoFiles([]));
+  }, [repoFullName]);
 
   const loadCitationFile = useCallback(
     async (citation: ChatCitation) => {
@@ -736,7 +1080,7 @@ export default function ChatPage() {
     (citation: ChatCitation, openMobile = false) => {
       setSelectedCitation(citation);
       setInspectorMode("file");
-      setInspectorOpen(true);
+      setRightPanelMode("inspector");
       void loadCitationFile(citation);
       if (openMobile) setMobileInspectorOpen(true);
     },
@@ -749,12 +1093,14 @@ export default function ChatPage() {
   }, [loadCitationFile, selectedCitation]);
 
   const handleSend = useCallback(
-    async (content: string) => {
+    async (content: string, files: string[] = [], images: ChatAttachedImage[] = []) => {
       addMessage({
         id: `${Date.now()}-user`,
         role: "user",
         content,
         timestamp: new Date(),
+        attachedFiles: files.length > 0 ? files : undefined,
+        attachedImages: images.length > 0 ? images : undefined,
       });
       addMessage({
         id: `${Date.now()}-assistant`,
@@ -763,9 +1109,16 @@ export default function ChatPage() {
         timestamp: new Date(),
       });
       setIsStreaming(true);
+      setTreeAttachedFiles([]);
 
       const controller = new AbortController();
       abortRef.current = controller;
+
+      // Convert image dataUrls to base64 for API
+      const apiImages = images.map((img) => ({
+        mimeType: img.mimeType,
+        data: img.dataUrl.replace(/^data:[^;]+;base64,/, ""),
+      }));
 
       try {
         const response = await fetch("/api/chat", {
@@ -774,7 +1127,12 @@ export default function ChatPage() {
             "Content-Type": "application/json",
             ...(apiKey ? { "x-google-api-key": apiKey } : {}),
           },
-          body: JSON.stringify({ message: content, repo_full_name: repoFullName }),
+          body: JSON.stringify({
+            message: content,
+            repo_full_name: repoFullName,
+            attached_files: files.length > 0 ? files : undefined,
+            attached_images: apiImages.length > 0 ? apiImages : undefined,
+          }),
           signal: controller.signal,
         });
 
@@ -865,8 +1223,9 @@ export default function ChatPage() {
     clearChat();
     setSelectedCitation(null);
     setInspectorMode("snippet");
-    setInspectorOpen(false);
+    setRightPanelMode("tree");
     setMobileInspectorOpen(false);
+    setTreeAttachedFiles([]);
   };
 
   const handleOpenFilePath = useCallback(
@@ -886,7 +1245,7 @@ export default function ChatPage() {
       };
       setSelectedCitation(syntheticCitation);
       setInspectorMode("file");
-      setInspectorOpen(true);
+      setRightPanelMode("inspector");
       void loadCitationFile(syntheticCitation);
       if (window.innerWidth < 1024) setMobileInspectorOpen(true);
     },
@@ -933,8 +1292,16 @@ export default function ChatPage() {
   }, []);
 
   const handleCloseInspector = useCallback(() => {
-    setInspectorOpen(false);
+    setRightPanelMode("tree");
     setSelectedCitation(null);
+  }, []);
+
+  const handleAttachFileFromTree = useCallback((path: string) => {
+    setTreeAttachedFiles((prev) => prev.includes(path) ? prev : [...prev, path]);
+  }, []);
+
+  const handleClearTreeAttachment = useCallback((path: string) => {
+    setTreeAttachedFiles((prev) => prev.filter((p) => p !== path));
   }, []);
 
   const selectedFile = selectedCitation
@@ -956,11 +1323,11 @@ export default function ChatPage() {
         {/* Chat Panel */}
         <div
           className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-[var(--alpha-white-8)] bg-[radial-gradient(circle_at_top,rgba(63,185,80,0.08),transparent_42%),var(--surface-0)] shadow-[0_24px_80px_rgba(0,0,0,0.2)] transition-all duration-200"
-          style={{ flex: inspectorOpen ? `0 0 ${splitRatio * 100}%` : "1 1 100%" }}
+          style={{ flex: `0 0 ${splitRatio * 100}%` }}
         >
           <div className="flex items-center justify-between gap-3 border-b border-[var(--alpha-white-8)] px-4 py-3">
             <div>
-              <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--gray-500)]">
+              <div className="font-mono text-xs uppercase tracking-[0.18em] text-[var(--gray-500)]">
                 Repo Chat
               </div>
               <h2 className="m-0 mt-1 font-mono text-sm text-[var(--gray-100)]">
@@ -1008,10 +1375,6 @@ export default function ChatPage() {
                 <MessageBubble
                   key={message.id}
                   message={message}
-                  selectedCitationId={selectedCitation?.citation_id || null}
-                  onSelectCitation={(citation) =>
-                    selectCitation(citation, window.innerWidth < 1024)
-                  }
                   onOpenFilePath={handleOpenFilePath}
                 />
               ))}
@@ -1024,7 +1387,7 @@ export default function ChatPage() {
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--accent-green)] [animation-delay:0.15s]" />
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--accent-green)] [animation-delay:0.3s]" />
                 </div>
-                <span className="font-mono text-[11px] text-[var(--gray-500)]">
+                <span className="font-mono text-xs text-[var(--gray-500)]">
                   Searching indexed code...
                 </span>
               </div>
@@ -1048,37 +1411,67 @@ export default function ChatPage() {
             onSend={handleSend}
             isStreaming={isStreaming}
             onStop={handleStop}
+            repoFiles={repoFiles}
+            attachedFilesFromTree={treeAttachedFiles}
+            onClearTreeAttachment={handleClearTreeAttachment}
           />
         </div>
 
-        {/* Drag Handle */}
-        {inspectorOpen && (
-          <div
-            onPointerDown={handleDragStart}
-            className="hidden lg:flex flex-col items-center justify-center w-2 cursor-col-resize group shrink-0 mx-1"
-          >
-            <div className="h-12 w-1 rounded-full bg-[var(--alpha-white-8)] group-hover:bg-[var(--accent-green)]/40 transition-colors flex items-center justify-center">
-              <GripVertical size={10} className="text-[var(--gray-600)] group-hover:text-[var(--accent-green)] transition-colors" />
-            </div>
+        {/* Drag Handle — always visible on desktop */}
+        <div
+          onPointerDown={handleDragStart}
+          className="hidden lg:flex flex-col items-center justify-center w-2 cursor-col-resize group shrink-0 mx-1"
+        >
+          <div className="h-12 w-1 rounded-full bg-[var(--alpha-white-8)] group-hover:bg-[var(--accent-green)]/40 transition-colors flex items-center justify-center">
+            <GripVertical size={10} className="text-[var(--gray-600)] group-hover:text-[var(--accent-green)] transition-colors" />
           </div>
-        )}
+        </div>
 
-        {/* Inspector Panel (desktop) */}
-        {inspectorOpen && (
-          <div
-            className="hidden lg:flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--surface-0)] shadow-[0_24px_80px_rgba(0,0,0,0.2)] transition-all duration-200"
-            style={{ flex: `0 0 ${(1 - splitRatio) * 100 - 1}%` }}
-          >
-            <div className="flex items-center justify-between border-b border-[var(--alpha-white-8)] px-3 py-2">
-              <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--gray-500)]">Inspector</span>
+        {/* Right Panel — always visible (desktop) */}
+        <div
+          className="hidden lg:flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--surface-0)] shadow-[0_24px_80px_rgba(0,0,0,0.2)] transition-all duration-200"
+          style={{ flex: `0 0 ${(1 - splitRatio) * 100 - 1}%` }}
+        >
+          <div className="flex items-center justify-between border-b border-[var(--alpha-white-8)] px-3 py-2">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setRightPanelMode("tree"); setSelectedCitation(null); }}
+                className={`rounded-lg px-2 py-1 font-mono text-xs transition-colors ${
+                  rightPanelMode === "tree"
+                    ? "bg-[var(--accent-green)]/12 text-[var(--accent-green)]"
+                    : "text-[var(--gray-500)] hover:text-[var(--gray-300)]"
+                }`}
+              >
+                Files
+              </button>
+              <button
+                onClick={() => { if (selectedCitation) setRightPanelMode("inspector"); }}
+                className={`rounded-lg px-2 py-1 font-mono text-xs transition-colors ${
+                  rightPanelMode === "inspector"
+                    ? "bg-[var(--accent-green)]/12 text-[var(--accent-green)]"
+                    : "text-[var(--gray-500)] hover:text-[var(--gray-300)]"
+                } ${!selectedCitation ? "opacity-40 cursor-not-allowed" : ""}`}
+              >
+                Inspector
+              </button>
+            </div>
+            {rightPanelMode === "inspector" && (
               <button
                 onClick={handleCloseInspector}
                 className="rounded-lg border border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] p-1.5 text-[var(--gray-400)] hover:text-[var(--gray-100)] transition-colors"
               >
                 <X size={12} />
               </button>
-            </div>
-            <div className="min-h-0 flex-1">
+            )}
+          </div>
+          <div className="min-h-0 flex-1">
+            {rightPanelMode === "tree" ? (
+              <FileTreePanel
+                repoFullName={repoFullName}
+                onOpenFile={handleOpenFilePath}
+                onAttachFile={handleAttachFileFromTree}
+              />
+            ) : (
               <InspectorPanel
                 citation={selectedCitation}
                 mode={inspectorMode}
@@ -1088,9 +1481,9 @@ export default function ChatPage() {
                 error={selectedFileError}
                 lastIndexedAt={repo?.last_indexed_at}
               />
-            </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       {/* Mobile inspector overlay */}

@@ -116,7 +116,7 @@ export function RepoSelector() {
                 <div className="flex flex-col items-center justify-center py-8 text-[var(--gray-500)]">
                   <Database size={20} className="mb-2 opacity-40" />
                   <span className="text-sm font-mono">No repositories added</span>
-                  <span className="text-[11px] font-mono text-[var(--gray-600)] mt-1">
+                  <span className="text-xs font-mono text-[var(--gray-600)] mt-1">
                     Add one to get started
                   </span>
                 </div>
@@ -124,7 +124,7 @@ export function RepoSelector() {
                 <>
                   {indexed.length > 0 && (
                     <div className="px-3 py-1.5">
-                      <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--gray-500)]">
+                      <span className="text-xs font-mono uppercase tracking-wider text-[var(--gray-500)]">
                         Indexed
                       </span>
                     </div>
@@ -139,7 +139,7 @@ export function RepoSelector() {
                   ))}
                   {pending.length > 0 && (
                     <div className="px-3 py-1.5 mt-1">
-                      <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--gray-500)]">
+                      <span className="text-xs font-mono uppercase tracking-wider text-[var(--gray-500)]">
                         Pending
                       </span>
                     </div>
@@ -215,12 +215,12 @@ function RepoItem({
             {repo.full_name}
           </span>
           {repo.indexed && (
-            <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)]">
+            <span className="shrink-0 px-1.5 py-0.5 rounded text-xs font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)]">
               Indexed
             </span>
           )}
           {isIngesting && (
-            <span className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)]">
+            <span className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)]">
               <Loader2 size={10} className="animate-spin" />
               {ingestionStatus.progress}%
             </span>
@@ -228,7 +228,7 @@ function RepoItem({
         </div>
         <div className="flex items-center gap-3 mt-1">
           {repo.language && (
-            <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
+            <span className="flex items-center gap-1 text-xs font-mono text-[var(--gray-500)]">
               <span
                 className="w-2 h-2 rounded-full"
                 style={{ backgroundColor: langColor }}
@@ -236,7 +236,7 @@ function RepoItem({
               {repo.language}
             </span>
           )}
-          <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
+          <span className="flex items-center gap-1 text-xs font-mono text-[var(--gray-500)]">
             <Star size={10} />
             {repo.stargazers_count}
           </span>

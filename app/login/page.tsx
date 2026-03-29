@@ -155,14 +155,14 @@ function LoginContent() {
                 read:user
               </span>
             </div>
-            <p className="text-muted-foreground text-[11px] font-mono my-0 leading-relaxed opacity-70">
+            <p className="text-muted-foreground text-xs font-mono my-0 leading-relaxed opacity-70">
               Required to read repository contents and your profile.
             </p>
           </div>
         </div>
 
         {/* Footer */}
-        <p className="text-center text-muted-foreground text-[11px] font-mono mt-4 opacity-60">
+        <p className="text-center text-muted-foreground text-xs font-mono mt-4 opacity-60">
           Your tokens are never stored on our servers.
         </p>
       </motion.div>

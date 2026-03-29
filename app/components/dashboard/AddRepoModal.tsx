@@ -238,19 +238,9 @@ export function AddRepoModal() {
         // Close modal
         handleClose();
 
-        // Register webhook if auto-sync was enabled
-        if (config.auto_sync_enabled) {
-          fetch("/api/repos/sync/settings", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              repo_full_name: repo.full_name,
-              auto_sync_enabled: true,
-            }),
-          }).catch((err) => {
-            console.warn("[AddRepoModal] Webhook registration failed:", err.message);
-          });
-        }
+
+        // Webhook registration is now handled server-side in POST /api/repos
+
 
         // Step 2: Auto-trigger ingestion if API key is available
         if (apiKey) {
@@ -713,7 +703,7 @@ export function AddRepoModal() {
                         <div className="mb-4">
                           <button
                             onClick={() => setShowTokenField(!showTokenField)}
-                            className="flex items-center gap-1.5 text-[11px] font-mono text-[var(--gray-500)] hover:text-[var(--gray-300)] transition-colors bg-transparent border-none cursor-pointer p-0 mb-2"
+                            className="flex items-center gap-1.5 text-xs font-mono text-[var(--gray-500)] hover:text-[var(--gray-300)] transition-colors bg-transparent border-none cursor-pointer p-0 mb-2"
                           >
                             <KeyRound size={12} />
                             {showTokenField ? "Hide" : "Add"} access token for private repos
@@ -734,7 +724,7 @@ export function AddRepoModal() {
                                 placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
                                 className="w-full px-3 py-2 rounded-lg text-xs font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-200)] placeholder:text-[var(--gray-600)] focus:outline-none focus:border-[var(--accent-green)]/40 transition-colors"
                               />
-                              <p className="font-mono text-[10px] text-[var(--gray-600)] mt-1 m-0">
+                              <p className="font-mono text-xs text-[var(--gray-600)] mt-1 m-0">
                                 Personal Access Token with <code className="text-[var(--gray-400)]">repo</code> scope for private repos you have access to
                               </p>
                             </motion.div>
@@ -791,7 +781,7 @@ export function AddRepoModal() {
 
                             <div className="flex items-center gap-4 mt-3 mb-4">
                               {lookupResult.language && (
-                                <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
+                                <span className="flex items-center gap-1 text-xs font-mono text-[var(--gray-500)]">
                                   <span
                                     className="w-2 h-2 rounded-full"
                                     style={{
@@ -803,11 +793,11 @@ export function AddRepoModal() {
                                   {lookupResult.language}
                                 </span>
                               )}
-                              <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
+                              <span className="flex items-center gap-1 text-xs font-mono text-[var(--gray-500)]">
                                 <Star size={10} className="text-yellow-400" />
                                 {lookupResult.stargazers_count}
                               </span>
-                              <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
+                              <span className="flex items-center gap-1 text-xs font-mono text-[var(--gray-500)]">
                                 <GitFork size={10} />
                                 {lookupResult.forks_count}
                               </span>
@@ -848,7 +838,7 @@ export function AddRepoModal() {
               {/* Footer hint (only on step 1) */}
               {step === "select" && !apiKey && (
                 <div className="px-6 py-3 border-t border-[var(--alpha-white-5)] bg-[var(--accent-amber)]/5">
-                  <p className="font-mono text-[11px] text-[var(--accent-amber)] m-0">
+                  <p className="font-mono text-xs text-[var(--accent-amber)] m-0">
                     ⚠ Set your Google AI API key first to auto-ingest repos on
                     add
                   </p>
@@ -888,7 +878,7 @@ function BrowseRepoItem({
         </div>
         <div className="flex items-center gap-3 mt-1">
           {repo.language && (
-            <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
+            <span className="flex items-center gap-1 text-xs font-mono text-[var(--gray-500)]">
               <span
                 className="w-2 h-2 rounded-full"
                 style={{ backgroundColor: langColor }}
@@ -896,7 +886,7 @@ function BrowseRepoItem({
               {repo.language}
             </span>
           )}
-          <span className="flex items-center gap-1 text-[11px] font-mono text-[var(--gray-500)]">
+          <span className="flex items-center gap-1 text-xs font-mono text-[var(--gray-500)]">
             <Star size={10} className="text-yellow-400" />
             {repo.stargazers_count}
           </span>

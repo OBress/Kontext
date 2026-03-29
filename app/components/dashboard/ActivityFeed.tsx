@@ -135,7 +135,7 @@ function timeAgo(dateStr: string): string {
 function SourceBadge({ source }: { source: "kontext" | "github" }) {
   if (source === "github") {
     return (
-      <span className="inline-flex items-center gap-1 rounded border border-white/5 bg-white/8 px-1.5 py-0.5 font-mono text-[9px] font-medium text-[var(--gray-300)]">
+      <span className="inline-flex items-center gap-1 rounded border border-white/5 bg-white/8 px-1.5 py-0.5 font-mono text-xs font-medium text-[var(--gray-300)]">
         <svg
           viewBox="0 0 16 16"
           width="9"
@@ -151,7 +151,7 @@ function SourceBadge({ source }: { source: "kontext" | "github" }) {
   }
 
   return (
-    <span className="inline-flex items-center gap-1 rounded border border-[var(--accent-green)]/10 bg-[var(--accent-green)]/10 px-1.5 py-0.5 font-mono text-[9px] font-medium text-[var(--accent-green)]">
+    <span className="inline-flex items-center gap-1 rounded border border-[var(--accent-green)]/10 bg-[var(--accent-green)]/10 px-1.5 py-0.5 font-mono text-xs font-medium text-[var(--accent-green)]">
       <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-green)]" />
       Kontext
     </span>
@@ -270,7 +270,7 @@ export function ActivityFeed() {
         {events.length > 0 && (
           <button
             onClick={handleClearAll}
-            className={`flex cursor-pointer items-center gap-1 rounded border-none px-2 py-0.5 font-mono text-[10px] transition-all ${
+            className={`flex cursor-pointer items-center gap-1 rounded border-none px-2 py-0.5 font-mono text-xs transition-all ${
               clearConfirm
                 ? "bg-[var(--accent-red)]/15 text-[var(--accent-red)]"
                 : "bg-transparent text-[var(--gray-600)] hover:text-[var(--gray-400)]"
@@ -291,10 +291,10 @@ export function ActivityFeed() {
               <div className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--alpha-white-5)]">
                 <Database size={14} className="text-[var(--gray-600)]" />
               </div>
-              <p className="m-0 font-mono text-[11px] text-[var(--gray-600)]">
+              <p className="m-0 font-mono text-xs text-[var(--gray-600)]">
                 No activity yet
               </p>
-              <p className="m-0 mt-0.5 font-mono text-[10px] text-[var(--gray-700)]">
+              <p className="m-0 mt-0.5 font-mono text-xs text-[var(--gray-700)]">
                 Repo and GitHub activity will appear here
               </p>
             </div>
@@ -342,12 +342,12 @@ export function ActivityFeed() {
                         <SourceBadge source={event.source} />
                       </div>
 
-                      <p className="m-0 line-clamp-2 font-mono text-[11px] leading-relaxed text-[var(--gray-200)]">
+                      <p className="m-0 line-clamp-2 font-mono text-xs leading-relaxed text-[var(--gray-200)]">
                         {event.title}
                       </p>
 
                       {event.description && (
-                        <p className="m-0 mt-0.5 line-clamp-1 font-mono text-[10px] text-[var(--gray-500)]">
+                        <p className="m-0 mt-0.5 line-clamp-1 font-mono text-xs text-[var(--gray-500)]">
                           {event.description}
                         </p>
                       )}
@@ -355,13 +355,13 @@ export function ActivityFeed() {
                       <div className="mt-0.5 flex items-center gap-1.5">
                         {event.repo_full_name && (
                           <>
-                            <span className="font-mono text-[10px] text-[var(--gray-500)] transition-colors group-hover:text-[var(--accent-green)]">
+                            <span className="font-mono text-xs text-[var(--gray-500)] transition-colors group-hover:text-[var(--accent-green)]">
                               {event.repo_full_name}
                             </span>
                             <span className="text-[var(--gray-600)]">·</span>
                           </>
                         )}
-                        <span className="font-mono text-[10px] text-[var(--gray-600)]">
+                        <span className="font-mono text-xs text-[var(--gray-600)]">
                           {timeAgo(event.created_at)}
                         </span>
                       </div>

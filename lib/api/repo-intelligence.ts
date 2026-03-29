@@ -7,9 +7,15 @@ import {
 } from "@/lib/code";
 import {
   generateChatStream,
+  generateMultimodalChatStream,
   generateQueryEmbedding,
   generateText,
 } from "./embeddings";
+import {
+  buildTaskSystemInstruction,
+  formatEvidencePack,
+  PROMPT_GENERATION_CONFIGS,
+} from "./prompt-contract";
 
 export type RepoAnswerMode = "grounded" | "partial" | "insufficient_evidence";
 
@@ -318,12 +324,32 @@ export async function retrieveRepoContext(params: {
   };
 }
 
-export function buildRepoAnswerSystemPrompt(params: {
+export function buildRepoAnswerSystemPrompt(): string {
+  return buildTaskSystemInstruction({
+    task: "grounded_explainer",
+    role: "Kontext, a grounded repository explainer",
+    mission: "Answer repository questions using only the supplied evidence pack.",
+    outputStyle: [
+      "Be brief and direct. Use short paragraphs or bullets only when they add clarity.",
+      "Wrap repository file paths in backticks exactly as they appear in the evidence pack.",
+      "Do not emit Mermaid, JSON payloads, fenced visual blocks, or tool-call markup.",
+      'If the evidence is not strong enough, say "Insufficient evidence" and suggest the next file or area to inspect.',
+    ],
+    taskRules: [
+      "Use timeline evidence only when the question is about when or why something changed.",
+      "When listing items such as files or endpoints, be thorough within the supplied evidence.",
+      "Do not imply certainty beyond the retrieved context.",
+    ],
+  });
+}
+
+export function buildRepoAnswerPrompt(params: {
   repoFullName: string;
   fileManifest: string;
   contextBlocks: string;
   timelineBlocks?: string;
   extraInstructions?: string;
+  question: string;
 }): string {
   const {
     repoFullName,
@@ -331,30 +357,64 @@ export function buildRepoAnswerSystemPrompt(params: {
     contextBlocks,
     timelineBlocks,
     extraInstructions,
+    question,
   } = params;
 
-  return `You are Kontext, a concise code assistant for the repository "${repoFullName}".
+  const evidencePack = formatEvidencePack({
+    summary:
+      "Use the retrieved repository evidence to answer the question. Prefer exact citations over inference.",
+    facts: [
+      { label: "Repository", value: repoFullName, confidence: "exact" },
+      { label: "Question", value: question, confidence: "exact" },
+    ],
+    excerpts: [
+      {
+        title: "Repository file manifest",
+        source: repoFullName,
+        reason: "Use this to reason about likely locations when the retrieved snippets are partial.",
+        content: fileManifest,
+      },
+      {
+        title: "Retrieved code context",
+        source: repoFullName,
+        reason: "Primary evidence for the answer.",
+        content:
+          contextBlocks || "No retrieved repository code context was found.",
+      },
+      ...(timelineBlocks
+        ? [
+            {
+              title: "Development timeline context",
+              source: repoFullName,
+              reason:
+                "Use only when the question depends on when or why something changed.",
+              content: timelineBlocks,
+            },
+          ]
+        : []),
+    ],
+    coverageGaps: [
+      contextBlocks
+        ? ""
+        : "No retrieved code snippet matched strongly. Be explicit about limited evidence.",
+    ].filter(Boolean),
+  });
 
-Rules:
-- Be brief and direct. No filler, no preambles, no "Great question!" or "Let me explain...". Get straight to the answer.
-- Use short sentences. Prefer bullet points and code references over prose.
-- ALWAYS wrap file paths in backticks exactly as indexed, e.g. \`app/api/chat/route.ts\`.
-- Only state facts supported by the retrieved context or file manifest.
-- When listing items (endpoints, files, etc.), be thorough and use all relevant citations.
-- Use timeline context for questions about when something changed.
-- If evidence is incomplete, say so briefly and suggest which files to check.
-- If there is no relevant evidence, say "Insufficient evidence" and suggest next steps.
-${extraInstructions ? `- ${extraInstructions}` : ""}
-
-## Repository File Manifest
-
-${fileManifest}
-
-## Retrieved Code Context
-
-${contextBlocks || "No retrieved repository code context was found."}${
-    timelineBlocks ? `\n\n## Development Timeline Context\n\n${timelineBlocks}` : ""
-  }`;
+  return [
+    "Answer the repository question using the supplied evidence pack.",
+    extraInstructions ? `Additional instruction: ${extraInstructions}` : "",
+    "",
+    evidencePack,
+    "",
+    "Answer requirements:",
+    "- Start with the direct answer.",
+    "- Keep the answer grounded in the evidence pack.",
+    "- Mention relevant file paths in backticks when they support the answer.",
+    "- Do not generate diagrams, charts, fenced JSON, or structured tool payloads.",
+    "- If evidence is partial, say so briefly instead of guessing.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export async function answerRepoQuestion(params: {
@@ -366,8 +426,14 @@ export async function answerRepoQuestion(params: {
   timelineBlocks?: string;
   extraInstructions?: string;
 }): Promise<string> {
-  const systemPrompt = buildRepoAnswerSystemPrompt(params);
-  return generateText(params.apiKey, params.question, systemPrompt);
+  return generateText(
+    params.apiKey,
+    buildRepoAnswerPrompt(params),
+    {
+      systemInstruction: buildRepoAnswerSystemPrompt(),
+      generationConfig: PROMPT_GENERATION_CONFIGS.groundedAnswer,
+    }
+  );
 }
 
 export async function streamRepoAnswer(params: {
@@ -378,7 +444,28 @@ export async function streamRepoAnswer(params: {
   contextBlocks: string;
   timelineBlocks?: string;
   extraInstructions?: string;
+  attachedFileBlocks?: string;
+  imageParts?: Array<{ mimeType: string; data: string }>;
 }): Promise<ReadableStream<Uint8Array>> {
-  const systemPrompt = buildRepoAnswerSystemPrompt(params);
-  return generateChatStream(params.apiKey, systemPrompt, params.question);
+  const promptText = buildRepoAnswerPrompt(params);
+  const fullPrompt = params.attachedFileBlocks
+    ? `${promptText}\n\n--- Explicitly attached file context (user-selected via @-mention) ---\n${params.attachedFileBlocks}`
+    : promptText;
+
+  const streamOptions = {
+    systemInstruction: buildRepoAnswerSystemPrompt(),
+    generationConfig: PROMPT_GENERATION_CONFIGS.groundedAnswer,
+  };
+
+  if (params.imageParts && params.imageParts.length > 0) {
+    const parts = [
+      { text: fullPrompt },
+      ...params.imageParts.map((img) => ({
+        inlineData: { mimeType: img.mimeType, data: img.data },
+      })),
+    ];
+    return generateMultimodalChatStream(params.apiKey, parts, streamOptions);
+  }
+
+  return generateChatStream(params.apiKey, fullPrompt, streamOptions);
 }

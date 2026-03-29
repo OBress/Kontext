@@ -42,6 +42,7 @@ export interface ArchitectureAnalysis {
   summary: string;
   components: ArchComponent[];
   connections: ArchConnection[];
+  unassignedFiles?: string[];
 }
 
 export type ArchitectureLayerId = "overview" | "system" | "code";

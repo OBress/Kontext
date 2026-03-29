@@ -293,8 +293,8 @@ export default function PromptsPage() {
                     : "bg-[var(--alpha-white-5)] text-[var(--gray-400)] border-[var(--alpha-white-8)] hover:text-[var(--gray-200)]"
                 }`}
               >
-                <span className="block text-xs font-medium">{opt.label}</span>
-                <span className="block text-[10px] text-[var(--gray-600)] mt-0.5 font-normal">
+                <span className="block text-sm font-medium">{opt.label}</span>
+                <span className="block text-xs text-[var(--gray-500)] mt-0.5 font-normal">
                   {opt.sublabel}
                 </span>
               </button>
@@ -313,7 +313,7 @@ export default function PromptsPage() {
                 Detected Stack
               </h3>
               <div className="flex items-center gap-1.5">
-                <span className="font-mono text-[10px] text-[var(--gray-600)]">
+                <span className="font-mono text-xs text-[var(--gray-600)]">
                   {detectedStack.length} technologies
                 </span>
                 {expandStack ? (
@@ -334,18 +334,18 @@ export default function PromptsPage() {
                       [item.name]: !prev[item.name],
                     }))
                   }
-                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono transition-colors border cursor-pointer ${
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono transition-colors border cursor-pointer ${
                     enabledTech[item.name]
                       ? "bg-[var(--accent-green)]/8 text-[var(--gray-300)] border-[var(--accent-green)]/20"
                       : "bg-transparent text-[var(--gray-600)] border-[var(--alpha-white-8)] line-through"
                   }`}
                 >
                   {item.name}
-                  <span className="text-[8px] text-[var(--gray-600)]">{item.confidence}%</span>
+                  <span className="text-xs text-[var(--gray-600)]">{item.confidence}%</span>
                 </button>
               ))}
               {!expandStack && detectedStack.length > 8 && (
-                <span className="text-[10px] text-[var(--gray-600)] font-mono px-1 py-0.5">
+                <span className="text-xs text-[var(--gray-600)] font-mono px-1 py-0.5">
                   +{detectedStack.length - 8} more
                 </span>
               )}
@@ -407,7 +407,7 @@ export default function PromptsPage() {
                 {PROGRESS_STEPS.map((step, idx) => (
                   <div
                     key={step.label}
-                    className={`flex items-center gap-2 font-mono text-[11px] transition-colors duration-300 ${
+                    className={`flex items-center gap-2 font-mono text-xs transition-colors duration-300 ${
                       idx < progressStep
                         ? "text-[var(--accent-green)]"
                         : idx === progressStep
@@ -455,14 +455,14 @@ export default function PromptsPage() {
             </button>
             {showInstall && (
               <div className="mt-3 space-y-2">
-                <span className="font-mono text-[11px] text-[var(--accent-green)] font-medium">
+                <span className="font-mono text-xs text-[var(--accent-green)] font-medium">
                   {installInfo.title}
                 </span>
                 <ol className="list-none p-0 m-0 space-y-1.5">
                   {installInfo.steps.map((step, i) => (
                     <li
                       key={i}
-                      className="flex gap-2 font-mono text-[11px] text-[var(--gray-400)] leading-relaxed"
+                      className="flex gap-2 font-mono text-xs text-[var(--gray-400)] leading-relaxed"
                     >
                       <span className="text-[var(--gray-600)] shrink-0">{i + 1}.</span>
                       {step}
@@ -504,14 +504,14 @@ export default function PromptsPage() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setShowPreview(!showPreview)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-mono bg-[var(--alpha-white-5)] text-[var(--gray-400)] hover:text-[var(--gray-200)] transition-colors border-none cursor-pointer"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono bg-[var(--alpha-white-5)] text-[var(--gray-400)] hover:text-[var(--gray-200)] transition-colors border-none cursor-pointer"
                 >
                   {showPreview ? <Code size={12} /> : <Eye size={12} />}
                   {showPreview ? "Source" : "Preview"}
                 </button>
                 <button
                   onClick={handleCopy}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-mono bg-[var(--alpha-white-5)] text-[var(--gray-400)] hover:text-[var(--gray-200)] transition-colors border-none cursor-pointer"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono bg-[var(--alpha-white-5)] text-[var(--gray-400)] hover:text-[var(--gray-200)] transition-colors border-none cursor-pointer"
                 >
                   {copied ? <Check size={12} className="text-[var(--accent-green)]" /> : <Copy size={12} />}
                   {copied ? "Copied!" : "Copy"}
@@ -519,7 +519,7 @@ export default function PromptsPage() {
                 {hasFiles ? (
                   <button
                     onClick={handleDownloadZip}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)] hover:bg-[var(--accent-green)]/20 transition-colors border-none cursor-pointer"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)] hover:bg-[var(--accent-green)]/20 transition-colors border-none cursor-pointer"
                   >
                     <Archive size={12} />
                     Download ZIP
@@ -527,7 +527,7 @@ export default function PromptsPage() {
                 ) : (
                   <button
                     onClick={handleDownloadSingle}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-mono bg-[var(--alpha-white-5)] text-[var(--gray-400)] hover:text-[var(--gray-200)] transition-colors border-none cursor-pointer"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono bg-[var(--alpha-white-5)] text-[var(--gray-400)] hover:text-[var(--gray-200)] transition-colors border-none cursor-pointer"
                   >
                     <Download size={12} />
                     Download
@@ -549,7 +549,7 @@ export default function PromptsPage() {
                           setSelectedFileIdx(idx);
                           setIsAnimating(false);
                         }}
-                        className={`w-full text-left px-2.5 py-2 rounded-lg text-[11px] font-mono transition-colors border-none cursor-pointer flex items-start gap-2 ${
+                        className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-mono transition-colors border-none cursor-pointer flex items-start gap-2 ${
                           idx === selectedFileIdx
                             ? "bg-[var(--accent-green)]/10 text-[var(--accent-green)]"
                             : "bg-transparent text-[var(--gray-400)] hover:bg-[var(--alpha-white-5)] hover:text-[var(--gray-200)]"
@@ -558,7 +558,7 @@ export default function PromptsPage() {
                         <FileText size={12} className="shrink-0 mt-0.5" />
                         <div className="min-w-0">
                           <div className="truncate">{file.path.split("/").pop()}</div>
-                          <div className="text-[9px] text-[var(--gray-600)] truncate mt-0.5">
+                          <div className="text-xs text-[var(--gray-600)] truncate mt-0.5">
                             {file.path}
                           </div>
                         </div>
@@ -625,7 +625,7 @@ export default function PromptsPage() {
               <p className="font-mono text-sm text-[var(--gray-500)] m-0">
                 Select a target and click &ldquo;Generate&rdquo; to create scoped AI rules
               </p>
-              <p className="font-mono text-[11px] text-[var(--gray-600)] mt-1 m-0">
+              <p className="font-mono text-xs text-[var(--gray-600)] mt-1 m-0">
                 Generates multiple rule files tailored to your IDE&apos;s format
               </p>
             </div>

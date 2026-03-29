@@ -183,7 +183,7 @@ export function RepoHealthCard({
         <>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4">
             <div className="rounded-lg bg-[var(--alpha-white-5)] p-3">
-              <p className="font-mono text-[10px] uppercase text-[var(--gray-500)] m-0 mb-1">
+              <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">
                 Open
               </p>
               <p className="font-mono text-lg text-[var(--gray-100)] m-0">
@@ -191,7 +191,7 @@ export function RepoHealthCard({
               </p>
             </div>
             <div className="rounded-lg bg-[var(--alpha-white-5)] p-3">
-              <p className="font-mono text-[10px] uppercase text-[var(--gray-500)] m-0 mb-1">
+              <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">
                 Critical
               </p>
               <p className="font-mono text-lg text-red-300 m-0">
@@ -199,7 +199,7 @@ export function RepoHealthCard({
               </p>
             </div>
             <div className="rounded-lg bg-[var(--alpha-white-5)] p-3">
-              <p className="font-mono text-[10px] uppercase text-[var(--gray-500)] m-0 mb-1">
+              <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">
                 High
               </p>
               <p className="font-mono text-lg text-amber-300 m-0">
@@ -207,7 +207,7 @@ export function RepoHealthCard({
               </p>
             </div>
             <div className="rounded-lg bg-[var(--alpha-white-5)] p-3">
-              <p className="font-mono text-[10px] uppercase text-[var(--gray-500)] m-0 mb-1">
+              <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">
                 Medium
               </p>
               <p className="font-mono text-lg text-blue-300 m-0">
@@ -215,7 +215,7 @@ export function RepoHealthCard({
               </p>
             </div>
             <div className="rounded-lg bg-[var(--alpha-white-5)] p-3">
-              <p className="font-mono text-[10px] uppercase text-[var(--gray-500)] m-0 mb-1">
+              <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">
                 Resolved
               </p>
               <p className="font-mono text-lg text-[var(--accent-green)] m-0">
@@ -238,7 +238,7 @@ export function RepoHealthCard({
                 <p className="font-mono text-xs text-[var(--gray-500)] m-0">
                   {summary.latestRun.summary || "No summary yet."}
                 </p>
-                <p className="font-mono text-[11px] text-[var(--gray-400)] m-0">
+                <p className="font-mono text-xs text-[var(--gray-400)] m-0">
                   {summary.latestRun.newFindings} new, {summary.latestRun.resolvedFindings} resolved,{" "}
                   {summary.latestRun.findingsTotal} current findings
                 </p>

@@ -1,0 +1,146 @@
+{
+  "repoFullName": "acme/kontext",
+  "targetDisplay": "Cursor",
+  "customInstructions": "Highlight security-sensitive data handling and Supabase patterns.",
+  "configChunks": [
+    {
+      "file_path": "package.json",
+      "content": "{\n  \"name\": \"kontext\",\n  \"version\": \"0.1.0\",\n  \"scripts\": {\n    \"dev\": \"next dev\",\n    \"build\": \"next build\",\n    \"lint\": \"eslint\",\n    \"db:push\": \"supabase db push\"\n  },\n  \"dependencies\": {\n    \"next\": \"16.0.6\",\n    \"react\": \"19.2.0\",\n    \"typescript\": \"^5.0.0\",\n    \"tailwindcss\": \"^4.0.0\",\n    \"@supabase/supabase-js\": \"^2.100.1\",\n    \"@google/generative-ai\": \"^0.24.1\",\n    \"zustand\": \"^5.0.12\"\n  },\n  \"devDependencies\": {\n    \"eslint\": \"^9.0.0\"\n  }\n}"
+    },
+    {
+      "file_path": "tsconfig.json",
+      "content": "{\n  \"compilerOptions\": {\n    \"strict\": true,\n    \"jsx\": \"react-jsx\"\n  }\n}"
+    },
+    {
+      "file_path": "tailwind.config.ts",
+      "content": "export default {\n  theme: {\n    extend: {},\n  },\n};"
+    },
+    {
+      "file_path": "Dockerfile",
+      "content": "FROM node:20-alpine\nWORKDIR /app\nCOPY package.json package-lock.json ./\nRUN npm ci\nCOPY . .\nRUN npm run build"
+    }
+  ],
+  "files": [
+    { "file_path": "AGENTS.md", "extension": ".md", "line_count": 40, "imports": [] },
+    { "file_path": "README.md", "extension": ".md", "line_count": 80, "imports": [] },
+    { "file_path": "package.json", "extension": ".json", "line_count": 32, "imports": [] },
+    { "file_path": "tsconfig.json", "extension": ".json", "line_count": 12, "imports": [] },
+    { "file_path": "app/layout.tsx", "extension": ".tsx", "line_count": 40, "imports": ["react", "@/components/shell/AppShell"] },
+    { "file_path": "app/api/chat/route.ts", "extension": ".ts", "line_count": 88, "imports": ["next/server", "@/lib/api/repo-intelligence"] },
+    { "file_path": "components/chat-panel.tsx", "extension": ".tsx", "line_count": 120, "imports": ["react", "@/components/ui/card"] },
+    { "file_path": "lib/api/errors.ts", "extension": ".ts", "line_count": 55, "imports": ["next/server"] },
+    { "file_path": "supabase/schema.sql", "extension": ".sql", "line_count": 220, "imports": [] },
+    { "file_path": "styles/globals.css", "extension": ".css", "line_count": 80, "imports": [] },
+    { "file_path": ".github/workflows/ci.yml", "extension": ".yml", "line_count": 35, "imports": [] },
+    { "file_path": "__tests__/chat-route.test.ts", "extension": ".ts", "line_count": 90, "imports": ["vitest"] }
+  ],
+  "evidenceChunks": [
+    {
+      "file_path": "AGENTS.md",
+      "content": "# Project Overview\nKontext is a repository intelligence product.\n\n## Security\nUse process.env for secrets and route errors through lib/api/errors.ts.\n\n## Done\nShip type-safe changes with lint passing."
+    },
+    {
+      "file_path": "README.md",
+      "content": "# Kontext\nAnalyze repositories with AI-powered architecture maps, chat, onboarding, and repo health checks."
+    },
+    {
+      "file_path": "app/layout.tsx",
+      "content": "import { AppShell } from \"@/components/shell/AppShell\";\n\nexport default function RootLayout({ children }: { children: React.ReactNode }) {\n  return <AppShell>{children}</AppShell>;\n}"
+    },
+    {
+      "file_path": "app/api/chat/route.ts",
+      "content": "import { retrieveRepoContext, streamRepoAnswer } from \"@/lib/api/repo-intelligence\";\n\nexport async function POST(request: Request) {\n  // chat route implementation\n}"
+    },
+    {
+      "file_path": "components/chat-panel.tsx",
+      "content": "\"use client\";\n\nexport function ChatPanel() {\n  return <section className=\"grid gap-4\">Chat UI</section>;\n}"
+    },
+    {
+      "file_path": "supabase/schema.sql",
+      "content": "create table public.generated_prompts (\n  id bigint primary key generated always as identity,\n  prompt_text text not null\n);\n\nalter table public.generated_prompts enable row level security;"
+    },
+    {
+      "file_path": "styles/globals.css",
+      "content": "@import \"tailwindcss\";\n\n:root {\n  --background: #07111f;\n  --foreground: #f6f7fb;\n}"
+    },
+    {
+      "file_path": ".github/workflows/ci.yml",
+      "content": "name: CI\non: [push, pull_request]\njobs:\n  lint:\n    runs-on: ubuntu-latest"
+    }
+  ],
+  "scopeContexts": [
+    {
+      "scope": "api",
+      "globs": ["app/api/**/*.ts"],
+      "promptHint": "Cover authentication patterns, request validation, error responses, rate limiting, middleware usage, data access in routes, and status code conventions."
+    },
+    {
+      "scope": "components",
+      "globs": ["components/**/*.tsx"],
+      "promptHint": "Cover Server vs Client component boundaries, prop typing, composition patterns, state management, accessibility, and naming conventions."
+    },
+    {
+      "scope": "database",
+      "globs": ["supabase/**"],
+      "promptHint": "Cover schema conventions, migrations, RLS and authorization, RPC usage, query patterns, and indexing strategy."
+    },
+    {
+      "scope": "styling",
+      "globs": ["styles/**", "**/*.css"],
+      "promptHint": "Cover styling methodology, design tokens, responsive breakpoints, animation patterns, and style co-location."
+    },
+    {
+      "scope": "testing",
+      "globs": ["**/*.test.*"],
+      "promptHint": "Cover test framework usage, mocking strategy, naming and co-location, fixture patterns, and unit vs integration boundaries."
+    },
+    {
+      "scope": "devops",
+      "globs": [".github/workflows/**", "Dockerfile"],
+      "promptHint": "Cover CI or CD workflows, environment variable handling, deployment targets, container setup, and release conventions."
+    }
+  ],
+  "repoQuestion": {
+    "question": "How does the repository chat flow work?",
+    "fileManifest": "app/api/chat/route.ts\ncomponents/chat-panel.tsx\nlib/api/repo-intelligence.ts",
+    "contextBlocks": "--- Citation 1: app/api/chat/route.ts:1-20 ---\nimport { retrieveRepoContext, streamRepoAnswer } from \"@/lib/api/repo-intelligence\";\n\nexport async function POST(request: Request) {\n  // chat route implementation\n}",
+    "timelineBlocks": "--- Timeline Entry 1: 2026-03-28 (commit abc1234 by Owen, relevance: 78.0%) ---\nAdded streaming repo chat with retrieved citations.\nRaw commit message: add repo chat streaming"
+  },
+  "repoChecks": {
+    "triggerMode": "after_sync",
+    "baseSha": "abc1234",
+    "headSha": "def5678",
+    "changedFiles": [
+      { "path": "app/api/chat/route.ts", "status": "modified", "additions": 15, "deletions": 3 }
+    ],
+    "manifest": "app/api/chat/route.ts\ncomponents/chat-panel.tsx\nsupabase/schema.sql",
+    "fileBlocks": "### app/api/chat/route.ts\n```ts\nexport async function POST(request: Request) {\n  // chat route implementation\n}\n```",
+    "recentCommitSummary": "- abc1234 (2026-03-28): Added streaming repo chat with citations",
+    "openFindingSummary": "- [security] Missing auth check on prompt export route (app/api/prompts/route.ts) [high]"
+  },
+  "onboarding": {
+    "repoDescription": "Repository intelligence workspace",
+    "language": "TypeScript",
+    "defaultBranch": "main",
+    "lastSyncedSha": "def5678",
+    "fileManifest": "app/api/chat/route.ts\ncomponents/chat-panel.tsx\nsupabase/schema.sql\nstyles/globals.css",
+    "recentCommits": "- abc1234: add repo chat streaming | Added streaming repo chat with citations",
+    "architectureSummary": "{\n  \"summary\": \"Kontext combines chat, onboarding, repo health checks, and prompt generation.\",\n  \"components\": []\n}"
+  },
+  "architecture": {
+    "chunkSamples": [
+      {
+        "file_path": "app/api/chat/route.ts",
+        "content": "import { retrieveRepoContext, streamRepoAnswer } from \"@/lib/api/repo-intelligence\";\n\nexport async function POST(request: Request) {\n  // chat route implementation\n}"
+      },
+      {
+        "file_path": "components/chat-panel.tsx",
+        "content": "\"use client\";\n\nexport function ChatPanel() {\n  return <section className=\"grid gap-4\">Chat UI</section>;\n}"
+      },
+      {
+        "file_path": "supabase/schema.sql",
+        "content": "create table public.generated_prompts (\n  id bigint primary key generated always as identity,\n  prompt_text text not null\n);"
+      }
+    ]
+  }
+}

@@ -371,7 +371,7 @@ export default function McpPage() {
                       {tool.description}
                     </p>
                     <div className="rounded-lg bg-[var(--surface-1)] p-3">
-                      <span className="font-mono text-[10px] uppercase text-[var(--gray-500)] block mb-2">
+                      <span className="font-mono text-xs uppercase text-[var(--gray-500)] block mb-2">
                         Parameters
                       </span>
                       {Object.entries(tool.params).map(([key, type]) => (
@@ -400,7 +400,7 @@ export default function McpPage() {
                     value={logFilter}
                     onChange={(e) => setLogFilter(e.target.value)}
                     placeholder="Filter..."
-                    className="pl-7 pr-2 py-1 w-24 rounded text-[10px] font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-300)] placeholder:text-[var(--gray-600)] focus:outline-none"
+                    className="pl-7 pr-2 py-1 w-24 rounded text-xs font-mono bg-[var(--surface-1)] border border-[var(--alpha-white-5)] text-[var(--gray-300)] placeholder:text-[var(--gray-600)] focus:outline-none"
                   />
                 </div>
                 <button
@@ -411,7 +411,7 @@ export default function McpPage() {
                 </button>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-2 font-mono text-[11px]">
+            <div className="flex-1 overflow-y-auto p-2 font-mono text-xs">
               {filteredLogs.map((log, i) => (
                 <div
                   key={i}
@@ -507,7 +507,7 @@ export default function McpPage() {
                 >
                   <div className="flex-1 min-w-0">
                     <p className="font-mono text-sm text-[var(--gray-200)] m-0">{key.name}</p>
-                    <p className="font-mono text-[10px] text-[var(--gray-500)] m-0">
+                    <p className="font-mono text-xs text-[var(--gray-500)] m-0">
                       {key.key_prefix}... · All repos ·{" "}
                       Created {new Date(key.created_at).toLocaleDateString()}
                       {key.last_used_at && ` · Last used ${new Date(key.last_used_at).toLocaleDateString()}`}
@@ -569,12 +569,12 @@ export default function McpPage() {
 
                   {isExpanded && (
                     <div className="px-4 pb-4 border-t border-[var(--alpha-white-5)] pt-3 space-y-3">
-                      <p className="font-mono text-[11px] text-[var(--gray-500)] m-0">
+                      <p className="font-mono text-xs text-[var(--gray-500)] m-0">
                         {integration.description}
                       </p>
 
                       <div className="relative">
-                        <pre className="rounded-lg bg-[var(--surface-1)] p-3 font-mono text-[11px] text-[var(--gray-300)] overflow-x-auto m-0 whitespace-pre">
+                        <pre className="rounded-lg bg-[var(--surface-1)] p-3 font-mono text-xs text-[var(--gray-300)] overflow-x-auto m-0 whitespace-pre">
                           {config}
                         </pre>
                         <button
@@ -594,7 +594,7 @@ export default function McpPage() {
                           href={integration.docsUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 font-mono text-[11px] text-[var(--accent-green)] hover:underline"
+                          className="inline-flex items-center gap-1 font-mono text-xs text-[var(--accent-green)] hover:underline"
                         >
                           View setup docs <ExternalLink size={10} />
                         </a>

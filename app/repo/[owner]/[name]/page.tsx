@@ -87,25 +87,25 @@ export default function RepoOverviewPage() {
             {/* Status details */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
-                <p className="font-mono text-[10px] uppercase text-[var(--gray-500)] m-0 mb-1">Status</p>
+                <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Status</p>
                 <p className="font-mono text-xs text-[var(--gray-200)] m-0 capitalize">
                   {ingestionStatus.status}
                 </p>
               </div>
               <div>
-                <p className="font-mono text-[10px] uppercase text-[var(--gray-500)] m-0 mb-1">Files</p>
+                <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Files</p>
                 <p className="font-mono text-xs text-[var(--gray-200)] m-0">
                   {ingestionStatus.filesProcessed} / {ingestionStatus.filesTotal || "—"}
                 </p>
               </div>
               <div>
-                <p className="font-mono text-[10px] uppercase text-[var(--gray-500)] m-0 mb-1">Chunks</p>
+                <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Chunks</p>
                 <p className="font-mono text-xs text-[var(--gray-200)] m-0">
                   {ingestionStatus.chunksCreated}
                 </p>
               </div>
               <div>
-                <p className="font-mono text-[10px] uppercase text-[var(--gray-500)] m-0 mb-1">Embeddings</p>
+                <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Embeddings</p>
                 <p className="font-mono text-xs text-[var(--gray-200)] m-0">
                   {ingestionStatus.status === "embedding"
                     ? `${ingestionStatus.chunksCreated} / ${ingestionStatus.chunksTotal}`
@@ -114,7 +114,7 @@ export default function RepoOverviewPage() {
               </div>
             </div>
 
-            <p className="font-mono text-[11px] text-[var(--gray-500)] mt-3 m-0">
+            <p className="font-mono text-xs text-[var(--gray-500)] mt-3 m-0">
               {ingestionStatus.message}
             </p>
           </GlowCard>
@@ -313,7 +313,7 @@ function QuickLink({
           <p className="font-mono text-xs text-[var(--gray-500)] m-0 leading-relaxed">
             {description}
           </p>
-          <p className="font-mono text-[10px] text-[var(--gray-600)] mt-2 m-0">
+          <p className="font-mono text-xs text-[var(--gray-600)] mt-2 m-0">
             Available after indexing
           </p>
         </GlowCard>

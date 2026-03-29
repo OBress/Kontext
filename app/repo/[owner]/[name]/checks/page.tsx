@@ -12,6 +12,8 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronRight,
+  ClipboardCopy,
+  Check,
   ExternalLink,
   FileCode,
   Loader2,
@@ -116,7 +118,7 @@ function SeverityBadge({ severity }: { severity: RepoCheckFinding["severity"] })
           : "text-[var(--gray-400)] border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)]";
 
   return (
-    <span className={`px-2 py-0.5 rounded-full border text-[10px] font-mono ${color}`}>
+    <span className={`px-2 py-0.5 rounded-full border text-xs font-mono ${color}`}>
       {severity}
     </span>
   );
@@ -280,10 +282,10 @@ function FindingInspectorModal({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2 mb-2">
                 <SeverityBadge severity={finding.severity} />
-                <span className="px-2 py-0.5 rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-[10px] font-mono text-[var(--gray-400)]">
+                <span className="px-2 py-0.5 rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-xs font-mono text-[var(--gray-400)]">
                   {finding.check_type}
                 </span>
-                <span className="px-2 py-0.5 rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-[10px] font-mono text-[var(--gray-500)]">
+                <span className="px-2 py-0.5 rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-xs font-mono text-[var(--gray-500)]">
                   {finding.transition_state}
                 </span>
               </div>
@@ -294,7 +296,7 @@ function FindingInspectorModal({
                 {finding.summary}
               </p>
               {finding.recommendation && (
-                <p className="font-mono text-[11px] text-[var(--accent-green)] m-0 mt-2">
+                <p className="font-mono text-xs text-[var(--accent-green)] m-0 mt-2">
                   Fix direction: {finding.recommendation}
                 </p>
               )}
@@ -324,7 +326,7 @@ function FindingInspectorModal({
           {finding.file_path && (
             <div className="mt-3 flex items-center gap-2">
               <FileCode size={13} className="text-[var(--accent-green)] shrink-0" />
-              <span className="font-mono text-[11px] text-[var(--gray-300)] truncate">
+              <span className="font-mono text-xs text-[var(--gray-300)] truncate">
                 {finding.file_path}
               </span>
             </div>
@@ -345,7 +347,7 @@ function FindingInspectorModal({
                 </p>
                 {finding.evidence && (
                   <div className="mt-4 rounded-xl border border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] p-4 text-left">
-                    <p className="font-mono text-[10px] uppercase tracking-widest text-[var(--gray-500)] m-0 mb-2">
+                    <p className="font-mono text-xs uppercase tracking-widest text-[var(--gray-500)] m-0 mb-2">
                       Evidence
                     </p>
                     <pre className="font-mono text-xs text-[var(--gray-300)] m-0 whitespace-pre-wrap">
@@ -371,7 +373,7 @@ function FindingInspectorModal({
               </p>
               {finding.evidence && (
                 <div className="w-full max-w-2xl rounded-xl border border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] p-4 text-left">
-                  <p className="font-mono text-[10px] uppercase tracking-widest text-[var(--gray-500)] m-0 mb-2">
+                  <p className="font-mono text-xs uppercase tracking-widest text-[var(--gray-500)] m-0 mb-2">
                     Evidence from analysis
                   </p>
                   <pre className="font-mono text-xs text-[var(--gray-300)] m-0 whitespace-pre-wrap">
@@ -412,6 +414,7 @@ export default function RepoChecksPage() {
   const [running, setRunning] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [inspectedFinding, setInspectedFinding] = useState<RepoCheckFinding | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -575,6 +578,31 @@ export default function RepoChecksPage() {
     return { critical, high, medium, low };
   }, [findings]);
 
+  // Copy all findings to clipboard as structured markdown
+  const copyFindings = useCallback(async () => {
+    if (findings.length === 0) return;
+
+    const lines: string[] = [`## Open Findings (${findings.length} total)`, ""];
+    for (const f of findings) {
+      lines.push(`### [${f.severity}] ${f.title}`);
+      lines.push(`- **Type:** ${f.check_type}`);
+      lines.push(`- **Status:** ${f.transition_state}`);
+      if (f.file_path) lines.push(`- **File:** ${f.file_path}`);
+      lines.push(`- **Summary:** ${f.summary}`);
+      if (f.recommendation) lines.push(`- **Recommendation:** ${f.recommendation}`);
+      if (f.evidence) lines.push(`- **Evidence:** \`${f.evidence.replace(/\n/g, " ").slice(0, 200)}\``);
+      lines.push("");
+    }
+
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback: select-copy pattern
+    }
+  }, [findings]);
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 py-10 font-mono text-sm text-[var(--gray-500)]">
@@ -585,158 +613,175 @@ export default function RepoChecksPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <GlowCard glowColor="none" className="p-5">
-        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <Shield size={16} className="text-[var(--accent-amber)]" />
-              <h2 className="font-mono text-base font-semibold text-[var(--gray-100)] m-0">
-                Automated Repo Checks
-              </h2>
+    <>
+      {/* 2×2 quadrant grid — fits within the viewport */}
+      <div
+        className="grid grid-cols-2 gap-4"
+        style={{
+          height: "calc(100vh - 140px)",
+          gridTemplateRows: "auto 1fr",
+        }}
+      >
+        {/* ─── TOP LEFT: Automated Repo Checks ─── */}
+        <GlowCard glowColor="none" className="p-5 flex flex-col overflow-hidden">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <Shield size={16} className="text-[var(--accent-amber)]" />
+                <h2 className="font-mono text-base font-semibold text-[var(--gray-100)] m-0">
+                  Automated Repo Checks
+                </h2>
+              </div>
+              <p className="font-mono text-sm text-[var(--gray-500)] m-0">
+                Continuous health across security, optimization, consistency, and change impact.
+              </p>
             </div>
-            <p className="font-mono text-sm text-[var(--gray-500)] m-0">
-              Continuous repo health across security, optimization, consistency, and change impact.
-            </p>
+
+            <button
+              onClick={runChecks}
+              disabled={running}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20 hover:bg-[var(--accent-green)]/20 disabled:opacity-50 cursor-pointer whitespace-nowrap shrink-0"
+            >
+              {running ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+              Run Checks Now
+            </button>
           </div>
 
-          <button
-            onClick={runChecks}
-            disabled={running}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20 hover:bg-[var(--accent-green)]/20 disabled:opacity-50 cursor-pointer"
-          >
-            {running ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-            Run Checks Now
-          </button>
-        </div>
+          <div className="grid grid-cols-3 gap-2 mb-2">
+            <Metric label="Open" value={summary?.openCount || 0} accent="text-[var(--gray-100)]" />
+            <Metric label="Critical" value={severityCounts.critical} accent="text-red-300" />
+            <Metric label="High" value={severityCounts.high} accent="text-amber-300" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Metric label="Medium" value={severityCounts.medium} accent="text-blue-300" />
+            <Metric label="Resolved" value={summary?.resolvedRecently || 0} accent="text-[var(--accent-green)]" />
+          </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mt-5">
-          <Metric label="Open findings" value={summary?.openCount || 0} accent="text-[var(--gray-100)]" />
-          <Metric label="Critical" value={severityCounts.critical} accent="text-red-300" />
-          <Metric label="High" value={severityCounts.high} accent="text-amber-300" />
-          <Metric label="Medium" value={severityCounts.medium} accent="text-blue-300" />
-          <Metric label="Resolved" value={summary?.resolvedRecently || 0} accent="text-[var(--accent-green)]" />
-        </div>
+          {message && (
+            <p className="mt-2 font-mono text-xs text-[var(--gray-400)] m-0 truncate">
+              {message}
+            </p>
+          )}
+        </GlowCard>
 
-        {message && (
-          <p className="mt-4 font-mono text-xs text-[var(--gray-400)] m-0">
-            {message}
-          </p>
-        )}
-      </GlowCard>
+        {/* ─── TOP RIGHT: Check Configuration (2×2 grid) ─── */}
+        <GlowCard glowColor="cyan" className="p-5 flex flex-col overflow-hidden">
+          <div className="flex items-center gap-2 mb-3">
+            <Sparkles size={16} className="text-[var(--accent-green)]" />
+            <h3 className="font-mono text-base font-medium text-[var(--gray-200)] m-0">
+              Check Configuration
+            </h3>
+            {saving && <Loader2 size={14} className="animate-spin text-[var(--gray-500)]" />}
+          </div>
 
-      <GlowCard glowColor="cyan" className="p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <Sparkles size={16} className="text-[var(--accent-green)]" />
-          <h3 className="font-mono text-sm font-medium text-[var(--gray-200)] m-0">
-            Check Configuration
-          </h3>
-          {saving && <Loader2 size={13} className="animate-spin text-[var(--gray-500)]" />}
-        </div>
+          <div className="grid grid-cols-2 gap-2 flex-1">
+            {configs.map((config) => {
+              const dropdownValue = config.enabled ? config.trigger_mode : "off";
 
-        <div className="space-y-3">
-          {configs.map((config) => (
-            <div
-              key={config.check_type}
-              className="rounded-xl border border-[var(--alpha-white-8)] bg-[var(--alpha-white-3)] p-4"
-            >
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h4 className="font-mono text-sm text-[var(--gray-200)] m-0">
+              return (
+                <div
+                  key={config.check_type}
+                  className="rounded-lg border border-[var(--alpha-white-8)] bg-[var(--alpha-white-3)] px-3 py-2.5 flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-2 shrink-0">
+                    <h4 className="font-mono text-sm font-medium text-[var(--gray-200)] m-0">
                       {CHECK_LABELS[config.check_type].title}
                     </h4>
                     {config.enabled ? (
-                      <span className="font-mono text-[10px] text-[var(--accent-green)] border border-[var(--accent-green)]/20 bg-[var(--accent-green)]/10 rounded-full px-2 py-0.5">
-                        Enabled
+                      <span className="font-mono text-xs text-[var(--accent-green)] border border-[var(--accent-green)]/20 bg-[var(--accent-green)]/10 rounded-full px-2 py-0.5 leading-none">
+                        On
                       </span>
                     ) : (
-                      <span className="font-mono text-[10px] text-[var(--gray-500)] border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] rounded-full px-2 py-0.5">
-                        Disabled
+                      <span className="font-mono text-xs text-[var(--gray-500)] border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] rounded-full px-2 py-0.5 leading-none">
+                        Off
                       </span>
                     )}
                   </div>
-                  <p className="font-mono text-xs text-[var(--gray-500)] m-0">
-                    {CHECK_LABELS[config.check_type].description}
-                  </p>
-                </div>
 
-                <div className="flex flex-wrap items-center gap-3">
-                  <label className="flex items-center gap-2 font-mono text-xs text-[var(--gray-400)]">
-                    <input
-                      type="checkbox"
-                      checked={config.enabled}
-                      onChange={(e) => updateConfig(config.check_type, { enabled: e.target.checked })}
-                    />
-                    Enabled
-                  </label>
-
-                  <label className="flex items-center gap-2 font-mono text-xs text-[var(--gray-400)]">
-                    Trigger
-                    <select
-                      value={config.trigger_mode}
-                      onChange={(e) =>
+                  <select
+                    value={dropdownValue}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "off") {
+                        updateConfig(config.check_type, { enabled: false });
+                      } else {
                         updateConfig(config.check_type, {
-                          trigger_mode: e.target.value as RepoCheckConfig["trigger_mode"],
-                        })
+                          enabled: true,
+                          trigger_mode: val as RepoCheckConfig["trigger_mode"],
+                        });
                       }
-                      className="px-2 py-1 rounded-lg bg-[var(--surface-1)] border border-[var(--alpha-white-10)] text-[var(--gray-300)] font-mono text-xs"
-                    >
-                      <option value="after_sync">After sync</option>
-                      <option value="manual">Manual only</option>
-                      <option value="daily">Daily</option>
-                    </select>
-                  </label>
-
-                  <label className="flex items-center gap-2 font-mono text-xs text-[var(--gray-400)]">
-                    <input
-                      type="checkbox"
-                      checked={config.notify_on_high}
-                      onChange={(e) =>
-                        updateConfig(config.check_type, {
-                          notify_on_high: e.target.checked,
-                        })
-                      }
-                    />
-                    Notify on high
-                  </label>
+                    }}
+                    className="px-2 py-1 rounded-md bg-[var(--surface-1)] border border-[var(--alpha-white-10)] text-[var(--gray-300)] font-mono text-xs cursor-pointer"
+                  >
+                    <option value="off">Off</option>
+                    <option value="after_sync">After sync</option>
+                    <option value="manual">Manual only</option>
+                    <option value="daily">Daily</option>
+                  </select>
                 </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </GlowCard>
+              );
+            })}
+          </div>
+        </GlowCard>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <GlowCard glowColor="none" className="p-5">
-          <div className="flex items-center gap-2 mb-4">
+
+        {/* ─── BOTTOM LEFT: Open Findings (scrollable) ─── */}
+        <GlowCard glowColor="none" className="p-5 flex flex-col overflow-hidden">
+          <div className="flex items-center gap-2 mb-3 shrink-0">
             <AlertTriangle size={16} className="text-amber-300" />
-            <h3 className="font-mono text-sm font-medium text-[var(--gray-200)] m-0">
+            <h3 className="font-mono text-base font-medium text-[var(--gray-200)] m-0">
               Open Findings
             </h3>
+            <span className="font-mono text-xs text-[var(--gray-500)] ml-1">
+              ({findings.length})
+            </span>
+
+            {findings.length > 0 && (
+              <button
+                onClick={copyFindings}
+                className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono border transition-all duration-200 cursor-pointer shrink-0"
+                style={{
+                  color: copied ? "var(--accent-green)" : "var(--gray-400)",
+                  borderColor: copied ? "rgba(63,185,80,0.3)" : "var(--alpha-white-10)",
+                  background: copied ? "rgba(63,185,80,0.1)" : "var(--alpha-white-5)",
+                }}
+              >
+                {copied ? (
+                  <>
+                    <Check size={13} />
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <ClipboardCopy size={13} />
+                    Copy All
+                  </>
+                )}
+              </button>
+            )}
           </div>
 
-          {findings.length === 0 ? (
-            <div className="rounded-xl border border-[var(--alpha-white-8)] bg-[var(--alpha-white-3)] p-4">
-              <div className="flex items-center gap-2 font-mono text-sm text-[var(--accent-green)]">
-                <CheckCircle2 size={15} />
-                No open findings right now.
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
+            {findings.length === 0 ? (
+              <div className="rounded-lg border border-[var(--alpha-white-8)] bg-[var(--alpha-white-3)] p-4">
+                <div className="flex items-center gap-2 font-mono text-sm text-[var(--accent-green)]">
+                  <CheckCircle2 size={15} />
+                  No open findings right now.
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {findings.map((finding) => (
+            ) : (
+              findings.map((finding) => (
                 <button
                   key={finding.id}
                   onClick={() => setInspectedFinding(finding)}
-                  className="w-full text-left rounded-xl border border-[var(--alpha-white-8)] bg-[var(--alpha-white-3)] p-4 transition-all hover:border-[var(--accent-green)]/25 hover:bg-[var(--alpha-white-5)] group cursor-pointer"
+                  className="w-full text-left rounded-lg border border-[var(--alpha-white-8)] bg-[var(--alpha-white-3)] px-4 py-3 transition-all hover:border-[var(--accent-green)]/25 hover:bg-[var(--alpha-white-5)] group cursor-pointer"
                 >
                   <div className="flex flex-wrap items-center gap-2 mb-2">
                     <SeverityBadge severity={finding.severity} />
-                    <span className="px-2 py-0.5 rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-[10px] font-mono text-[var(--gray-400)]">
+                    <span className="px-2 py-0.5 rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-xs font-mono text-[var(--gray-400)]">
                       {finding.check_type}
                     </span>
-                    <span className="px-2 py-0.5 rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-[10px] font-mono text-[var(--gray-500)]">
+                    <span className="px-2 py-0.5 rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-xs font-mono text-[var(--gray-500)]">
                       {finding.transition_state}
                     </span>
                     <ChevronRight
@@ -744,59 +789,58 @@ export default function RepoChecksPage() {
                       className="ml-auto text-[var(--gray-600)] group-hover:text-[var(--accent-green)] transition-colors"
                     />
                   </div>
-                  <h4 className="font-mono text-sm text-[var(--gray-200)] m-0 mb-2">
+                  <h4 className="font-mono text-sm text-[var(--gray-200)] m-0 mb-1">
                     {finding.title}
                   </h4>
-                  <p className="font-mono text-xs text-[var(--gray-500)] m-0 mb-2">
+                  <p className="font-mono text-xs text-[var(--gray-500)] m-0 mb-1 line-clamp-2">
                     {finding.summary}
                   </p>
                   {finding.file_path && (
-                    <p className="font-mono text-[11px] text-[var(--gray-400)] m-0 mb-1 flex items-center gap-1.5">
-                      <FileCode size={11} className="text-[var(--accent-green)] shrink-0" />
-                      {finding.file_path}
-                    </p>
-                  )}
-                  {finding.recommendation && (
-                    <p className="font-mono text-[11px] text-[var(--gray-400)] m-0">
-                      Fix direction: {finding.recommendation}
+                    <p className="font-mono text-xs text-[var(--gray-400)] m-0 flex items-center gap-1.5">
+                      <FileCode size={12} className="text-[var(--accent-green)] shrink-0" />
+                      <span className="truncate">{finding.file_path}</span>
                     </p>
                   )}
                 </button>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
         </GlowCard>
 
-        <GlowCard glowColor="none" className="p-5">
-          <div className="flex items-center gap-2 mb-4">
+        {/* ─── BOTTOM RIGHT: Recent Runs (scrollable) ─── */}
+        <GlowCard glowColor="none" className="p-5 flex flex-col overflow-hidden">
+          <div className="flex items-center gap-2 mb-3 shrink-0">
             <Zap size={16} className="text-[var(--accent-green)]" />
-            <h3 className="font-mono text-sm font-medium text-[var(--gray-200)] m-0">
+            <h3 className="font-mono text-base font-medium text-[var(--gray-200)] m-0">
               Recent Runs
             </h3>
+            <span className="font-mono text-xs text-[var(--gray-500)] ml-1">
+              ({runs.length})
+            </span>
           </div>
 
-          {runs.length === 0 ? (
-            <div className="rounded-xl border border-[var(--alpha-white-8)] bg-[var(--alpha-white-3)] p-4">
-              <p className="font-mono text-xs text-[var(--gray-500)] m-0">
-                No automated check history yet.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {runs.map((run) => (
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
+            {runs.length === 0 ? (
+              <div className="rounded-lg border border-[var(--alpha-white-8)] bg-[var(--alpha-white-3)] p-4">
+                <p className="font-mono text-sm text-[var(--gray-500)] m-0">
+                  No automated check history yet.
+                </p>
+              </div>
+            ) : (
+              runs.map((run) => (
                 <div
                   key={run.id}
-                  className="rounded-xl border border-[var(--alpha-white-8)] bg-[var(--alpha-white-3)] p-4"
+                  className="rounded-lg border border-[var(--alpha-white-8)] bg-[var(--alpha-white-3)] px-4 py-3"
                 >
                   <div className="flex flex-wrap items-center gap-2 mb-2">
-                    <span className="px-2 py-0.5 rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-[10px] font-mono text-[var(--gray-400)]">
+                    <span className="px-2 py-0.5 rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-xs font-mono text-[var(--gray-400)]">
                       {run.trigger_mode}
                     </span>
-                    <span className="px-2 py-0.5 rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-[10px] font-mono text-[var(--gray-400)]">
+                    <span className="px-2 py-0.5 rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-xs font-mono text-[var(--gray-400)]">
                       {run.status}
                     </span>
                     {run.head_sha && (
-                      <span className="px-2 py-0.5 rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-[10px] font-mono text-[var(--gray-500)]">
+                      <span className="px-2 py-0.5 rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-xs font-mono text-[var(--gray-500)]">
                         {run.head_sha.slice(0, 7)}
                       </span>
                     )}
@@ -805,17 +849,17 @@ export default function RepoChecksPage() {
                   <p className="font-mono text-xs text-[var(--gray-400)] m-0 mb-1">
                     {new Date(run.created_at).toLocaleString()}
                   </p>
-                  <p className="font-mono text-xs text-[var(--gray-500)] m-0 mb-2">
+                  <p className="font-mono text-xs text-[var(--gray-500)] m-0 mb-1.5 line-clamp-2">
                     {run.summary || "No summary was generated."}
                   </p>
-                  <p className="font-mono text-[11px] text-[var(--gray-400)] m-0">
+                  <p className="font-mono text-xs text-[var(--gray-400)] m-0">
                     {run.new_findings} new, {run.resolved_findings} resolved, {run.unchanged_findings} persistent,{" "}
                     {run.findings_total} total
                   </p>
                 </div>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
         </GlowCard>
       </div>
 
@@ -827,7 +871,7 @@ export default function RepoChecksPage() {
           onClose={() => setInspectedFinding(null)}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -841,8 +885,8 @@ function Metric({
   accent: string;
 }) {
   return (
-    <div className="rounded-xl bg-[var(--alpha-white-5)] p-4">
-      <p className="font-mono text-[10px] uppercase text-[var(--gray-500)] m-0 mb-1">
+    <div className="rounded-lg bg-[var(--alpha-white-5)] p-3">
+      <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-0.5">
         {label}
       </p>
       <p className={`font-mono text-xl m-0 ${accent}`}>{value}</p>

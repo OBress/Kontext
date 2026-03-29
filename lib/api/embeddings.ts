@@ -1,4 +1,10 @@
+import type {
+  GenerationConfig,
+  Part,
+  ResponseSchema,
+} from "@google/generative-ai";
 import { TaskType } from "@google/generative-ai";
+import { ApiError } from "./errors";
 import {
   createGeminiClient,
   delay,
@@ -9,9 +15,55 @@ import {
   GEMINI_GENERATION_MODEL,
   normalizeGeminiError,
 } from "./gemini";
+import {
+  buildTaskSystemInstruction,
+  PROMPT_GENERATION_CONFIGS,
+} from "./prompt-contract";
 
 interface EmbeddingOptions {
   onBatchComplete?: (completed: number, total: number) => void;
+}
+
+export interface TextGenerationOptions {
+  systemInstruction?: string;
+  generationConfig?: GenerationConfig;
+}
+
+export interface StructuredJsonGenerationOptions<T>
+  extends TextGenerationOptions {
+  responseSchema: ResponseSchema;
+  validate?: (value: unknown) => value is T;
+  transform?: (value: unknown) => T;
+  maxAttempts?: number;
+}
+
+function normalizeGenerationOptions(
+  options?: string | TextGenerationOptions
+): TextGenerationOptions {
+  if (typeof options === "string") {
+    return { systemInstruction: options };
+  }
+
+  return options || {};
+}
+
+function parseJsonResponse(text: string): unknown {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw new ApiError(
+      502,
+      "AI_PARSE_ERROR",
+      "Gemini returned an empty structured response."
+    );
+  }
+
+  const cleaned = trimmed
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+
+  return JSON.parse(cleaned);
 }
 
 /**
@@ -98,16 +150,78 @@ export async function generateQueryEmbedding(
  */
 export async function generateChatStream(
   apiKey: string,
-  systemPrompt: string,
-  userMessage: string
+  userMessage: string,
+  options?: string | TextGenerationOptions
 ): Promise<ReadableStream<Uint8Array>> {
+  const normalizedOptions = normalizeGenerationOptions(options);
   const genAI = createGeminiClient(apiKey);
   const model = genAI.getGenerativeModel({
     model: GEMINI_GENERATION_MODEL,
-    systemInstruction: systemPrompt,
+    ...(normalizedOptions.systemInstruction
+      ? { systemInstruction: normalizedOptions.systemInstruction }
+      : {}),
+    ...(normalizedOptions.generationConfig
+      ? { generationConfig: normalizedOptions.generationConfig }
+      : {}),
   });
 
   const result = await model.generateContentStream(userMessage);
+  const encoder = new TextEncoder();
+
+  return new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const chunk of result.stream) {
+          const text = chunk.text();
+          if (text) {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ type: "text", content: text })}\n\n`
+              )
+            );
+          }
+        }
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`)
+        );
+        controller.close();
+      } catch (err: unknown) {
+        const message = normalizeGeminiError(err, "generation").message;
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ type: "error", message })}\n\n`
+          )
+        );
+        controller.close();
+      }
+    },
+  });
+}
+
+/**
+ * Generate a streaming chat response with multimodal content (text + images).
+ * Accepts an array of Gemini Part objects for the user message.
+ */
+export async function generateMultimodalChatStream(
+  apiKey: string,
+  parts: Part[],
+  options?: string | TextGenerationOptions
+): Promise<ReadableStream<Uint8Array>> {
+  const normalizedOptions = normalizeGenerationOptions(options);
+  const genAI = createGeminiClient(apiKey);
+  const model = genAI.getGenerativeModel({
+    model: GEMINI_GENERATION_MODEL,
+    ...(normalizedOptions.systemInstruction
+      ? { systemInstruction: normalizedOptions.systemInstruction }
+      : {}),
+    ...(normalizedOptions.generationConfig
+      ? { generationConfig: normalizedOptions.generationConfig }
+      : {}),
+  });
+
+  const result = await model.generateContentStream({
+    contents: [{ role: "user", parts }],
+  });
   const encoder = new TextEncoder();
 
   return new ReadableStream({
@@ -146,13 +260,19 @@ export async function generateChatStream(
 export async function generateText(
   apiKey: string,
   prompt: string,
-  systemInstruction?: string
+  options?: string | TextGenerationOptions
 ): Promise<string> {
   try {
+    const normalizedOptions = normalizeGenerationOptions(options);
     const genAI = createGeminiClient(apiKey);
     const model = genAI.getGenerativeModel({
       model: GEMINI_GENERATION_MODEL,
-      ...(systemInstruction ? { systemInstruction } : {}),
+      ...(normalizedOptions.systemInstruction
+        ? { systemInstruction: normalizedOptions.systemInstruction }
+        : {}),
+      ...(normalizedOptions.generationConfig
+        ? { generationConfig: normalizedOptions.generationConfig }
+        : {}),
     });
 
     const result = await model.generateContent(prompt);
@@ -160,6 +280,61 @@ export async function generateText(
   } catch (err: unknown) {
     throw normalizeGeminiError(err, "generation");
   }
+}
+
+export async function generateStructuredJson<T>(
+  apiKey: string,
+  prompt: string,
+  options: StructuredJsonGenerationOptions<T>
+): Promise<T> {
+  const maxAttempts = options.maxAttempts || 2;
+  const generationConfig: GenerationConfig = {
+    ...options.generationConfig,
+    responseMimeType: "application/json",
+    responseSchema: options.responseSchema,
+  };
+
+  let lastError: unknown = null;
+  let attemptPrompt = prompt;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const raw = await generateText(apiKey, attemptPrompt, {
+        systemInstruction: options.systemInstruction,
+        generationConfig,
+      });
+      const parsed = parseJsonResponse(raw);
+
+      if (options.transform) {
+        return options.transform(parsed);
+      }
+
+      if (options.validate && !options.validate(parsed)) {
+        throw new ApiError(
+          502,
+          "AI_PARSE_ERROR",
+          "Gemini returned structured JSON that did not match the expected shape."
+        );
+      }
+
+      return parsed as T;
+    } catch (error: unknown) {
+      lastError = error;
+      if (attempt >= maxAttempts) break;
+
+      attemptPrompt = `${prompt}\n\nIMPORTANT: Return only valid JSON that matches the requested schema. Do not use markdown fences.`;
+    }
+  }
+
+  if (lastError instanceof ApiError) {
+    throw lastError;
+  }
+
+  throw new ApiError(
+    502,
+    "AI_PARSE_ERROR",
+    "Gemini did not return valid structured JSON."
+  );
 }
 
 /**
@@ -171,7 +346,7 @@ export async function generateFileSummary(
   filePath: string,
   content: string
 ): Promise<string> {
-  const prompt = `Analyze this source code file and provide a concise 2-3 sentence summary of what it does, its key exports, and its role in the project.
+  const prompt = `Analyze this partial source code file excerpt and provide a concise 2-3 sentence summary of what it appears to do, its likely key exports, and its role in the project.
 
 File: ${filePath}
 
@@ -179,7 +354,22 @@ File: ${filePath}
 ${content.slice(0, 4000)}
 \`\`\`
 
+Only describe behavior that is visible in the excerpt. If the excerpt is incomplete, say so briefly.
+
 Summary:`;
 
-  return generateText(apiKey, prompt, "You are a senior software engineer. Provide concise, technical summaries of code files.");
+  return generateText(apiKey, prompt, {
+    systemInstruction: buildTaskSystemInstruction({
+      task: "high_signal_compressor",
+      role: "a senior software engineer",
+      mission:
+        "Produce concise technical file summaries from partial source excerpts.",
+      outputStyle: [
+        "Keep the summary to 2-3 sentences.",
+        "Use technical language without filler.",
+        "State when the excerpt appears partial instead of assuming missing details.",
+      ],
+    }),
+    generationConfig: PROMPT_GENERATION_CONFIGS.summary,
+  });
 }

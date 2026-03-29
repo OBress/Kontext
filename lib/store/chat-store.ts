@@ -29,6 +29,12 @@ export interface TimelineCitation {
   similarity: number;
 }
 
+export interface ChatAttachedImage {
+  name: string;
+  mimeType: string;
+  dataUrl: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -37,6 +43,8 @@ export interface ChatMessage {
   citations?: ChatCitation[];
   timelineCitations?: TimelineCitation[];
   answerMode?: ChatAnswerMode;
+  attachedFiles?: string[];
+  attachedImages?: ChatAttachedImage[];
 }
 
 interface ChatState {

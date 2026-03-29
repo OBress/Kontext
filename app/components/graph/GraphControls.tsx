@@ -58,7 +58,7 @@ export function GraphControls() {
 
             {/* File type filters */}
             <div>
-              <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--gray-500)] mb-2 block">
+              <span className="font-mono text-xs uppercase tracking-wider text-[var(--gray-500)] mb-2 block">
                 File Types
               </span>
               <div className="space-y-1.5">
@@ -96,7 +96,7 @@ export function GraphControls() {
                         />
                       )}
                     </span>
-                    <span className="font-mono text-[11px] text-[var(--gray-400)] group-hover:text-[var(--gray-200)] transition-colors">
+                    <span className="font-mono text-xs text-[var(--gray-400)] group-hover:text-[var(--gray-200)] transition-colors">
                       {label}
                     </span>
                   </label>
@@ -106,7 +106,7 @@ export function GraphControls() {
 
             {/* Min connections */}
             <div>
-              <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--gray-500)] mb-2 block">
+              <span className="font-mono text-xs uppercase tracking-wider text-[var(--gray-500)] mb-2 block">
                 Min connections: {filters.minConnections}
               </span>
               <input
@@ -130,7 +130,7 @@ export function GraphControls() {
 
             {/* Layout selector */}
             <div>
-              <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--gray-500)] mb-2 block">
+              <span className="font-mono text-xs uppercase tracking-wider text-[var(--gray-500)] mb-2 block">
                 Layout
               </span>
               <div className="flex gap-1">
@@ -138,7 +138,7 @@ export function GraphControls() {
                   <button
                     key={l.value}
                     onClick={() => setLayout(l.value)}
-                    className={`flex-1 py-1 rounded text-[10px] font-mono transition-colors border-none cursor-pointer ${
+                    className={`flex-1 py-1 rounded text-xs font-mono transition-colors border-none cursor-pointer ${
                       layout === l.value
                         ? "bg-[var(--accent-green)]/15 text-[var(--accent-green)]"
                         : "bg-[var(--alpha-white-5)] text-[var(--gray-500)] hover:text-[var(--gray-300)]"
@@ -154,7 +154,7 @@ export function GraphControls() {
             <div className="flex gap-2 pt-1">
               <button
                 onClick={() => setIsFullscreen(!isFullscreen)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[11px] font-mono bg-[var(--alpha-white-5)] text-[var(--gray-400)] hover:text-[var(--gray-200)] transition-colors border-none cursor-pointer"
+                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-mono bg-[var(--alpha-white-5)] text-[var(--gray-400)] hover:text-[var(--gray-200)] transition-colors border-none cursor-pointer"
               >
                 {isFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
                 {isFullscreen ? "Exit" : "Fullscreen"}

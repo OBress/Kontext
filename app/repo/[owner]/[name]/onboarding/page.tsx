@@ -249,10 +249,10 @@ export default function RepoOnboardingPage() {
 
         <div className="mt-4">
           <div className="flex items-center justify-between mb-1">
-            <span className="font-mono text-[10px] text-[var(--gray-500)] uppercase">
+            <span className="font-mono text-xs text-[var(--gray-500)] uppercase">
               Progress
             </span>
-            <span className="font-mono text-[10px] text-[var(--accent-green)]">
+            <span className="font-mono text-xs text-[var(--accent-green)]">
               {progressPercent}%
             </span>
           </div>
@@ -291,7 +291,7 @@ export default function RepoOnboardingPage() {
           <>
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="font-mono text-[10px] uppercase text-[var(--accent-green)] m-0">
+                <p className="font-mono text-xs uppercase text-[var(--accent-green)] m-0">
                   Step {currentStep + 1} of {steps.length}
                 </p>
                 <h3 className="font-mono text-xl text-[var(--gray-100)] mt-2 mb-1">
@@ -301,7 +301,7 @@ export default function RepoOnboardingPage() {
                   {step.description}
                 </p>
               </div>
-              <span className="px-2 py-1 rounded-full bg-[var(--alpha-white-5)] text-[var(--gray-400)] font-mono text-[10px] uppercase">
+              <span className="px-2 py-1 rounded-full bg-[var(--alpha-white-5)] text-[var(--gray-400)] font-mono text-xs uppercase">
                 {step.stepType.replace("_", " ")}
               </span>
             </div>
@@ -370,7 +370,7 @@ export default function RepoOnboardingPage() {
                             : "Not quite yet."}
                         </p>
                         {quizFeedback?.explanation && (
-                          <p className="font-mono text-[11px] text-[var(--gray-500)] m-0 mt-2">
+                          <p className="font-mono text-xs text-[var(--gray-500)] m-0 mt-2">
                             {quizFeedback.explanation}
                           </p>
                         )}
@@ -381,7 +381,7 @@ export default function RepoOnboardingPage() {
 
                 {attemptsForCurrentStep.length > 0 && (
                   <div className="mt-4">
-                    <p className="font-mono text-[10px] uppercase text-[var(--gray-500)] mb-2">
+                    <p className="font-mono text-xs uppercase text-[var(--gray-500)] mb-2">
                       Attempts
                     </p>
                     <div className="space-y-2">
@@ -394,7 +394,7 @@ export default function RepoOnboardingPage() {
                             Attempt {attempt.attemptNumber}
                           </span>
                           <span
-                            className={`font-mono text-[10px] ${
+                            className={`font-mono text-xs ${
                               attempt.passed
                                 ? "text-[var(--accent-green)]"
                                 : "text-[var(--accent-amber)]"
@@ -478,7 +478,7 @@ export default function RepoOnboardingPage() {
                 Preview Mode
               </span>
             </div>
-            <p className="font-mono text-[11px] text-[var(--gray-400)] m-0">
+            <p className="font-mono text-xs text-[var(--gray-400)] m-0">
               This is how the assigned onboarding experience will look. Publish and attach it from the Team tab to use it with invites.
             </p>
           </div>

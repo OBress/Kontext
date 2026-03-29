@@ -211,7 +211,7 @@ export default function RepoSettingsPage() {
           {isOwner === false && (
             <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--alpha-white-3)] border border-[var(--alpha-white-5)]">
               <Shield size={14} className="text-[var(--gray-500)] shrink-0" />
-              <p className="font-mono text-[11px] text-[var(--gray-500)] m-0">
+              <p className="font-mono text-xs text-[var(--gray-500)] m-0">
                 Only the repository owner can delete this repository.
               </p>
             </div>
@@ -282,10 +282,10 @@ export default function RepoSettingsPage() {
                         className="text-red-400/60 mt-0.5 shrink-0"
                       />
                       <div className="min-w-0">
-                        <p className="font-mono text-[11px] font-medium text-[var(--gray-300)] m-0">
+                        <p className="font-mono text-xs font-medium text-[var(--gray-300)] m-0">
                           {item.label}
                         </p>
-                        <p className="font-mono text-[10px] text-[var(--gray-600)] m-0 mt-0.5">
+                        <p className="font-mono text-xs text-[var(--gray-600)] m-0 mt-0.5">
                           {item.description}
                         </p>
                       </div>

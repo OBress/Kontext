@@ -1,12 +1,19 @@
 import { createHash } from "crypto";
+import type { ResponseSchema } from "@google/generative-ai";
+import { SchemaType } from "@google/generative-ai";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "./auth";
 import { resolveAiKey } from "./ai-key";
 import { ApiError } from "./errors";
-import { generateText } from "./embeddings";
+import { generateStructuredJson } from "./embeddings";
 import { buildFileManifest } from "./repo-intelligence";
 import { stripChunkFileHeader } from "@/lib/code";
 import { logActivity } from "./activity";
+import {
+  buildTaskSystemInstruction,
+  formatEvidencePack,
+  PROMPT_GENERATION_CONFIGS,
+} from "./prompt-contract";
 import {
   completeRepoJob,
   createRepoJob,
@@ -184,44 +191,6 @@ function truncate(text: string, maxLength: number) {
   return `${text.slice(0, maxLength)}\n... [truncated]`;
 }
 
-function stripJsonFence(text: string) {
-  return text
-    .trim()
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/, "")
-    .trim();
-}
-
-function extractJsonText(text: string): string {
-  const stripped = stripJsonFence(text);
-  if (stripped.startsWith("{") || stripped.startsWith("[")) {
-    return stripped;
-  }
-
-  const objectStart = stripped.indexOf("{");
-  const objectEnd = stripped.lastIndexOf("}");
-  if (objectStart !== -1 && objectEnd > objectStart) {
-    return stripped.slice(objectStart, objectEnd + 1);
-  }
-
-  const arrayStart = stripped.indexOf("[");
-  const arrayEnd = stripped.lastIndexOf("]");
-  if (arrayStart !== -1 && arrayEnd > arrayStart) {
-    return stripped.slice(arrayStart, arrayEnd + 1);
-  }
-
-  throw new ApiError(502, "AI_PARSE_ERROR", "Repo checks response was not valid JSON.");
-}
-
-function parseRepoCheckResponse(text: string): RepoCheckModelResponse {
-  const parsed = JSON.parse(extractJsonText(text)) as RepoCheckModelResponse;
-  if (!parsed || typeof parsed !== "object") {
-    throw new ApiError(502, "AI_PARSE_ERROR", "Repo checks response was empty.");
-  }
-  return parsed;
-}
-
 function buildFingerprint(checkType: RepoCheckType, finding: RepoCheckModelFinding): string {
   const stableKey = [
     checkType,
@@ -250,6 +219,176 @@ function getLanePromptLabel(checkType: RepoCheckType) {
     default:
       return "Actionable engineering issues.";
   }
+}
+
+const CHECK_FINDING_SCHEMA: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    fingerprint_key: { type: SchemaType.STRING },
+    title: { type: SchemaType.STRING },
+    summary: { type: SchemaType.STRING },
+    severity: {
+      type: SchemaType.STRING,
+      format: "enum",
+      enum: ["low", "medium", "high", "critical"],
+    },
+    confidence: { type: SchemaType.NUMBER },
+    category: { type: SchemaType.STRING },
+    file_path: { type: SchemaType.STRING },
+    symbol: { type: SchemaType.STRING },
+    evidence: { type: SchemaType.STRING },
+    recommendation: { type: SchemaType.STRING },
+    related_files: {
+      type: SchemaType.ARRAY,
+      items: { type: SchemaType.STRING },
+    },
+  },
+  required: ["fingerprint_key", "title", "summary", "severity", "confidence"],
+};
+
+const CHECK_LANE_SCHEMA: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    summary: { type: SchemaType.STRING },
+    findings: {
+      type: SchemaType.ARRAY,
+      items: CHECK_FINDING_SCHEMA,
+      maxItems: 5,
+    },
+  },
+  required: ["summary", "findings"],
+};
+
+const REPO_CHECK_RESPONSE_SCHEMA: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    overall_summary: { type: SchemaType.STRING },
+    checks: {
+      type: SchemaType.OBJECT,
+      properties: {
+        security: CHECK_LANE_SCHEMA,
+        optimization: CHECK_LANE_SCHEMA,
+        consistency: CHECK_LANE_SCHEMA,
+        change_impact: CHECK_LANE_SCHEMA,
+      },
+    },
+  },
+  required: ["overall_summary", "checks"],
+};
+
+export function buildRepoCheckSystemInstruction(): string {
+  return buildTaskSystemInstruction({
+    task: "skeptical_reviewer",
+    role: "Kontext Repo Health",
+    mission:
+      "Analyze repository update evidence and return structured, action-oriented findings.",
+    outputStyle: [
+      "Return structured JSON only.",
+      "Prefer 0 findings over weak speculation.",
+      "Keep summaries concise and findings evidence-driven.",
+    ],
+    taskRules: [
+      "Only emit a finding when the supplied evidence shows a concrete risk, inconsistency, regression, or inefficiency.",
+      "Treat confidence below 0.5 as too weak to report.",
+      "Use severity for impact and confidence for certainty. Do not use one to compensate for the other.",
+      "Recommendations must be specific enough that an engineer knows what to inspect or change next.",
+    ],
+  });
+}
+
+function normalizeRepoCheckResponse(value: unknown): RepoCheckModelResponse {
+  if (!value || typeof value !== "object") {
+    throw new ApiError(
+      502,
+      "AI_PARSE_ERROR",
+      "Repo checks response was not an object."
+    );
+  }
+
+  const record = value as Record<string, unknown>;
+  const rawChecks =
+    record.checks && typeof record.checks === "object"
+      ? (record.checks as Record<string, unknown>)
+      : {};
+
+  const checks: Partial<Record<RepoCheckType, RepoCheckModelLane>> = {};
+
+  for (const checkType of REPO_CHECK_TYPES) {
+    const rawLane = rawChecks[checkType];
+    if (!rawLane || typeof rawLane !== "object") continue;
+
+    const laneRecord = rawLane as Record<string, unknown>;
+    const findings = Array.isArray(laneRecord.findings)
+      ? laneRecord.findings
+          .filter(
+            (finding): finding is Record<string, unknown> =>
+              !!finding && typeof finding === "object"
+          )
+          .slice(0, 5)
+          .map((finding) => ({
+            fingerprint_key:
+              typeof finding.fingerprint_key === "string"
+                ? finding.fingerprint_key.trim()
+                : "",
+            title:
+              typeof finding.title === "string" ? finding.title.trim() : "",
+            summary:
+              typeof finding.summary === "string"
+                ? finding.summary.trim()
+                : "",
+            severity:
+              typeof finding.severity === "string"
+                ? finding.severity.trim()
+                : "medium",
+            confidence:
+              typeof finding.confidence === "number"
+                ? finding.confidence
+                : 0.55,
+            category:
+              typeof finding.category === "string"
+                ? finding.category.trim()
+                : "",
+            file_path:
+              typeof finding.file_path === "string"
+                ? finding.file_path.trim()
+                : "",
+            symbol:
+              typeof finding.symbol === "string"
+                ? finding.symbol.trim()
+                : "",
+            evidence:
+              typeof finding.evidence === "string"
+                ? finding.evidence.trim()
+                : "",
+            recommendation:
+              typeof finding.recommendation === "string"
+                ? finding.recommendation.trim()
+                : "",
+            related_files: Array.isArray(finding.related_files)
+              ? finding.related_files.filter(
+                  (entry): entry is string =>
+                    typeof entry === "string" && entry.trim().length > 0
+                )
+              : [],
+          }))
+      : [];
+
+    checks[checkType] = {
+      summary:
+        typeof laneRecord.summary === "string"
+          ? laneRecord.summary.trim()
+          : "",
+      findings,
+    };
+  }
+
+  return {
+    overall_summary:
+      typeof record.overall_summary === "string"
+        ? record.overall_summary.trim()
+        : "",
+    checks,
+  };
 }
 
 export function getDefaultRepoCheckConfigs(
@@ -433,7 +572,7 @@ async function loadRepoCheckContext(params: {
   };
 }
 
-function buildRepoCheckPrompt(params: {
+export function buildRepoCheckPrompt(params: {
   repoFullName: string;
   triggerMode: RepoCheckTriggerMode;
   baseSha: string | null;
@@ -461,63 +600,77 @@ function buildRepoCheckPrompt(params: {
           })
           .join("\n");
 
-  return `Analyze the repository "${params.repoFullName}" after a code update.
+  const evidencePack = formatEvidencePack({
+    summary:
+      "Review the repository update evidence and report only strong, actionable findings.",
+    facts: [
+      { label: "Repository", value: params.repoFullName, confidence: "exact" },
+      { label: "Trigger mode", value: params.triggerMode, confidence: "exact" },
+      {
+        label: "Base SHA",
+        value: params.baseSha || "unknown",
+        confidence: params.baseSha ? "exact" : "unknown",
+      },
+      {
+        label: "Head SHA",
+        value: params.headSha || "unknown",
+        confidence: params.headSha ? "exact" : "unknown",
+      },
+      { label: "Requested lanes", value: params.checkTypes, confidence: "exact" },
+    ],
+    excerpts: [
+      {
+        title: "Requested lane descriptions",
+        content: lanes,
+        reason: "Stay within the requested analysis lanes.",
+      },
+      {
+        title: "Changed files",
+        content: changeList,
+        reason: "Prioritize findings that are connected to this update.",
+      },
+      {
+        title: "Open findings from previous runs",
+        content: params.openFindingSummary || "None",
+        reason: "Use this to avoid rewording the same weak issue unless the new evidence strengthens it.",
+      },
+      {
+        title: "Recent commit context",
+        content:
+          params.recentCommitSummary || "No recent commits were available.",
+        reason: "Use this for nearby context when the changed files are partial.",
+      },
+      {
+        title: "Repository manifest",
+        content: params.manifest,
+        reason: "Use this to understand surrounding systems and neighboring files.",
+      },
+      {
+        title: "Current file context",
+        content:
+          params.fileBlocks ||
+          "No file content was available. Use the manifest and commit context only.",
+        reason: "Primary evidence for concrete findings.",
+      },
+    ],
+  });
 
-Trigger mode: ${params.triggerMode}
-Base SHA: ${params.baseSha || "unknown"}
-Head SHA: ${params.headSha || "unknown"}
-
-Enabled analysis lanes:
-${lanes}
-
-Changed files:
-${changeList}
-
-Open findings from previous runs:
-${params.openFindingSummary || "None"}
-
-Recent commit context:
-${params.recentCommitSummary || "No recent commits were available."}
-
-Repository manifest:
-${params.manifest}
-
-Current file context:
-${params.fileBlocks || "No file content was available. Use the manifest and commit context only."}
-
-Return STRICT JSON only with this shape:
-{
-  "overall_summary": "1-3 sentence summary",
-  "checks": {
-    "security": {
-      "summary": "short summary for this lane",
-      "findings": [
-        {
-          "fingerprint_key": "stable-kebab-case-issue-key",
-          "title": "short issue title",
-          "summary": "what is wrong and why it matters",
-          "severity": "low|medium|high|critical",
-          "confidence": 0.0,
-          "category": "short category",
-          "file_path": "path/to/file",
-          "symbol": "optional function or component name",
-          "evidence": "brief code evidence",
-          "recommendation": "specific fix direction",
-          "related_files": ["optional/other/file.ts"]
-        }
-      ]
-    }
-  }
-}
-
-Rules:
-- Only include lanes that were requested.
-- Keep findings actionable and code-specific.
-- Prefer 0 findings over weak speculation.
-- Cap each lane at 5 findings.
-- Use stable fingerprint keys so the same issue can be tracked across commits.
-- For consistency, call out duplicate patterns, inconsistent endpoint shapes, mixed data-access conventions, or multiple ways of doing the same job.
-- For change_impact, focus on likely regressions, incomplete fixes, or missing follow-up work caused by this change.`;
+  return [
+    "Analyze the repository after a code update.",
+    "",
+    evidencePack,
+    "",
+    "Output requirements:",
+    "- Return JSON matching the requested schema.",
+    "- Only include requested lanes.",
+    "- Cap each lane at 5 findings.",
+    "- Prefer 0 findings over weak speculation.",
+    "- Use stable fingerprint keys so the same issue can be tracked across commits.",
+    "- Confidence rubric: 0.9 direct evidence, 0.7 strong signal, 0.5 partial but still actionable. Do not report below 0.5.",
+    "- Severity reflects impact, not certainty.",
+    "- For consistency, focus on duplicate patterns, mixed endpoint or data-access styles, or multiple ways of doing the same job.",
+    "- For change_impact, focus on likely regressions, incomplete fixes, or missing follow-up work implied by the change.",
+  ].join("\n");
 }
 
 async function persistRepoCheckFindings(params: {
@@ -841,7 +994,7 @@ export async function runRepoChecks(params: RunRepoChecksParams) {
       });
     }
 
-    const responseText = await generateText(
+    const parsed = await generateStructuredJson<RepoCheckModelResponse>(
       apiKey,
       buildRepoCheckPrompt({
         repoFullName: params.repoFullName,
@@ -855,10 +1008,13 @@ export async function runRepoChecks(params: RunRepoChecksParams) {
         recentCommitSummary: context.recentCommitSummary,
         openFindingSummary: context.openFindingSummary,
       }),
-      "You are Kontext Repo Health. Return strict JSON only. Be precise, skeptical, and action-oriented."
+      {
+        systemInstruction: buildRepoCheckSystemInstruction(),
+        generationConfig: PROMPT_GENERATION_CONFIGS.structuredJson,
+        responseSchema: REPO_CHECK_RESPONSE_SCHEMA,
+        transform: normalizeRepoCheckResponse,
+      }
     );
-
-    const parsed = parseRepoCheckResponse(responseText);
     const counts = await persistRepoCheckFindings({
       supabase,
       userId: params.userId,

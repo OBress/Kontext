@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthenticatedUser } from "@/lib/api/auth";
+import { getAuthenticatedUser, createAdminClient } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/api/rate-limit";
 import { handleApiError } from "@/lib/api/errors";
 import { validateRepoFullName } from "@/lib/api/validate";
-import { fetchUserRepos } from "@/lib/api/github";
+import { fetchUserRepos, registerWebhook } from "@/lib/api/github";
 import { encryptToken } from "@/lib/api/crypto";
 import { logActivity } from "@/lib/api/activity";
 import { backfillRepoActivity } from "@/lib/api/backfill";
+import { resolveRepoGitHubToken } from "@/lib/api/repo-auth";
+
+const WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || "";
 
 /**
  * GET /api/repos — Returns repos based on source:
@@ -103,6 +106,10 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/repos — Connect/add a repo (upsert into repos + add owner to team)
+ *
+ * When auto_sync_enabled is true, also registers a GitHub webhook on the repo.
+ * If webhook registration fails (e.g. no admin access), the repo is still created
+ * but will fall back to polling-based sync.
  */
 export async function POST(request: Request) {
   try {
@@ -152,6 +159,37 @@ export async function POST(request: Request) {
 
     if (error) throw error;
 
+    // Register webhook if auto-sync requested
+    let webhookRegistered = false;
+    if (body.auto_sync_enabled && WEBHOOK_SECRET) {
+      const { token: effectiveToken } = await resolveRepoGitHubToken(
+        supabase,
+        user.id,
+        fullName,
+        githubToken
+      );
+
+      if (effectiveToken) {
+        const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://webhook.yourdomain.com";
+        const webhookUrl = `${baseUrl}/api/webhooks/github`;
+
+        try {
+          const hookId = await registerWebhook(effectiveToken, owner, name, webhookUrl, WEBHOOK_SECRET);
+          const adminDb = await createAdminClient();
+          await adminDb
+            .from("repos")
+            .update({ webhook_id: hookId })
+            .eq("user_id", user.id)
+            .eq("full_name", fullName);
+          webhookRegistered = true;
+          console.log(`[repos] Webhook registered for ${fullName} (hook ID: ${hookId})`);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          console.warn(`[repos] Webhook registration failed for ${fullName} — will use polling fallback: ${message}`);
+        }
+      }
+    }
+
     // Add caller as owner of the team
     await supabase.from("team_members").upsert(
       {
@@ -182,8 +220,9 @@ export async function POST(request: Request) {
       });
     }
 
-    return NextResponse.json({ repo, hasCustomToken: !!body.custom_access_token });
+    return NextResponse.json({ repo, hasCustomToken: !!body.custom_access_token, webhookRegistered });
   } catch (error) {
     return handleApiError(error);
   }
 }
+

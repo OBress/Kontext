@@ -279,6 +279,25 @@ export function TaskIndicator() {
     };
   }, [setRepoCheckRuns, setRepoJobs]);
 
+  // Poll for updates on repos without webhooks (5-minute interval)
+  useEffect(() => {
+    const pollForUpdates = () => {
+      fetch("/api/repos/sync/poll", { method: "POST" }).catch(() => {
+        // Ignore polling errors — this is a best-effort fallback.
+      });
+    };
+
+    // Initial poll after 30 seconds (give time for page load)
+    const initialTimeout = window.setTimeout(pollForUpdates, 30_000);
+    // Then every 5 minutes
+    const pollInterval = window.setInterval(pollForUpdates, 5 * 60 * 1000);
+
+    return () => {
+      window.clearTimeout(initialTimeout);
+      window.clearInterval(pollInterval);
+    };
+  }, []);
+
   const tasks = useMemo(() => {
     const ingestionTasks: TaskItem[] = Object.entries(ingestionStatus).map(
       ([repoName, ingestion]) => ({
@@ -371,7 +390,7 @@ export function TaskIndicator() {
 
         {totalCount > 0 && (
           <span
-            className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold rounded-full transition-all duration-300 ${
+            className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-xs font-bold rounded-full transition-all duration-300 ${
               hasActive
                 ? "bg-[var(--accent-green)] text-[var(--surface-0)] shadow-[0_0_8px_rgba(63,185,80,0.4)]"
                 : "bg-[var(--alpha-white-10)] text-[var(--gray-400)]"
@@ -416,18 +435,18 @@ export function TaskIndicator() {
                   {!selectedTask && (
                     <div className="flex items-center gap-2">
                       {activeTasks.length > 0 && (
-                        <span className="flex items-center gap-1 font-mono text-[10px] text-[var(--accent-green)]">
+                        <span className="flex items-center gap-1 font-mono text-xs text-[var(--accent-green)]">
                           <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-green)] animate-pulse" />
                           {activeTasks.length} running
                         </span>
                       )}
                       {completedTasks.length > 0 && (
-                        <span className="font-mono text-[10px] text-[var(--gray-500)]">
+                        <span className="font-mono text-xs text-[var(--gray-500)]">
                           {completedTasks.length} done
                         </span>
                       )}
                       {errorTasks.length > 0 && (
-                        <span className="font-mono text-[10px] text-[var(--accent-red)]">
+                        <span className="font-mono text-xs text-[var(--accent-red)]">
                           {errorTasks.length} failed
                         </span>
                       )}
@@ -509,7 +528,7 @@ function EmptyState() {
       <p className="font-mono text-xs text-[var(--gray-400)] mb-1">
         No tasks yet
       </p>
-      <p className="font-mono text-[10px] text-[var(--gray-600)]">
+      <p className="font-mono text-xs text-[var(--gray-600)]">
         Ingestion, onboarding, and repo health work will appear here
       </p>
     </div>
@@ -557,7 +576,7 @@ function TaskListItem({
           <span className="font-mono text-xs text-[var(--gray-200)] truncate">
             {task.repoName}
           </span>
-          <span className="px-1.5 py-0.5 rounded-full bg-[var(--alpha-white-5)] font-mono text-[9px] text-[var(--gray-500)] shrink-0">
+          <span className="px-1.5 py-0.5 rounded-full bg-[var(--alpha-white-5)] font-mono text-xs text-[var(--gray-500)] shrink-0">
             {task.kind === "ingestion"
               ? "ingest"
               : task.kind === "check"
@@ -589,7 +608,7 @@ function TaskListItem({
 
       <div className="flex items-center justify-between gap-2">
         <span
-          className={`font-mono text-[10px] ${
+          className={`font-mono text-xs ${
             isDone
               ? "text-[var(--accent-green)]"
               : isError
@@ -604,16 +623,16 @@ function TaskListItem({
         </span>
         {task.kind === "ingestion" ? (
           isActive ? (
-            <span className="font-mono text-[10px] text-[var(--gray-600)]">
+            <span className="font-mono text-xs text-[var(--gray-600)]">
               {task.ingestion.filesProcessed}/{task.ingestion.filesTotal} files
             </span>
           ) : null
         ) : task.kind === "check" ? (
-          <span className="font-mono text-[10px] text-[var(--gray-600)]">
+          <span className="font-mono text-xs text-[var(--gray-600)]">
             {task.checkRun.newFindings} new - {task.checkRun.resolvedFindings} resolved
           </span>
         ) : (
-          <span className="font-mono text-[10px] text-[var(--gray-600)]">
+          <span className="font-mono text-xs text-[var(--gray-600)]">
             {REPO_JOB_TYPE_LABELS[task.repoJob.jobType]}
           </span>
         )}
@@ -678,11 +697,11 @@ function TaskDetailView({
             <span className="font-mono text-xs text-[var(--gray-200)]">
               {label.label}
             </span>
-            <span className="ml-auto font-mono text-[10px] text-[var(--gray-500)]">
+            <span className="ml-auto font-mono text-xs text-[var(--gray-500)]">
               {task.checkRun.triggerMode}
             </span>
           </div>
-          <p className="font-mono text-[11px] text-[var(--gray-500)] m-0">
+          <p className="font-mono text-xs text-[var(--gray-500)] m-0">
             {task.checkRun.summary || "Kontext is updating repo health for the latest changes."}
           </p>
         </div>
@@ -774,11 +793,11 @@ function TaskDetailView({
             <span className="font-mono text-xs text-[var(--gray-200)]">
               {task.repoJob.title || REPO_JOB_TYPE_LABELS[task.repoJob.jobType]}
             </span>
-            <span className="ml-auto font-mono text-[10px] text-[var(--gray-500)]">
+            <span className="ml-auto font-mono text-xs text-[var(--gray-500)]">
               {task.repoJob.trigger}
             </span>
           </div>
-          <p className="font-mono text-[11px] text-[var(--gray-500)] m-0">
+          <p className="font-mono text-xs text-[var(--gray-500)] m-0">
             {task.repoJob.resultSummary ||
               task.repoJob.errorMessage ||
               "Kontext is processing this background job."}
@@ -850,7 +869,7 @@ function TaskDetailView({
       </div>
 
       <div className="space-y-1">
-        <span className="font-mono text-[10px] text-[var(--gray-500)] uppercase tracking-wider">
+        <span className="font-mono text-xs text-[var(--gray-500)] uppercase tracking-wider">
           Pipeline
         </span>
         <div className="flex items-center gap-1">
@@ -894,10 +913,10 @@ function TaskDetailView({
       {isActive && (
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <span className="font-mono text-[10px] text-[var(--gray-500)]">
+            <span className="font-mono text-xs text-[var(--gray-500)]">
               Progress
             </span>
-            <span className="font-mono text-[10px] text-[var(--accent-green)] tabular-nums">
+            <span className="font-mono text-xs text-[var(--accent-green)] tabular-nums">
               {Math.round(status.progress)}%
             </span>
           </div>
@@ -942,7 +961,7 @@ function TaskDetailView({
 
       {(status.message || status.error) && (
         <div
-          className={`px-3 py-2 rounded-lg font-mono text-[10px] ${
+          className={`px-3 py-2 rounded-lg font-mono text-xs ${
             isError
               ? "bg-[var(--accent-red)]/10 text-[var(--accent-red)] border border-[var(--accent-red)]/20"
               : "bg-[var(--alpha-white-5)] text-[var(--gray-400)]"
@@ -998,7 +1017,7 @@ function StatCard({
           size={11}
           className={active ? "text-[var(--accent-green)]" : "text-[var(--gray-500)]"}
         />
-        <span className="font-mono text-[9px] text-[var(--gray-500)] uppercase tracking-wider">
+        <span className="font-mono text-xs text-[var(--gray-500)] uppercase tracking-wider">
           {label}
         </span>
       </div>

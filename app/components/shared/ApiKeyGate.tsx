@@ -125,7 +125,7 @@ export function ApiKeyGate() {
 
             {(testResult || testError) && (
               <div
-                className={`mb-4 rounded-lg border px-3 py-2.5 font-mono text-[11px] ${
+                className={`mb-4 rounded-lg border px-3 py-2.5 font-mono text-xs ${
                   testStatus === "success"
                     ? "border-[var(--accent-green)]/20 bg-[var(--accent-green)]/10 text-[var(--gray-200)]"
                     : "border-[var(--accent-red)]/20 bg-[var(--accent-red)]/10 text-[var(--gray-200)]"
@@ -185,7 +185,7 @@ export function ApiKeyGate() {
             </div>
 
             {/* Footer note */}
-            <p className="text-center text-[11px] text-[var(--gray-600)] mt-4 font-mono">
+            <p className="text-center text-xs text-[var(--gray-600)] mt-4 font-mono">
               Stored locally in your browser. Sent to our servers only to execute your request, and not persisted on our servers by default.
             </p>
           </motion.div>

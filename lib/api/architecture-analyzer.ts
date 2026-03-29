@@ -1,5 +1,17 @@
-import type { ArchitectureAnalysis } from "@/types/architecture";
-import { generateText } from "./embeddings";
+import type { ResponseSchema } from "@google/generative-ai";
+import { SchemaType } from "@google/generative-ai";
+import type {
+  ArchConnectionType,
+  ArchComponentType,
+  ArchitectureAnalysis,
+} from "@/types/architecture";
+import { ApiError } from "./errors";
+import { generateStructuredJson } from "./embeddings";
+import {
+  buildTaskSystemInstruction,
+  formatEvidencePack,
+  PROMPT_GENERATION_CONFIGS,
+} from "./prompt-contract";
 
 interface FileMetadata {
   file_path: string;
@@ -14,155 +26,364 @@ interface ChunkSample {
   content: string;
 }
 
-/**
- * Build the Gemini prompt for architecture analysis.
- */
-function buildAnalysisPrompt(
+function isArchComponentType(value: unknown): value is ArchComponentType {
+  return (
+    typeof value === "string" &&
+    [
+      "page",
+      "api",
+      "service",
+      "worker",
+      "database",
+      "config",
+      "shared",
+      "external",
+    ].includes(value)
+  );
+}
+
+function isArchConnectionType(value: unknown): value is ArchConnectionType {
+  return (
+    typeof value === "string" &&
+    [
+      "api_call",
+      "import",
+      "webhook",
+      "database_query",
+      "auth",
+      "event",
+    ].includes(value)
+  );
+}
+
+const ARCH_COMPONENT_TYPE_SCHEMA: ResponseSchema = {
+  type: SchemaType.STRING,
+  format: "enum",
+  enum: [
+    "page",
+    "api",
+    "service",
+    "worker",
+    "database",
+    "config",
+    "shared",
+    "external",
+  ],
+};
+
+const ARCH_CONNECTION_TYPE_SCHEMA: ResponseSchema = {
+  type: SchemaType.STRING,
+  format: "enum",
+  enum: [
+    "api_call",
+    "import",
+    "webhook",
+    "database_query",
+    "auth",
+    "event",
+  ],
+};
+
+const ARCH_CHILD_SCHEMA: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    id: { type: SchemaType.STRING },
+    label: { type: SchemaType.STRING },
+    description: { type: SchemaType.STRING },
+    type: ARCH_COMPONENT_TYPE_SCHEMA,
+    files: {
+      type: SchemaType.ARRAY,
+      items: { type: SchemaType.STRING },
+    },
+  },
+  required: ["id", "label", "description", "type", "files"],
+};
+
+const ARCH_COMPONENT_SCHEMA: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    id: { type: SchemaType.STRING },
+    label: { type: SchemaType.STRING },
+    description: { type: SchemaType.STRING },
+    type: ARCH_COMPONENT_TYPE_SCHEMA,
+    files: {
+      type: SchemaType.ARRAY,
+      items: { type: SchemaType.STRING },
+    },
+    children: {
+      type: SchemaType.ARRAY,
+      items: ARCH_CHILD_SCHEMA,
+    },
+  },
+  required: ["id", "label", "description", "type", "files"],
+};
+
+const ARCH_CONNECTION_SCHEMA: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    id: { type: SchemaType.STRING },
+    source: { type: SchemaType.STRING },
+    target: { type: SchemaType.STRING },
+    label: { type: SchemaType.STRING },
+    description: { type: SchemaType.STRING },
+    type: ARCH_CONNECTION_TYPE_SCHEMA,
+  },
+  required: ["id", "source", "target", "label", "description", "type"],
+};
+
+const ARCHITECTURE_RESPONSE_SCHEMA: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    summary: { type: SchemaType.STRING },
+    components: {
+      type: SchemaType.ARRAY,
+      minItems: 3,
+      maxItems: 10,
+      items: ARCH_COMPONENT_SCHEMA,
+    },
+    connections: {
+      type: SchemaType.ARRAY,
+      items: ARCH_CONNECTION_SCHEMA,
+    },
+    unassignedFiles: {
+      type: SchemaType.ARRAY,
+      items: { type: SchemaType.STRING },
+    },
+  },
+  required: ["summary", "components", "connections"],
+};
+
+export function buildArchitectureAnalysisSystemInstruction(): string {
+  return buildTaskSystemInstruction({
+    task: "system_mapper",
+    role: "a senior software architect",
+    mission:
+      "Produce a high-level architecture model from representative repository evidence.",
+    outputStyle: [
+      "Return structured JSON only.",
+      "Favor a human-usable architecture model over exhaustive classification.",
+      "Use representative files for components and mention leftovers in unassignedFiles when needed.",
+    ],
+    taskRules: [
+      "Group files by user-visible responsibility, not by folder name alone.",
+      "Do not force every file into a component if the evidence is incomplete.",
+      "Only create child components when they improve comprehension.",
+    ],
+  });
+}
+
+export function buildAnalysisPrompt(
   repoFullName: string,
   files: FileMetadata[],
   chunkSamples: ChunkSample[]
 ): string {
-  // Build file tree summary
   const fileTree = files
-    .map((f) => `  ${f.file_path} (${f.line_count} lines, imports: ${f.imports.length})`)
-    .join("\n");
-
-  // Build import graph summary (top connections)
-  const importSummary = files
-    .filter((f) => f.imports.length > 0)
-    .slice(0, 60)
     .map(
-      (f) =>
-        `  ${f.file_path} → [${f.imports.slice(0, 5).join(", ")}${f.imports.length > 5 ? ` +${f.imports.length - 5} more` : ""}]`
+      (file) =>
+        `  ${file.file_path} (${file.line_count} lines, imports: ${file.imports.length})`
     )
     .join("\n");
 
-  // Build code samples
+  const importSummary = files
+    .filter((file) => file.imports.length > 0)
+    .slice(0, 60)
+    .map(
+      (file) =>
+        `  ${file.file_path} -> [${file.imports.slice(0, 5).join(", ")}${file.imports.length > 5 ? ` +${file.imports.length - 5} more` : ""}]`
+    )
+    .join("\n");
+
   const codeSamples = chunkSamples
     .slice(0, 40)
-    .map((c) => `--- ${c.file_path} ---\n${c.content.slice(0, 600)}`)
+    .map((sample) => `--- ${sample.file_path} ---\n${sample.content.slice(0, 600)}`)
     .join("\n\n");
 
-  return `You are a senior software architect. Analyze this codebase and produce a high-level architecture diagram as structured JSON.
+  const evidencePack = formatEvidencePack({
+    summary:
+      "Use representative repository evidence to produce a readable architecture model.",
+    facts: [
+      { label: "Repository", value: repoFullName, confidence: "exact" },
+      {
+        label: "Total indexed files",
+        value: String(files.length),
+        confidence: "exact",
+      },
+    ],
+    excerpts: [
+      {
+        title: "File tree",
+        source: repoFullName,
+        reason: "Use this to identify major responsibilities and boundaries.",
+        content: fileTree,
+      },
+      {
+        title: "Import graph summary",
+        source: repoFullName,
+        reason: "Use this to infer major relationships between components.",
+        content: importSummary || "No import data was available.",
+      },
+      {
+        title: "Representative code samples",
+        source: repoFullName,
+        reason: "Use these to name components by role and understand what they do.",
+        content: codeSamples || "No representative code samples were available.",
+      },
+    ],
+  });
 
-REPOSITORY: ${repoFullName}
-TOTAL FILES: ${files.length}
-
-FILE TREE:
-${fileTree}
-
-IMPORT GRAPH (file → dependencies):
-${importSummary}
-
-CODE SAMPLES (first chunk of key files):
-${codeSamples}
-
-INSTRUCTIONS:
-1. Identify 5-10 top-level architectural COMPONENTS that a human would recognize (e.g., "Landing Page", "Auth System", "Chat Interface", "Ingestion Pipeline", "API Layer").
-2. Name components by their ROLE, not their folder name. Use human-friendly labels.
-3. Each component can optionally have 2-5 children sub-components if it's complex enough to warrant drill-down.
-4. Identify CONNECTIONS between components. Label each connection with what kind of interaction it is (e.g., "REST API call", "imports shared utils", "sends webhook", "queries database").
-5. For each component, list the file paths that belong to it. Every file should belong to exactly one component.
-6. Write a 1-2 sentence description for each component and connection.
-
-OUTPUT FORMAT (strict JSON, no markdown fences):
-{
-  "summary": "1-2 sentence overview of the entire project",
-  "components": [
-    {
-      "id": "kebab-case-id",
-      "label": "Human Friendly Name",
-      "description": "2-3 sentence description of what this component does",
-      "type": "page|api|service|worker|database|config|shared|external",
-      "files": ["path/to/file.ts", ...],
-      "children": [
-        {
-          "id": "child-id",
-          "label": "Child Name",
-          "description": "Description",
-          "type": "page|api|service|worker|database|config|shared|external",
-          "files": ["path/to/child.ts"]
-        }
-      ]
-    }
-  ],
-  "connections": [
-    {
-      "id": "source-to-target",
-      "source": "source-component-id",
-      "target": "target-component-id",
-      "label": "Short Label (e.g. REST API)",
-      "description": "Description of the interaction",
-      "type": "api_call|import|webhook|database_query|auth|event"
-    }
-  ]
+  return [
+    "Analyze the codebase and produce a high-level architecture model.",
+    "",
+    evidencePack,
+    "",
+    "Architecture requirements:",
+    "- Identify 4 to 10 top-level components a human would recognize.",
+    "- Name components by role, not folder name alone.",
+    "- Add children only when they improve clarity.",
+    "- List representative files for each component. Do not force every file into a component.",
+    "- Use unassignedFiles for meaningful leftovers that are not confidently grouped.",
+    "- Keep connections between top-level components only.",
+    "- Make descriptions concise and concrete.",
+  ].join("\n");
 }
 
-IMPORTANT:
-- Return ONLY valid JSON. No markdown code fences, no explanation text.
-- Component IDs must be unique kebab-case strings.
-- Connection source and target must reference valid component IDs (top-level only, not children).
-- The "children" field is optional. Only use it for components complex enough to warrant drill-down.
-- Keep the total to 5-10 top-level components for readability.`;
+function normalizeAnalysisResponse(value: unknown): ArchitectureAnalysis {
+  if (!value || typeof value !== "object") {
+    throw new ApiError(
+      502,
+      "AI_PARSE_ERROR",
+      "Architecture analysis response was not an object."
+    );
+  }
+
+  const record = value as Record<string, unknown>;
+  const components = Array.isArray(record.components)
+    ? record.components
+        .filter(
+          (component): component is Record<string, unknown> =>
+            !!component && typeof component === "object"
+        )
+        .map((component) => ({
+          id: typeof component.id === "string" ? component.id.trim() : "",
+          label:
+            typeof component.label === "string" ? component.label.trim() : "",
+          description:
+            typeof component.description === "string"
+              ? component.description.trim()
+              : "",
+          type: isArchComponentType(component.type)
+            ? component.type
+            : "shared",
+          files: Array.isArray(component.files)
+            ? component.files.filter(
+                (file): file is string =>
+                  typeof file === "string" && file.trim().length > 0
+              )
+            : [],
+          children: Array.isArray(component.children)
+            ? component.children
+                .filter(
+                  (child): child is Record<string, unknown> =>
+                    !!child && typeof child === "object"
+                )
+                .map((child) => ({
+                  id: typeof child.id === "string" ? child.id.trim() : "",
+                  label:
+                    typeof child.label === "string" ? child.label.trim() : "",
+                  description:
+                    typeof child.description === "string"
+                      ? child.description.trim()
+                      : "",
+                  type: isArchComponentType(child.type)
+                    ? child.type
+                    : "shared",
+                  files: Array.isArray(child.files)
+                    ? child.files.filter(
+                        (file): file is string =>
+                          typeof file === "string" && file.trim().length > 0
+                      )
+                    : [],
+                }))
+                .filter((child) => child.id && child.label)
+            : undefined,
+        }))
+        .filter((component) => component.id && component.label)
+    : [];
+
+  if (components.length === 0) {
+    throw new ApiError(
+      502,
+      "AI_PARSE_ERROR",
+      "Architecture analysis did not include any valid components."
+    );
+  }
+
+  const componentIds = new Set(components.map((component) => component.id));
+  const connections = Array.isArray(record.connections)
+    ? record.connections
+        .filter(
+          (connection): connection is Record<string, unknown> =>
+            !!connection && typeof connection === "object"
+        )
+        .map((connection) => ({
+          id:
+            typeof connection.id === "string" ? connection.id.trim() : "",
+          source:
+            typeof connection.source === "string"
+              ? connection.source.trim()
+              : "",
+          target:
+            typeof connection.target === "string"
+              ? connection.target.trim()
+              : "",
+          label:
+            typeof connection.label === "string"
+              ? connection.label.trim()
+              : "",
+          description:
+            typeof connection.description === "string"
+              ? connection.description.trim()
+              : "",
+          type: isArchConnectionType(connection.type)
+            ? connection.type
+            : "import",
+        }))
+        .filter(
+          (connection) =>
+            connection.id &&
+            connection.source &&
+            connection.target &&
+            componentIds.has(connection.source) &&
+            componentIds.has(connection.target)
+        )
+    : [];
+
+  return {
+    summary:
+      typeof record.summary === "string" && record.summary.trim()
+        ? record.summary.trim()
+        : "Architecture summary unavailable.",
+    components,
+    connections,
+    unassignedFiles: Array.isArray(record.unassignedFiles)
+      ? record.unassignedFiles.filter(
+          (file): file is string =>
+            typeof file === "string" && file.trim().length > 0
+        )
+      : [],
+  };
 }
 
-/**
- * Parse the AI response into a validated ArchitectureAnalysis object.
- */
-function parseAnalysisResponse(raw: string): ArchitectureAnalysis {
-  // Strip potential markdown fences
-  let cleaned = raw.trim();
-  if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
-  }
-
-  const parsed = JSON.parse(cleaned);
-
-  // Validate required fields
-  if (!parsed.summary || !Array.isArray(parsed.components)) {
-    throw new Error("Invalid architecture analysis: missing summary or components");
-  }
-
-  // Ensure connections array exists
-  if (!Array.isArray(parsed.connections)) {
-    parsed.connections = [];
-  }
-
-  // Validate component structure
-  for (const comp of parsed.components) {
-    if (!comp.id || !comp.label || !comp.type) {
-      throw new Error(`Invalid component: missing id, label, or type in ${JSON.stringify(comp)}`);
-    }
-    if (!Array.isArray(comp.files)) {
-      comp.files = [];
-    }
-  }
-
-  // Validate connection references
-  const componentIds = new Set(parsed.components.map((c: { id: string }) => c.id));
-  parsed.connections = parsed.connections.filter(
-    (conn: { source: string; target: string }) =>
-      componentIds.has(conn.source) && componentIds.has(conn.target)
-  );
-
-  return parsed as ArchitectureAnalysis;
-}
-
-/**
- * Run the full architecture analysis pipeline.
- */
 export async function analyzeArchitecture(
   apiKey: string,
   repoFullName: string,
   files: FileMetadata[],
   chunkSamples: ChunkSample[]
 ): Promise<ArchitectureAnalysis> {
-  const prompt = buildAnalysisPrompt(repoFullName, files, chunkSamples);
-
-  const systemInstruction =
-    "You are a senior software architect. Analyze codebases and produce structured JSON describing the high-level architecture. Be concise and accurate. Output only valid JSON.";
-
-  const response = await generateText(apiKey, prompt, systemInstruction);
-
-  return parseAnalysisResponse(response);
+  return generateStructuredJson(apiKey, buildAnalysisPrompt(repoFullName, files, chunkSamples), {
+    systemInstruction: buildArchitectureAnalysisSystemInstruction(),
+    generationConfig: PROMPT_GENERATION_CONFIGS.structuredJson,
+    responseSchema: ARCHITECTURE_RESPONSE_SCHEMA,
+    transform: normalizeAnalysisResponse,
+  });
 }

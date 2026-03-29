@@ -1,6 +1,8 @@
+import type { ResponseSchema } from "@google/generative-ai";
+import { SchemaType } from "@google/generative-ai";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveAiKey } from "./ai-key";
-import { generateText } from "./embeddings";
+import { generateStructuredJson } from "./embeddings";
 import { ApiError, validationError } from "./errors";
 import {
   completeRepoJob,
@@ -8,6 +10,11 @@ import {
   failRepoJob,
 } from "./repo-jobs";
 import { buildFileManifest } from "./repo-intelligence";
+import {
+  buildTaskSystemInstruction,
+  formatEvidencePack,
+  PROMPT_GENERATION_CONFIGS,
+} from "./prompt-contract";
 
 export const ONBOARDING_STEP_TYPES = [
   "content",
@@ -154,6 +161,12 @@ interface OnboardingAttemptRow {
   created_at: string;
 }
 
+interface GeneratedOnboardingDraft {
+  title: string;
+  description: string;
+  steps: OnboardingStepDraft[];
+}
+
 export interface LearnerOnboardingStep extends OnboardingStepDraft {
   stepOrder: number;
 }
@@ -187,34 +200,6 @@ function isOnboardingStepType(value: unknown): value is OnboardingStepType {
   return (
     typeof value === "string" &&
     (ONBOARDING_STEP_TYPES as readonly string[]).includes(value)
-  );
-}
-
-function stripJsonFence(text: string) {
-  return text
-    .trim()
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/, "")
-    .trim();
-}
-
-function extractJsonText(text: string): string {
-  const stripped = stripJsonFence(text);
-  if (stripped.startsWith("{") || stripped.startsWith("[")) {
-    return stripped;
-  }
-
-  const objectStart = stripped.indexOf("{");
-  const objectEnd = stripped.lastIndexOf("}");
-  if (objectStart !== -1 && objectEnd > objectStart) {
-    return stripped.slice(objectStart, objectEnd + 1);
-  }
-
-  throw new ApiError(
-    502,
-    "AI_PARSE_ERROR",
-    "Onboarding draft response was not valid JSON."
   );
 }
 
@@ -840,7 +825,137 @@ export async function createOnboardingAssignmentForInvite(params: {
   }
 }
 
-function buildOnboardingPrompt(params: {
+const ONBOARDING_STEP_TYPE_SCHEMA: ResponseSchema = {
+  type: SchemaType.STRING,
+  format: "enum",
+  enum: [...ONBOARDING_STEP_TYPES],
+};
+
+const ONBOARDING_RESPONSE_SCHEMA: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    title: {
+      type: SchemaType.STRING,
+    },
+    description: {
+      type: SchemaType.STRING,
+    },
+    steps: {
+      type: SchemaType.ARRAY,
+      minItems: 5,
+      maxItems: 7,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          step_type: ONBOARDING_STEP_TYPE_SCHEMA,
+          title: {
+            type: SchemaType.STRING,
+          },
+          description: {
+            type: SchemaType.STRING,
+          },
+          content: {
+            type: SchemaType.STRING,
+          },
+          quiz_payload: {
+            type: SchemaType.OBJECT,
+            properties: {
+              question: {
+                type: SchemaType.STRING,
+              },
+              options: {
+                type: SchemaType.ARRAY,
+                items: {
+                  type: SchemaType.STRING,
+                },
+              },
+              correct_option_index: {
+                type: SchemaType.INTEGER,
+              },
+              explanation: {
+                type: SchemaType.STRING,
+              },
+            },
+          },
+        },
+        required: ["step_type", "title", "description", "content"],
+      },
+    },
+  },
+  required: ["title", "description", "steps"],
+};
+
+export function buildOnboardingSystemInstruction(): string {
+  return buildTaskSystemInstruction({
+    task: "technical_teacher",
+    role: "Kontext Onboarding",
+    mission:
+      "Create concise, repository-specific onboarding walkthroughs for a new engineer.",
+    outputStyle: [
+      "Return structured JSON only.",
+      "Keep each step concise, practical, and grounded in the repository evidence.",
+      "Teach the engineer how the repo works before asking them to memorize details.",
+    ],
+    taskRules: [
+      "The walkthrough must progress from repo orientation to concrete exploration, then to a safe first contribution mindset.",
+      "Use concrete directories, files, systems, and workflows when the evidence supports them.",
+      "If the evidence is partial, keep the walkthrough modest instead of inventing systems or workflows.",
+    ],
+  });
+}
+
+function normalizeGeneratedOnboardingDraft(
+  value: unknown
+): GeneratedOnboardingDraft {
+  if (!value || typeof value !== "object") {
+    throw new ApiError(
+      502,
+      "AI_PARSE_ERROR",
+      "Onboarding draft response was not an object."
+    );
+  }
+
+  const record = value as Record<string, unknown>;
+  const title =
+    typeof record.title === "string" && record.title.trim()
+      ? record.title.trim()
+      : "Repository onboarding";
+  const description =
+    typeof record.description === "string" ? record.description.trim() : "";
+  const rawSteps = Array.isArray(record.steps) ? record.steps : [];
+  const steps = rawSteps.map((step, index) =>
+    normalizeOnboardingStep(step, index)
+  );
+
+  if (steps.length < 5 || steps.length > 7) {
+    throw new ApiError(
+      502,
+      "AI_PARSE_ERROR",
+      "Onboarding draft must contain 5 to 7 steps."
+    );
+  }
+
+  const quizCount = steps.filter((step) => step.stepType === "quiz").length;
+  const acknowledgementCount = steps.filter(
+    (step) => step.stepType === "acknowledgement"
+  ).length;
+
+  if (quizCount !== 1 || acknowledgementCount !== 1) {
+    throw new ApiError(
+      502,
+      "AI_PARSE_ERROR",
+      "Onboarding draft must include exactly one quiz step and one acknowledgement step."
+    );
+  }
+
+  return {
+    title,
+    description,
+    steps,
+  };
+}
+
+export function buildOnboardingPrompt(params: {
   repoFullName: string;
   repoDescription: string | null;
   language: string | null;
@@ -850,51 +965,69 @@ function buildOnboardingPrompt(params: {
   recentCommits: string;
   architectureSummary: string;
 }) {
+  const evidencePack = formatEvidencePack({
+    summary:
+      "Use the repository evidence to teach a new engineer how to navigate and work in this codebase.",
+    facts: [
+      { label: "Repository", value: params.repoFullName, confidence: "exact" },
+      {
+        label: "Repository description",
+        value: params.repoDescription || "Not available",
+        confidence: params.repoDescription ? "exact" : "unknown",
+      },
+      {
+        label: "Primary language",
+        value: params.language || "Unknown",
+        confidence: params.language ? "exact" : "unknown",
+      },
+      {
+        label: "Default branch",
+        value: params.defaultBranch || "main",
+        confidence: params.defaultBranch ? "exact" : "inferred",
+      },
+      {
+        label: "Last synced SHA",
+        value: params.lastSyncedSha || "Unknown",
+        confidence: params.lastSyncedSha ? "exact" : "unknown",
+      },
+    ],
+    excerpts: [
+      {
+        title: "File manifest",
+        source: params.repoFullName,
+        reason: "Use this to point learners to concrete directories and files.",
+        content: params.fileManifest || "No indexed files yet.",
+      },
+      {
+        title: "Recent development context",
+        source: params.repoFullName,
+        reason:
+          "Use this to explain active areas of the codebase and what changed recently.",
+        content: params.recentCommits || "No recent commits available.",
+      },
+      {
+        title: "Architecture summary",
+        source: params.repoFullName,
+        reason:
+          "Use this to give the learner a mental model before they dive into files.",
+        content:
+          params.architectureSummary || "No architecture summary available.",
+      },
+    ],
+  });
+
   return [
-    "Create a repository onboarding plan as strict JSON.",
+    "Create an onboarding walkthrough for a new engineer joining this repository.",
     "",
-    "Return this shape exactly:",
-    "{",
-    '  "title": string,',
-    '  "description": string,',
-    '  "steps": [',
-    "    {",
-    '      "step_type": "content" | "guided_explore" | "quiz" | "acknowledgement",',
-    '      "title": string,',
-    '      "description": string,',
-    '      "content": string,',
-    '      "quiz_payload": {',
-    '        "question": string,',
-    '        "options": string[],',
-    '        "correct_option_index": number,',
-    '        "explanation": string',
-    "      }",
-    "    }",
-    "  ]",
-    "}",
+    evidencePack,
     "",
-    "Constraints:",
+    "Walkthrough requirements:",
+    "- Return JSON matching the requested schema.",
     "- Produce 5 to 7 steps.",
-    "- Include exactly 1 quiz step and 1 acknowledgement step.",
-    "- Make the steps practical for a new engineer joining the repo.",
-    "- Ground the content in the supplied repo facts only.",
-    "- Mention concrete directories, files, or systems when possible.",
-    "- Keep each step concise and useful for a hackathon demo.",
-    "",
-    `Repo: ${params.repoFullName}`,
-    `Description: ${params.repoDescription || "Not available"}`,
-    `Primary language: ${params.language || "Unknown"}`,
-    `Default branch: ${params.defaultBranch || "main"}`,
-    `Last synced SHA: ${params.lastSyncedSha || "Unknown"}`,
-    "",
-    "File manifest:",
-    params.fileManifest || "No indexed files yet.",
-    "",
-    "Recent development context:",
-    params.recentCommits || "No recent commits available.",
-    "",
-    "Architecture summary:",
-    params.architectureSummary || "No architecture summary available.",
+    "- Include exactly 1 quiz step and exactly 1 acknowledgement step.",
+    "- Sequence the walkthrough from orientation, to local workflow, to key systems, to practical exploration, then reinforcement.",
+    "- Mention concrete directories, files, commands, or systems when supported by the evidence.",
+    "- Keep each step concise and useful.",
   ].join("\n");
 }
 
@@ -971,7 +1104,7 @@ export async function generateOnboardingDraft(params: {
       8000
     );
 
-    const response = await generateText(
+    const parsed = await generateStructuredJson<GeneratedOnboardingDraft>(
       apiKey,
       buildOnboardingPrompt({
         repoFullName: params.repoFullName,
@@ -983,16 +1116,13 @@ export async function generateOnboardingDraft(params: {
         recentCommits,
         architectureSummary,
       }),
-      "You are Kontext Onboarding. Return strict JSON only. Create concise onboarding walkthroughs grounded in the repository context."
+      {
+        systemInstruction: buildOnboardingSystemInstruction(),
+        generationConfig: PROMPT_GENERATION_CONFIGS.structuredJson,
+        responseSchema: ONBOARDING_RESPONSE_SCHEMA,
+        transform: normalizeGeneratedOnboardingDraft,
+      }
     );
-
-    const parsed = JSON.parse(extractJsonText(response)) as {
-      title?: string;
-      description?: string;
-      steps?: unknown[];
-    };
-
-    const steps = Array.isArray(parsed.steps) ? parsed.steps : [];
     const { latestTemplate } = await listOnboardingTemplates(
       params.supabase,
       params.userId,
@@ -1005,13 +1135,9 @@ export async function generateOnboardingDraft(params: {
       repoFullName: params.repoFullName,
       templateId: latestTemplate?.id || null,
       createdBy: params.requestedBy,
-      title:
-        typeof parsed.title === "string" && parsed.title.trim()
-          ? parsed.title.trim()
-          : "Repository onboarding",
-      description:
-        typeof parsed.description === "string" ? parsed.description.trim() : "",
-      steps,
+      title: parsed.title,
+      description: parsed.description,
+      steps: parsed.steps,
       metadata: {
         generated_by_ai: true,
         generated_at: new Date().toISOString(),

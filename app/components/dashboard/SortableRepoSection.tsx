@@ -172,7 +172,7 @@ export function SortableRepoSection({ repos }: SortableRepoSectionProps) {
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex items-center gap-1.5 mr-2">
           <ArrowUpDown size={13} className="text-[var(--gray-500)]" />
-          <span className="font-mono text-[11px] text-[var(--gray-500)] uppercase tracking-wider">
+          <span className="font-mono text-xs text-[var(--gray-500)] uppercase tracking-wider">
             Sort
           </span>
         </div>
@@ -180,7 +180,7 @@ export function SortableRepoSection({ repos }: SortableRepoSectionProps) {
           <button
             key={opt.mode}
             onClick={() => setRepoSortMode(opt.mode)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full font-mono text-[11px] border transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full font-mono text-xs border transition-all cursor-pointer ${
               repoSortMode === opt.mode
                 ? "bg-[var(--accent-green)]/10 text-[var(--accent-green)] border-[var(--accent-green)]/25"
                 : "bg-transparent text-[var(--gray-400)] border-[var(--alpha-white-8)] hover:border-[var(--alpha-white-15)] hover:text-[var(--gray-300)]"
@@ -219,7 +219,7 @@ export function SortableRepoSection({ repos }: SortableRepoSectionProps) {
                   <span className="font-mono text-xs font-medium text-[var(--gray-200)]">
                     Pinned
                   </span>
-                  <span className="font-mono text-[10px] text-[var(--gray-500)] ml-1">
+                  <span className="font-mono text-xs text-[var(--gray-500)] ml-1">
                     {pinnedRepoObjects.length}/8
                   </span>
                 </div>

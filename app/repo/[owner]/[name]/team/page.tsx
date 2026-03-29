@@ -260,7 +260,7 @@ export default function TeamPage() {
               Team Members ({members.length})
             </h3>
             {callerRole && (
-              <span className="font-mono text-[10px] uppercase text-[var(--gray-500)]">
+              <span className="font-mono text-xs uppercase text-[var(--gray-500)]">
                 You are {callerRole}
               </span>
             )}
@@ -294,7 +294,7 @@ export default function TeamPage() {
                         </p>
                       </div>
                       <span
-                        className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono"
+                        className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono"
                         style={{
                           color: roleColors[displayRole] || "var(--gray-500)",
                           backgroundColor: `${roleColors[displayRole] || "var(--gray-500)"}15`,
@@ -372,7 +372,7 @@ export default function TeamPage() {
                   Send Invite
                 </button>
               </div>
-              <label className="flex items-center gap-2 font-mono text-[11px] text-[var(--gray-400)]">
+              <label className="flex items-center gap-2 font-mono text-xs text-[var(--gray-400)]">
                 <input
                   type="checkbox"
                   checked={assignOnboarding}
@@ -410,14 +410,14 @@ export default function TeamPage() {
                       <p className="font-mono text-xs text-[var(--gray-200)] m-0">
                         @{invite.github_username}
                       </p>
-                      <p className="font-mono text-[10px] text-[var(--gray-500)] m-0 mt-1">
+                      <p className="font-mono text-xs text-[var(--gray-500)] m-0 mt-1">
                         {invite.role} invited{" "}
                         {invite.created_at
                           ? new Date(invite.created_at).toLocaleDateString()
                           : "recently"}
                       </p>
                     </div>
-                    <span className="font-mono text-[10px] text-[var(--gray-500)]">
+                    <span className="font-mono text-xs text-[var(--gray-500)]">
                       {invite.onboarding_template_version_id
                         ? "Onboarding attached"
                         : "No onboarding"}
@@ -699,14 +699,14 @@ export default function TeamPage() {
                           <p className="font-mono text-xs text-[var(--gray-200)] m-0">
                             @{assignment.assigneeGitHubUsername || "pending"}
                           </p>
-                          <p className="font-mono text-[10px] text-[var(--gray-500)] m-0 mt-1">
+                          <p className="font-mono text-xs text-[var(--gray-500)] m-0 mt-1">
                             {assignment.templateTitle || "Onboarding"}{" "}
                             {assignment.templateVersionNumber
                               ? `v${assignment.templateVersionNumber}`
                               : ""}
                           </p>
                         </div>
-                        <span className="font-mono text-[10px] text-[var(--gray-500)]">
+                        <span className="font-mono text-xs text-[var(--gray-500)]">
                           {assignment.status.replace("_", " ")}
                         </span>
                       </div>
@@ -737,7 +737,7 @@ export default function TeamPage() {
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-[var(--alpha-white-8)] bg-[var(--alpha-white-3)] px-4 py-3">
-      <p className="font-mono text-[10px] uppercase text-[var(--gray-500)] m-0">
+      <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0">
         {label}
       </p>
       <p className="font-mono text-lg text-[var(--gray-100)] m-0 mt-2">{value}</p>

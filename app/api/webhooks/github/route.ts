@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/api/auth";
 import { resolveAiKey } from "@/lib/api/ai-key";
 import { logActivity } from "@/lib/api/activity";
 import { summarizeAndEmbedCommits } from "@/lib/api/timeline-ai";
+import { enqueueSyncTask } from "@/lib/api/sync-queue";
+import { executeBackgroundSync } from "@/lib/api/sync-pipeline";
 
 const WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || "";
 
@@ -63,6 +65,8 @@ export async function POST(request: Request) {
     const signature = request.headers.get("x-hub-signature-256") || "";
     const deliveryId = request.headers.get("x-github-delivery") || "";
     const event = request.headers.get("x-github-event") || "";
+
+    console.log(`[webhook] Received ${event} delivery ${deliveryId}`);
 
     if (!WEBHOOK_SECRET) {
       console.error("[webhook] GITHUB_WEBHOOK_SECRET not configured");
@@ -215,27 +219,23 @@ export async function POST(request: Request) {
           if (repo.auto_sync_enabled) {
             const watchedBranch = repo.watched_branch || "main";
             if (branch === watchedBranch && repo.last_synced_sha !== headSHA) {
-              const baseUrl =
-                process.env.NEXT_PUBLIC_SITE_URL ||
-                process.env.VERCEL_URL ||
-                "http://localhost:3000";
-
-              fetch(`${baseUrl}/api/repos/sync`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  repo_full_name: repoFullName,
-                  user_id: repo.user_id,
-                  head_sha: headSHA,
-                  webhook_triggered: true,
-                }),
-              }).catch((error) => {
-                console.error(
-                  "[webhook] Failed to trigger sync for",
-                  repoFullName,
-                  error.message
-                );
+              const result = enqueueSyncTask({
+                userId: repo.user_id,
+                repoFullName,
+                headSHA,
+                trigger: "webhook",
+                execute: (sha) =>
+                  executeBackgroundSync({
+                    userId: repo.user_id,
+                    repoFullName,
+                    headSHA: sha,
+                    trigger: "webhook",
+                  }),
               });
+
+              console.log(
+                `[webhook] Sync ${result.status} for ${repoFullName} → ${headSHA.slice(0, 7)}`
+              );
             }
           }
         }

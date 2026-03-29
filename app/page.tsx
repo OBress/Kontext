@@ -196,7 +196,7 @@ function FeatureHint({
         {icon}
       </div>
       <span className="font-mono text-xs font-medium text-[var(--gray-200)]">{title}</span>
-      <span className="font-mono text-[11px] text-[var(--gray-500)] text-center">{description}</span>
+      <span className="font-mono text-xs text-[var(--gray-500)] text-center">{description}</span>
     </div>
   );
 }

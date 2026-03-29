@@ -219,7 +219,7 @@ export default function SettingsPage() {
                   </div>
 
                   {(testResult || testError) && (
-                    <div className={`rounded-lg border px-3 py-2 font-mono text-[11px] ${
+                    <div className={`rounded-lg border px-3 py-2 font-mono text-xs ${
                       testStatus === "success"
                         ? "border-[var(--accent-green)]/20 bg-[var(--accent-green)]/10 text-[var(--gray-200)]"
                         : "border-[var(--accent-red)]/20 bg-[var(--accent-red)]/10 text-[var(--gray-200)]"
@@ -242,7 +242,7 @@ export default function SettingsPage() {
                   )}
                 </div>
               )}
-              <p className="font-mono text-[10px] text-[var(--gray-600)] mt-2 m-0">Stored in your browser&apos;s localStorage. Sent to our servers only to execute your request.</p>
+              <p className="font-mono text-xs text-[var(--gray-600)] mt-2 m-0">Stored in your browser&apos;s localStorage. Sent to our servers only to execute your request.</p>
             </GlowCard>
 
             {/* Activity Preferences */}
@@ -269,7 +269,7 @@ export default function SettingsPage() {
                   {/* Kontext events */}
                   <div>
                     <div className="flex items-center gap-1.5 mb-1.5">
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/10">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono font-medium bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/10">
                         <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-green)]" />
                         Kontext
                       </span>
@@ -306,7 +306,7 @@ export default function SettingsPage() {
                   {/* GitHub events */}
                   <div>
                     <div className="flex items-center gap-1.5 mb-1.5">
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-white/8 text-[var(--gray-300)] border border-white/5">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono font-medium bg-white/8 text-[var(--gray-300)] border border-white/5">
                         <svg viewBox="0 0 16 16" width="9" height="9" fill="currentColor" className="opacity-70">
                           <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
                         </svg>
@@ -402,7 +402,7 @@ export default function SettingsPage() {
                     <div key={key.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[var(--surface-1)] border border-[var(--alpha-white-5)]">
                       <div className="flex-1 min-w-0">
                         <p className="font-mono text-xs text-[var(--gray-200)] m-0">{key.name}</p>
-                        <p className="font-mono text-[10px] text-[var(--gray-500)] m-0">
+                        <p className="font-mono text-xs text-[var(--gray-500)] m-0">
                           {key.key_prefix}... · Created {new Date(key.created_at).toLocaleDateString()}
                           {key.last_used_at && ` · Last used ${new Date(key.last_used_at).toLocaleDateString()}`}
                         </p>

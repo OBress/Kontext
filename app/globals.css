@@ -130,6 +130,10 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    /* Scale up all rem-based sizes ~5% so the whole UI reads slightly larger */
+    font-size: 100%;
+  }
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-mono), ui-monospace, monospace;

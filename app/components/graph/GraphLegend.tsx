@@ -14,7 +14,7 @@ export function GraphLegend() {
   return (
     <div className="absolute bottom-4 left-4 z-20">
       <div className="glass-strong rounded-xl px-4 py-3">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--gray-500)] block mb-2">
+        <span className="font-mono text-xs uppercase tracking-wider text-[var(--gray-500)] block mb-2">
           Legend
         </span>
         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
@@ -24,14 +24,14 @@ export function GraphLegend() {
                 className="w-2.5 h-2.5 rounded-full shrink-0"
                 style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}40` }}
               />
-              <span className="font-mono text-[10px] text-[var(--gray-400)]">
+              <span className="font-mono text-xs text-[var(--gray-400)]">
                 {label}
               </span>
             </div>
           ))}
         </div>
         <div className="mt-2 pt-2 border-t border-[var(--alpha-white-5)]">
-          <span className="font-mono text-[10px] text-[var(--gray-500)]">
+          <span className="font-mono text-xs text-[var(--gray-500)]">
             Node size = file line count
           </span>
         </div>

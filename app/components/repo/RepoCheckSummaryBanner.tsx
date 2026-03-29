@@ -175,7 +175,7 @@ export function RepoCheckSummaryBanner({
               {banner.title}
             </p>
           </div>
-          <p className="font-mono text-[11px] text-[var(--gray-400)] m-0">
+          <p className="font-mono text-xs text-[var(--gray-400)] m-0">
             {banner.body}
             {summary?.latestRun?.summary ? ` ${summary.latestRun.summary}` : ""}
           </p>

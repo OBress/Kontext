@@ -83,7 +83,7 @@ export function RepoTooltip({ node, position, visible }: RepoTooltipProps) {
             </span>
           )}
           <span
-            className="ml-auto px-2 py-0.5 rounded text-[10px] font-medium"
+            className="ml-auto px-2 py-0.5 rounded text-xs font-medium"
             style={{
               background: `${badge.color}15`,
               color: badge.color,

@@ -98,7 +98,7 @@ export function RepoCard3D({
             <h3 className="font-mono text-sm font-semibold text-[var(--gray-100)] truncate m-0">
               {repo.name}
             </h3>
-            <span className="font-mono text-[11px] text-[var(--gray-500)]">
+            <span className="font-mono text-xs text-[var(--gray-500)]">
               {repo.owner}
             </span>
           </div>
@@ -122,19 +122,19 @@ export function RepoCard3D({
 
             {/* Status badge */}
             {repo.indexed && !isIngesting && (
-              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20">
+              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20">
                 <Database size={10} />
                 Indexed
               </span>
             )}
             {isIngesting && (
-              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20">
+              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20">
                 <Loader2 size={10} className="animate-spin" />
                 {ingestionStatus.progress}%
               </span>
             )}
             {!repo.indexed && !isIngesting && (
-              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono bg-[var(--alpha-white-5)] text-[var(--gray-400)] border border-[var(--alpha-white-8)]">
+              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-mono bg-[var(--alpha-white-5)] text-[var(--gray-400)] border border-[var(--alpha-white-8)]">
                 <Zap size={10} />
                 Pending
               </span>
@@ -173,14 +173,14 @@ export function RepoCard3D({
                 transition={{ duration: 0.3, ease: "easeOut" }}
               />
             </div>
-            <p className="font-mono text-[10px] text-[var(--gray-500)] mt-1.5 m-0">
+            <p className="font-mono text-xs text-[var(--gray-500)] mt-1.5 m-0">
               {ingestionStatus.message}
             </p>
           </div>
         )}
 
         {/* Footer stats */}
-        <div className="flex items-center gap-4 text-[11px] font-mono text-[var(--gray-500)]">
+        <div className="flex items-center gap-4 text-xs font-mono text-[var(--gray-500)]">
           {repo.language && (
             <span className="flex items-center gap-1.5">
               <span
@@ -207,7 +207,7 @@ export function RepoCard3D({
         {/* Indexed chunk count */}
         {repo.indexed && repo.chunk_count > 0 && !isIngesting && (
           <div className="mt-3 pt-3 border-t border-[var(--alpha-white-5)]">
-            <span className="text-[11px] font-mono text-[var(--gray-500)]">
+            <span className="text-xs font-mono text-[var(--gray-500)]">
               {repo.chunk_count.toLocaleString()} chunks embedded
             </span>
           </div>

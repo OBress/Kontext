@@ -63,7 +63,7 @@ export default function DashboardPage() {
                   <Database size={18} className="text-[var(--accent-green)]" />
                 </div>
                 <div>
-                  <p className="font-mono text-[11px] uppercase text-[var(--gray-500)] m-0">
+                  <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0">
                     Repos Added
                   </p>
                   <p className="font-mono text-2xl font-semibold text-[var(--gray-100)] m-0">
@@ -79,7 +79,7 @@ export default function DashboardPage() {
                   <Code2 size={18} className="text-[var(--accent-muted)]" />
                 </div>
                 <div>
-                  <p className="font-mono text-[11px] uppercase text-[var(--gray-500)] m-0">
+                  <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0">
                     Total Chunks
                   </p>
                   <p className="font-mono text-2xl font-semibold text-[var(--gray-100)] m-0">
@@ -95,7 +95,7 @@ export default function DashboardPage() {
                   <Users size={18} className="text-[var(--accent-green)]" />
                 </div>
                 <div>
-                  <p className="font-mono text-[11px] uppercase text-[var(--gray-500)] m-0">
+                  <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0">
                     Indexed
                   </p>
                   <p className="font-mono text-2xl font-semibold text-[var(--gray-100)] m-0">
