@@ -25,6 +25,7 @@ export function RepoHealthCard({
 }) {
   const apiKey = useAppStore((s) => s.apiKey);
   const cachedSummary = useAppStore((s) => s.repoHealthSummaries[repoFullName]);
+  const observedRun = useAppStore((s) => s.repoCheckRuns[repoFullName]);
   const setRepoHealthSummary = useAppStore((s) => s.setRepoHealthSummary);
   const setRepoCheckRun = useAppStore((s) => s.setRepoCheckRun);
   const [summary, setSummary] = useState<RepoHealthSummaryState | null>(
@@ -46,6 +47,9 @@ export function RepoHealthCard({
         criticalCount: number;
         highCount: number;
         resolvedRecently: number;
+        currentHeadSha: string | null;
+        latestCompletedHeadSha: string | null;
+        isCurrent: boolean;
         latestRun: {
           id: number;
           status: RepoCheckRunState["status"];
@@ -65,6 +69,9 @@ export function RepoHealthCard({
         criticalCount: data.criticalCount || 0,
         highCount: data.highCount || 0,
         resolvedRecently: data.resolvedRecently || 0,
+        currentHeadSha: data.currentHeadSha || null,
+        latestCompletedHeadSha: data.latestCompletedHeadSha || null,
+        isCurrent: data.isCurrent === true,
         latestRun: data.latestRun
           ? {
               id: data.latestRun.id,
@@ -94,9 +101,23 @@ export function RepoHealthCard({
     }
   }, [repoFullName, setRepoCheckRun, setRepoHealthSummary]);
 
+  const observedRunSignature = observedRun
+    ? `${observedRun.id}:${observedRun.status}:${observedRun.headSha || ""}:${observedRun.createdAt}`
+    : "none";
+
   useEffect(() => {
     fetchSummary();
-  }, [fetchSummary]);
+  }, [fetchSummary, observedRunSignature]);
+
+  const isVerifyingCurrentHead =
+    !!summary?.currentHeadSha &&
+    summary.latestRun?.status === "running" &&
+    summary.latestRun.headSha === summary.currentHeadSha;
+
+  const staleSummaryText =
+    summary?.currentHeadSha && summary?.latestCompletedHeadSha
+      ? `Showing findings from ${summary.latestCompletedHeadSha.slice(0, 7)} while ${summary.currentHeadSha.slice(0, 7)} is being verified.`
+      : "The latest completed repo-health result is older than the current synced repository state.";
 
   const runChecks = async () => {
     setRunning(true);
@@ -181,6 +202,16 @@ export function RepoHealthCard({
         </div>
       ) : (
         <>
+          {summary && !summary.isCurrent && (
+            <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-3">
+              <p className="font-mono text-xs text-amber-200 m-0">
+                {isVerifyingCurrentHead
+                  ? `Verifying fixes on ${summary.currentHeadSha?.slice(0, 7)} now.`
+                  : staleSummaryText}
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4">
             <div className="rounded-lg bg-[var(--alpha-white-5)] p-3">
               <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">
@@ -236,7 +267,9 @@ export function RepoHealthCard({
                   Latest run {new Date(summary.latestRun.createdAt).toLocaleString()}
                 </div>
                 <p className="font-mono text-xs text-[var(--gray-500)] m-0">
-                  {summary.latestRun.summary || "No summary yet."}
+                  {!summary.isCurrent && isVerifyingCurrentHead
+                    ? "A fresh repo-health run is in progress for the current synced head."
+                    : summary.latestRun.summary || "No summary yet."}
                 </p>
                 <p className="font-mono text-xs text-[var(--gray-400)] m-0">
                   {summary.latestRun.newFindings} new, {summary.latestRun.resolvedFindings} resolved,{" "}

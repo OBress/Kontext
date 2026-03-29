@@ -1,5 +1,5 @@
-import type { ResponseSchema } from "@google/generative-ai";
-import { SchemaType } from "@google/generative-ai";
+import type { Schema } from "@google/genai";
+import { Type } from "@google/genai";
 import {
   buildTaskSystemInstruction,
   formatEvidencePack,
@@ -44,33 +44,33 @@ export interface ScopeRuleResponse {
   content: string;
 }
 
-const STACK_ITEM_SCHEMA: ResponseSchema = {
-  type: SchemaType.OBJECT,
+const STACK_ITEM_SCHEMA: Schema = {
+  type: Type.OBJECT,
   properties: {
-    name: { type: SchemaType.STRING },
-    category: { type: SchemaType.STRING },
-    confidence: { type: SchemaType.INTEGER },
+    name: { type: Type.STRING },
+    category: { type: Type.STRING },
+    confidence: { type: Type.INTEGER },
   },
   required: ["name", "category", "confidence"],
 };
 
-export const ROOT_RULE_RESPONSE_SCHEMA: ResponseSchema = {
-  type: SchemaType.OBJECT,
+export const ROOT_RULE_RESPONSE_SCHEMA: Schema = {
+  type: Type.OBJECT,
   properties: {
-    summary: { type: SchemaType.STRING },
+    summary: { type: Type.STRING },
     detectedStack: {
-      type: SchemaType.ARRAY,
+      type: Type.ARRAY,
       items: STACK_ITEM_SCHEMA,
     },
-    content: { type: SchemaType.STRING },
+    content: { type: Type.STRING },
   },
   required: ["summary", "detectedStack", "content"],
 };
 
-export const SCOPE_RULE_RESPONSE_SCHEMA: ResponseSchema = {
-  type: SchemaType.OBJECT,
+export const SCOPE_RULE_RESPONSE_SCHEMA: Schema = {
+  type: Type.OBJECT,
   properties: {
-    content: { type: SchemaType.STRING },
+    content: { type: Type.STRING },
   },
   required: ["content"],
 };
@@ -256,7 +256,7 @@ function buildSeedStack(
     ["react", "React", "Library"],
     ["tailwindcss", "Tailwind CSS", "Styling"],
     ["@supabase/supabase-js", "Supabase", "Database"],
-    ["@google/generative-ai", "Google Gemini SDK", "Library"],
+    ["@google/genai", "Google Gemini SDK", "Library"],
     ["zustand", "Zustand", "Library"],
     ["framer-motion", "Framer Motion", "Library"],
     ["three", "Three.js", "Library"],

@@ -5,6 +5,7 @@ import type {
   ArchitectureBundle,
   ArchitectureLayerId,
   ArchitectureStatus,
+  ArchitectureTraceStep,
   ArchitectureView,
 } from "@/types/architecture";
 
@@ -45,6 +46,15 @@ interface ActiveTrace {
   nodeIds: string[];
   edgeIds: string[];
   layerId: ArchitectureLayerId;
+}
+
+interface ActiveSimulation {
+  layerId: ArchitectureLayerId;
+  nodeIds: string[];
+  edgeIds: string[];
+  steps: ArchitectureTraceStep[];
+  activeStepIndex: number;
+  summary: string;
 }
 
 interface GraphState {
@@ -112,6 +122,9 @@ interface GraphState {
 
   activeTrace: ActiveTrace | null;
   setActiveTrace: (trace: ActiveTrace | null) => void;
+
+  activeSimulation: ActiveSimulation | null;
+  setActiveSimulation: (simulation: ActiveSimulation | null) => void;
 }
 
 const defaultFilters: GraphFilters = {
@@ -219,8 +232,12 @@ export const useGraphStore = create<GraphState>((set) => ({
       highlightedEdgeIds: [],
       dimUnfocused: false,
       activeTrace: null,
+      activeSimulation: null,
     }),
 
   activeTrace: null,
   setActiveTrace: (trace) => set({ activeTrace: trace }),
+
+  activeSimulation: null,
+  setActiveSimulation: (simulation) => set({ activeSimulation: simulation }),
 }));

@@ -70,6 +70,9 @@ export interface RepoHealthSummaryState {
   criticalCount: number;
   highCount: number;
   resolvedRecently: number;
+  currentHeadSha?: string | null;
+  latestCompletedHeadSha?: string | null;
+  isCurrent?: boolean;
   latestRun: RepoCheckRunState | null;
 }
 

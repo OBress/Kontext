@@ -43,12 +43,16 @@ function ArchitectureEdgeComponent({
     highlightedEdgeIds,
     dimUnfocused,
     activeTrace,
+    activeSimulation,
   } = useGraphStore();
 
   const color =
     CONNECTION_TYPE_COLORS[edgeData?.connectionType || "import"] || "#8B949E";
   const isHighlighted = highlightedEdgeIds.includes(id);
   const isTracing = activeTrace?.edgeIds.includes(id) || false;
+  const isSimulationEdge =
+    activeSimulation?.steps[activeSimulation.activeStepIndex]?.kind === "edge" &&
+    activeSimulation.steps[activeSimulation.activeStepIndex]?.refId === id;
   const isActive = selected || selectedElement?.id === id || isHighlighted;
   const isDimmed = dimUnfocused && highlightedEdgeIds.length > 0 && !isHighlighted;
 
@@ -83,14 +87,20 @@ function ArchitectureEdgeComponent({
         interactionWidth={20}
       />
 
-      {isTracing && (
+      {(isTracing || isSimulationEdge) && (
         <>
           <circle r="3.5" fill={color} className="arch-trace-dot">
-            <animateMotion dur="2.4s" repeatCount="indefinite" path={edgePath} />
+            <animateMotion
+              dur={isSimulationEdge ? "1.2s" : "2.4s"}
+              repeatCount="indefinite"
+              path={edgePath}
+            />
           </circle>
-          <circle r="2.5" fill={color} opacity="0.65" className="arch-trace-dot">
-            <animateMotion dur="2.4s" repeatCount="indefinite" begin="1.1s" path={edgePath} />
-          </circle>
+          {!isSimulationEdge && (
+            <circle r="2.5" fill={color} opacity="0.65" className="arch-trace-dot">
+              <animateMotion dur="2.4s" repeatCount="indefinite" begin="1.1s" path={edgePath} />
+            </circle>
+          )}
         </>
       )}
 

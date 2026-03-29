@@ -5,6 +5,7 @@ import { IconRail } from "./IconRail";
 import { TopBar } from "./TopBar";
 import { ApiKeyGate } from "../shared/ApiKeyGate";
 import { AddRepoModal } from "../dashboard/AddRepoModal";
+import { useAiKeySync } from "@/hooks/use-ai-key-sync";
 
 interface AppShellProps {
   children: ReactNode;
@@ -12,6 +13,10 @@ interface AppShellProps {
 }
 
 export function AppShell({ children, hideRail }: AppShellProps) {
+  // Ensure the browser-stored API key is always synced to the server
+  // so background processes (webhooks) can use it.
+  useAiKeySync();
+
   return (
     <>
       <TopBar />
@@ -26,3 +31,4 @@ export function AppShell({ children, hideRail }: AppShellProps) {
     </>
   );
 }
+

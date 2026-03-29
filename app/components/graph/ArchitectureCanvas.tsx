@@ -2,49 +2,49 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ReactFlow,
-  ReactFlowProvider,
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   Panel,
-  BackgroundVariant,
-  useNodesState,
+  ReactFlow,
+  ReactFlowProvider,
   useEdgesState,
+  useNodesState,
   useReactFlow,
-  type Node,
   type Edge,
-  type NodeTypes,
   type EdgeTypes,
+  type Node,
+  type NodeTypes,
   type OnSelectionChangeParams,
 } from "@xyflow/react";
 import dagre from "dagre";
 import "@xyflow/react/dist/style.css";
-
-import { useGraphStore } from "@/lib/store/graph-store";
+import {
+  Brain,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Layers3,
+  Loader2,
+  RefreshCw,
+} from "lucide-react";
+import { ArchitectureAssistant, ArchitectureAssistantFab } from "./ArchitectureAssistant";
+import { DetailPanel } from "./DetailPanel";
+import { ArchitectureEdge } from "./ArchitectureEdge";
 import { ArchitectureNode } from "./ArchitectureNode";
 import { GroupNode } from "./GroupNode";
-import { ArchitectureEdge } from "./ArchitectureEdge";
-import { DetailPanel } from "./DetailPanel";
+import type { ArchitectureAssistantAction } from "@/lib/api/architecture-actions";
+import { useAppStore } from "@/lib/store/app-store";
+import type { ChatCitation } from "@/lib/store/chat-store";
+import { useGraphStore } from "@/lib/store/graph-store";
 import {
   getArchitectureView,
+  type ArchComponent,
   type ArchitectureBundle,
   type ArchitectureLayerId,
   type ArchitectureView,
-  type ArchComponent,
 } from "@/types/architecture";
-import {
-  Brain,
-  Loader2,
-  RefreshCw,
-  Clock,
-  Layers3,
-  MessageCircleMore,
-  Send,
-  X,
-  Sparkles,
-} from "lucide-react";
-import { useAppStore } from "@/lib/store/app-store";
 
 const nodeTypes: NodeTypes = {
   architecture: ArchitectureNode,
@@ -55,41 +55,14 @@ const edgeTypes: EdgeTypes = {
   architecture: ArchitectureEdge,
 };
 
-type AssistantAction =
-  | {
-      type: "switch_layer";
-      layerId: ArchitectureLayerId;
-    }
-  | {
-      type: "focus_nodes";
-      layerId: ArchitectureLayerId;
-      nodeIds: string[];
-      edgeIds: string[];
-      primaryNodeId: string | null;
-      dimOthers: boolean;
-    }
-  | {
-      type: "trace_path";
-      layerId: ArchitectureLayerId;
-      nodeIds: string[];
-      edgeIds: string[];
-      traceId: string | null;
-    };
-
-interface AssistantMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-}
-
 function getLayoutedElements(
   nodes: Node[],
   edges: Edge[],
   direction: "TB" | "LR" = "LR"
 ): { nodes: Node[]; edges: Edge[] } {
-  const g = new dagre.graphlib.Graph();
-  g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({
+  const graph = new dagre.graphlib.Graph();
+  graph.setDefaultEdgeLabel(() => ({}));
+  graph.setGraph({
     rankdir: direction,
     nodesep: 80,
     ranksep: 160,
@@ -100,31 +73,32 @@ function getLayoutedElements(
 
   for (const node of nodes) {
     if (!node.parentId) {
-      g.setNode(node.id, {
-        width: node.measured?.width || 260,
-        height: node.measured?.height || 180,
+      graph.setNode(node.id, {
+        width: node.measured?.width || 280,
+        height: node.measured?.height || 190,
       });
     }
   }
 
   for (const edge of edges) {
-    if (g.hasNode(edge.source) && g.hasNode(edge.target)) {
-      g.setEdge(edge.source, edge.target);
+    if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
+      graph.setEdge(edge.source, edge.target);
     }
   }
 
-  dagre.layout(g);
+  dagre.layout(graph);
 
   return {
     nodes: nodes.map((node) => {
       if (node.parentId) return node;
-      const dagreNode = g.node(node.id);
-      if (!dagreNode) return node;
+      const layoutNode = graph.node(node.id);
+      if (!layoutNode) return node;
+
       return {
         ...node,
         position: {
-          x: dagreNode.x - (node.measured?.width || 260) / 2,
-          y: dagreNode.y - (node.measured?.height || 180) / 2,
+          x: layoutNode.x - (node.measured?.width || 280) / 2,
+          y: layoutNode.y - (node.measured?.height || 190) / 2,
         },
       };
     }),
@@ -142,12 +116,6 @@ function viewToFlowElements(
   for (const component of view.components) {
     const hasChildren = !!component.children && component.children.length > 0;
     const isExpanded = expandedGroups.has(component.id);
-    let totalFiles = component.files.length;
-    if (component.children) {
-      for (const child of component.children) {
-        totalFiles += child.files.length;
-      }
-    }
 
     if (hasChildren && isExpanded) {
       nodes.push({
@@ -162,8 +130,8 @@ function viewToFlowElements(
           isExpanded: true,
         },
         style: {
-          width: 500,
-          height: 300 + component.children!.length * 100,
+          width: 520,
+          height: Math.max(280, 120 + component.children!.length * 104),
         },
       });
 
@@ -171,7 +139,7 @@ function viewToFlowElements(
         nodes.push({
           id: child.id,
           type: "architecture",
-          position: { x: 20, y: 60 + index * 120 },
+          position: { x: 18, y: 56 + index * 98 },
           parentId: component.id,
           extent: "parent" as const,
           data: {
@@ -186,10 +154,9 @@ function viewToFlowElements(
         });
       });
     } else {
-      const nodeType = hasChildren ? "group" : "architecture";
       nodes.push({
         id: component.id,
-        type: nodeType,
+        type: hasChildren ? "group" : "architecture",
         position: { x: 0, y: 0 },
         data: hasChildren
           ? {
@@ -206,13 +173,19 @@ function viewToFlowElements(
               files: component.files,
               hasChildren: false,
               isExpanded: false,
-              fileCount: totalFiles,
+              fileCount: component.files.length,
             },
       });
     }
   }
 
+  const visibleNodeIds = new Set(nodes.map((node) => node.id));
+
   for (const connection of view.connections) {
+    if (!visibleNodeIds.has(connection.source) || !visibleNodeIds.has(connection.target)) {
+      continue;
+    }
+
     edges.push({
       id: connection.id,
       source: connection.source,
@@ -229,185 +202,12 @@ function viewToFlowElements(
   return getLayoutedElements(nodes, edges, "LR");
 }
 
-interface ArchitectureAssistantProps {
-  repoFullName: string;
-  apiKey: string | null;
-  layer: ArchitectureLayerId;
-  open: boolean;
-  onClose: () => void;
-  onAction: (action: AssistantAction) => void;
-}
-
-function ArchitectureAssistant({
-  repoFullName,
-  apiKey,
-  layer,
-  open,
-  onClose,
-  onAction,
-}: ArchitectureAssistantProps) {
-  const [messages, setMessages] = useState<AssistantMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [isStreaming, setIsStreaming] = useState(false);
-  const endRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isStreaming]);
-
-  const sendPrompt = useCallback(
-    async (prompt: string) => {
-      if (!apiKey || !prompt.trim() || isStreaming) return;
-
-      setMessages((prev) => [
-        ...prev,
-        { id: `user-${Date.now()}`, role: "user", content: prompt.trim() },
-      ]);
-      setInput("");
-      setIsStreaming(true);
-
-      let assistantContent = "";
-      const assistantId = `assistant-${Date.now()}`;
-      setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
-
-      try {
-        const res = await fetch("/api/graph/assistant", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-google-api-key": apiKey,
-          },
-          body: JSON.stringify({
-            repo_full_name: repoFullName,
-            message: prompt.trim(),
-            layer,
-          }),
-        });
-
-        if (!res.ok || !res.body) {
-          throw new Error("Assistant request failed");
-        }
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            const dataLine = line.replace(/^data: /, "").trim();
-            if (!dataLine) continue;
-
-            const payload = JSON.parse(dataLine) as
-              | { type: "action"; action: AssistantAction }
-              | { type: "text"; content: string }
-              | { type: "done" };
-
-            if (payload.type === "action") {
-              onAction(payload.action);
-            }
-
-            if (payload.type === "text") {
-              assistantContent += payload.content;
-              setMessages((prev) =>
-                prev.map((message) =>
-                  message.id === assistantId
-                    ? { ...message, content: assistantContent }
-                    : message
-                )
-              );
-            }
-          }
-        }
-      } catch (error: unknown) {
-        const messageText =
-          error instanceof Error ? error.message : "Assistant request failed";
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === assistantId
-              ? { ...message, content: messageText }
-              : message
-          )
-        );
-      } finally {
-        setIsStreaming(false);
-      }
-    },
-    [apiKey, isStreaming, layer, onAction, repoFullName]
-  );
-
-  if (!open) return null;
-
-  return (
-    <div className="architecture-assistant">
-      <div className="architecture-assistant__header">
-        <div>
-          <div className="architecture-assistant__eyebrow">Architecture Assistant</div>
-          <div className="architecture-assistant__title">Graph-aware chat</div>
-        </div>
-        <button onClick={onClose} className="architecture-assistant__close">
-          <X size={16} />
-        </button>
-      </div>
-
-      <div className="architecture-assistant__messages">
-        {messages.length === 0 && (
-          <div className="architecture-assistant__empty">
-            <Sparkles size={16} />
-            <p>Ask about the flow, highlight a subsystem, or trace a request path.</p>
-            <div className="architecture-assistant__suggestions">
-              {[
-                "Explain the project architecture",
-                "Where is the user sending chat messages?",
-                "Trace the sync flow",
-              ].map((suggestion) => (
-                <button
-                  key={suggestion}
-                  onClick={() => void sendPrompt(suggestion)}
-                  className="architecture-assistant__suggestion"
-                >
-                  {suggestion}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`architecture-assistant__message architecture-assistant__message--${message.role}`}
-          >
-            {message.content || (message.role === "assistant" && isStreaming ? "Thinking..." : "")}
-          </div>
-        ))}
-        <div ref={endRef} />
-      </div>
-
-      <div className="architecture-assistant__composer">
-        <textarea
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          placeholder={apiKey ? "Ask the architecture assistant..." : "Set your AI key to use the assistant"}
-          disabled={!apiKey || isStreaming}
-          rows={1}
-        />
-        <button
-          onClick={() => void sendPrompt(input)}
-          disabled={!apiKey || !input.trim() || isStreaming}
-          className="architecture-assistant__send"
-        >
-          {isStreaming ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-        </button>
-      </div>
-    </div>
-  );
+function countSummary(view: ArchitectureView | null) {
+  if (!view) return "Architecture bundle not ready yet";
+  const nodeCount =
+    view.components.length +
+    view.components.reduce((total, component) => total + (component.children?.length || 0), 0);
+  return `${nodeCount} components - ${view.connections.length} connections`;
 }
 
 interface ArchitectureCanvasProps {
@@ -439,7 +239,10 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
     setIsArchitectureStale,
     setHighlights,
     clearHighlights,
+    activeTrace,
     setActiveTrace,
+    activeSimulation,
+    setActiveSimulation,
   } = useGraphStore();
 
   const apiKey = useAppStore((state) => state.apiKey);
@@ -517,6 +320,23 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
 
     return () => window.clearInterval(interval);
   }, [architectureStatus, loadGraph]);
+
+  useEffect(() => {
+    if (!activeSimulation) return;
+    if (activeSimulation.activeStepIndex >= activeSimulation.steps.length - 1) return;
+
+    const currentStep = activeSimulation.steps[activeSimulation.activeStepIndex];
+    const delay = currentStep?.kind === "edge" ? 950 : 700;
+
+    const timeout = window.setTimeout(() => {
+      setActiveSimulation({
+        ...activeSimulation,
+        activeStepIndex: activeSimulation.activeStepIndex + 1,
+      });
+    }, delay);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeSimulation, setActiveSimulation]);
 
   const handleAnalyze = useCallback(async () => {
     if (!apiKey || isAnalyzing) return;
@@ -597,24 +417,114 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
         if (matchedNodes.length > 0) {
           reactFlow.fitView({
             nodes: matchedNodes,
-            duration: 450,
+            duration: 520,
             padding: 0.24,
           });
         }
-      }, 120);
+      }, 220);
     },
     [reactFlow]
   );
 
+  const ensureExpandedGroups = useCallback(
+    (layerId: ArchitectureLayerId, groupIds: string[]) => {
+      if (groupIds.length === 0) return;
+      setActiveLayer(layerId);
+      setExpandedGroups([...new Set([...expandedGroups, ...groupIds])]);
+    },
+    [expandedGroups, setActiveLayer, setExpandedGroups]
+  );
+
+  const findBestNodeForFile = useCallback(
+    (filePath: string) => {
+      if (!architectureBundle) return null;
+
+      const exactCodeFileNode =
+        Object.values(architectureBundle.nodeIndex).find(
+          (entry) =>
+            entry.layers.includes("code") &&
+            entry.files.length === 1 &&
+            entry.files[0] === filePath
+        ) || null;
+
+      if (exactCodeFileNode) return exactCodeFileNode;
+
+      const codeModuleNode =
+        Object.values(architectureBundle.nodeIndex).find(
+          (entry) =>
+            entry.layers.includes("code") &&
+            !entry.parentId &&
+            entry.files.includes(filePath)
+        ) || null;
+
+      if (codeModuleNode) return codeModuleNode;
+
+      return (
+        Object.values(architectureBundle.nodeIndex).find((entry) =>
+          entry.files.includes(filePath)
+        ) || null
+      );
+    },
+    [architectureBundle]
+  );
+
+  const focusFilePath = useCallback(
+    (filePath: string) => {
+      const target = findBestNodeForFile(filePath);
+      if (!target) return;
+
+      const targetLayer = target.layers.includes("code")
+        ? "code"
+        : target.layers[0] || activeLayer;
+
+      if (target.parentId) {
+        ensureExpandedGroups(targetLayer, [target.parentId]);
+      } else {
+        setActiveLayer(targetLayer);
+      }
+
+      setActiveTrace(null);
+      setActiveSimulation(null);
+      setHighlights([target.id], [], false);
+      setSelectedElement({ type: "node", id: target.id });
+      focusNodes([target.id]);
+    },
+    [
+      activeLayer,
+      ensureExpandedGroups,
+      findBestNodeForFile,
+      focusNodes,
+      setActiveLayer,
+      setActiveSimulation,
+      setActiveTrace,
+      setHighlights,
+      setSelectedElement,
+    ]
+  );
+
+  const handleOpenCitation = useCallback(
+    (citation: ChatCitation) => {
+      focusFilePath(citation.file_path);
+    },
+    [focusFilePath]
+  );
+
   const applyAssistantAction = useCallback(
-    (action: AssistantAction) => {
+    (action: ArchitectureAssistantAction) => {
       if (action.type === "switch_layer") {
         setActiveLayer(action.layerId);
         return;
       }
 
+      if (action.type === "expand_groups") {
+        ensureExpandedGroups(action.layerId, action.groupIds);
+        return;
+      }
+
       if (action.type === "focus_nodes") {
         setActiveLayer(action.layerId);
+        setActiveTrace(null);
+        setActiveSimulation(null);
         setHighlights(action.nodeIds, action.edgeIds, action.dimOthers);
         setSelectedElement(
           action.primaryNodeId ? { type: "node", id: action.primaryNodeId } : null
@@ -625,6 +535,7 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
 
       if (action.type === "trace_path") {
         setActiveLayer(action.layerId);
+        setActiveSimulation(null);
         setHighlights(action.nodeIds, action.edgeIds, true);
         setActiveTrace({
           traceId: action.traceId,
@@ -633,9 +544,34 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
           layerId: action.layerId,
         });
         focusNodes(action.nodeIds);
+        return;
       }
+
+      setActiveLayer(action.layerId);
+      setHighlights(action.nodeIds, action.edgeIds, true);
+      setActiveTrace(null);
+      setActiveSimulation({
+        layerId: action.layerId,
+        nodeIds: action.nodeIds,
+        edgeIds: action.edgeIds,
+        steps: action.steps,
+        activeStepIndex: 0,
+        summary: action.summary,
+      });
+      setSelectedElement(
+        action.nodeIds[0] ? { type: "node", id: action.nodeIds[0] } : null
+      );
+      focusNodes(action.nodeIds);
     },
-    [focusNodes, setActiveLayer, setActiveTrace, setHighlights, setSelectedElement]
+    [
+      ensureExpandedGroups,
+      focusNodes,
+      setActiveLayer,
+      setActiveSimulation,
+      setActiveTrace,
+      setHighlights,
+      setSelectedElement,
+    ]
   );
 
   const analyzedTimeAgo = useMemo(() => {
@@ -648,6 +584,22 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
     if (hours < 24) return `${hours}h ago`;
     return `${Math.floor(hours / 24)}d ago`;
   }, [analyzedAt]);
+
+  const expandableGroupIds = useMemo(
+    () =>
+      (architectureData?.components || [])
+        .filter((component) => (component.children?.length || 0) > 0)
+        .map((component) => component.id),
+    [architectureData]
+  );
+
+  const expandAll = useCallback(() => {
+    setExpandedGroups(expandableGroupIds);
+  }, [expandableGroupIds, setExpandedGroups]);
+
+  const collapseAll = useCallback(() => {
+    setExpandedGroups([]);
+  }, [setExpandedGroups]);
 
   return (
     <div className="architecture-canvas">
@@ -716,6 +668,19 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
             ))}
           </div>
 
+          {activeLayer === "code" && expandableGroupIds.length > 0 && (
+            <div className="architecture-panel__actions">
+              <button onClick={expandAll}>
+                <ChevronDown size={12} />
+                Expand all
+              </button>
+              <button onClick={collapseAll}>
+                <ChevronUp size={12} />
+                Collapse all
+              </button>
+            </div>
+          )}
+
           {isAnalyzing && (
             <div className="analyze-status">
               <Loader2 size={16} className="animate-spin" />
@@ -726,11 +691,7 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
           {!isAnalyzing && (
             <div className="analyze-info">
               <div className="analyze-info__summary">
-                <span className="analyze-info__count">
-                  {architectureData
-                    ? `${architectureData.components.length} components · ${architectureData.connections.length} connections`
-                    : "Architecture bundle not ready yet"}
-                </span>
+                <span className="analyze-info__count">{countSummary(architectureData)}</span>
                 <div className="architecture-status-row">
                   <span className={`architecture-status-pill architecture-status-pill--${architectureStatus}`}>
                     {architectureStatus}
@@ -747,8 +708,12 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
                     </span>
                   )}
                 </div>
-                {architectureError && (
-                  <span className="analyze-hint">{architectureError}</span>
+                {architectureError && <span className="analyze-hint">{architectureError}</span>}
+                {activeSimulation && (
+                  <span className="analyze-hint">{activeSimulation.summary}</span>
+                )}
+                {!activeSimulation && activeTrace && (
+                  <span className="analyze-hint">Tracing highlighted path on the graph.</span>
                 )}
               </div>
               <button
@@ -768,13 +733,10 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
 
       <DetailPanel />
 
-      <button
-        className="architecture-assistant-fab"
+      <ArchitectureAssistantFab
+        open={assistantOpen}
         onClick={() => setAssistantOpen((value) => !value)}
-        title="Open architecture assistant"
-      >
-        {assistantOpen ? <X size={18} /> : <MessageCircleMore size={18} />}
-      </button>
+      />
 
       <ArchitectureAssistant
         repoFullName={repoFullName}
@@ -783,6 +745,8 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
         open={assistantOpen}
         onClose={() => setAssistantOpen(false)}
         onAction={applyAssistantAction}
+        onOpenCitation={handleOpenCitation}
+        onOpenFilePath={focusFilePath}
       />
     </div>
   );

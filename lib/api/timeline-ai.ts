@@ -1,4 +1,4 @@
-import { TaskType } from "@google/generative-ai";
+
 import { createAdminClient } from "./auth";
 import { generateEmbeddings, generateText } from "./embeddings";
 import {
@@ -109,7 +109,7 @@ export async function summarizeAndEmbedCommits(
   const embeddings = await generateEmbeddings(
     apiKey,
     summaries,
-    TaskType.RETRIEVAL_DOCUMENT
+    "RETRIEVAL_DOCUMENT"
   );
 
   return { summaries, embeddings };

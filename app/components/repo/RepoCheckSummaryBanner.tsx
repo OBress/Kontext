@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Loader2,
   Shield,
+  X,
 } from "lucide-react";
 import { RepoCheckRunState, RepoHealthSummaryState, useAppStore } from "@/lib/store/app-store";
 
@@ -20,12 +21,19 @@ export function RepoCheckSummaryBanner({
   lastSyncedSha?: string | null;
 }) {
   const cachedSummary = useAppStore((s) => s.repoHealthSummaries[repoFullName]);
+  const observedRun = useAppStore((s) => s.repoCheckRuns[repoFullName]);
   const setRepoHealthSummary = useAppStore((s) => s.setRepoHealthSummary);
   const setRepoCheckRun = useAppStore((s) => s.setRepoCheckRun);
   const [summary, setSummary] = useState<RepoHealthSummaryState | null>(
     cachedSummary || null
   );
   const [loading, setLoading] = useState(!cachedSummary);
+  const [dismissed, setDismissed] = useState(false);
+
+  // Reset dismissed state when the underlying data changes
+  useEffect(() => {
+    setDismissed(false);
+  }, [summary?.latestRun?.id]);
 
   const fetchSummary = useCallback(async () => {
     if (!repoFullName) return;
@@ -40,6 +48,9 @@ export function RepoCheckSummaryBanner({
         criticalCount: number;
         highCount: number;
         resolvedRecently: number;
+        currentHeadSha: string | null;
+        latestCompletedHeadSha: string | null;
+        isCurrent: boolean;
         latestRun: {
           id: number;
           status: RepoCheckRunState["status"];
@@ -59,6 +70,9 @@ export function RepoCheckSummaryBanner({
         criticalCount: data.criticalCount || 0,
         highCount: data.highCount || 0,
         resolvedRecently: data.resolvedRecently || 0,
+        currentHeadSha: data.currentHeadSha || null,
+        latestCompletedHeadSha: data.latestCompletedHeadSha || null,
+        isCurrent: data.isCurrent === true,
         latestRun: data.latestRun
           ? {
               id: data.latestRun.id,
@@ -88,13 +102,40 @@ export function RepoCheckSummaryBanner({
     }
   }, [repoFullName, setRepoCheckRun, setRepoHealthSummary]);
 
+  const observedRunSignature = observedRun
+    ? `${observedRun.id}:${observedRun.status}:${observedRun.headSha || ""}:${observedRun.createdAt}`
+    : "none";
+
   useEffect(() => {
     fetchSummary();
-  }, [fetchSummary, lastSyncedSha]);
+  }, [fetchSummary, lastSyncedSha, observedRunSignature]);
 
   const banner = useMemo(() => {
     const latestRun = summary?.latestRun;
-    if (!latestRun || latestRun.status !== "completed") {
+    if (!latestRun) {
+      return null;
+    }
+
+    if (!summary.isCurrent) {
+      const isVerifyingCurrentHead =
+        latestRun.status === "running" &&
+        latestRun.headSha &&
+        latestRun.headSha === summary.currentHeadSha;
+
+      return {
+        tone: "warn" as const,
+        title: isVerifyingCurrentHead
+          ? "Repo health is re-verifying fixes"
+          : "Repo health results are catching up",
+        body: isVerifyingCurrentHead
+          ? `The latest sync reached ${summary.currentHeadSha?.slice(0, 7)} and a fresh verification run is still in progress.`
+          : summary.currentHeadSha && summary.latestCompletedHeadSha
+            ? `Latest completed findings are from ${summary.latestCompletedHeadSha.slice(0, 7)} while the repo is already synced to ${summary.currentHeadSha.slice(0, 7)}.`
+            : "A fresh verification run is still needed for the current synced repository state.",
+      };
+    }
+
+    if (latestRun.status !== "completed") {
       return null;
     }
 
@@ -141,7 +182,7 @@ export function RepoCheckSummaryBanner({
     );
   }
 
-  if (!banner) return null;
+  if (!banner || dismissed) return null;
 
   const isWarn = banner.tone === "warn";
 
@@ -182,12 +223,21 @@ export function RepoCheckSummaryBanner({
         </div>
       </div>
 
-      <Link
-        href={checksHref}
-        className="shrink-0 px-3 py-1.5 rounded-lg border border-[var(--alpha-white-10)] bg-transparent font-mono text-xs text-[var(--gray-300)] hover:bg-[var(--alpha-white-5)] no-underline"
-      >
-        Open Checks
-      </Link>
+      <div className="flex items-center gap-2 shrink-0">
+        <Link
+          href={checksHref}
+          className="px-3 py-1.5 rounded-lg border border-[var(--alpha-white-10)] bg-transparent font-mono text-xs text-[var(--gray-300)] hover:bg-[var(--alpha-white-5)] no-underline"
+        >
+          Open Checks
+        </Link>
+        <button
+          onClick={() => setDismissed(true)}
+          className="p-1 rounded-md text-[var(--gray-400)] hover:text-[var(--gray-200)] hover:bg-[var(--alpha-white-5)] transition-colors cursor-pointer"
+          aria-label="Dismiss banner"
+        >
+          <X size={14} />
+        </button>
+      </div>
     </div>
   );
 }

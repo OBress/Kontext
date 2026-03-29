@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { TaskType } from "@google/generative-ai";
+
 import { NextResponse } from "next/server";
 import { createAdminClient, getAuthenticatedUser } from "@/lib/api/auth";
 import { getApiErrorPayload, handleApiError, ApiError } from "@/lib/api/errors";
@@ -218,7 +218,7 @@ export async function POST(request: Request) {
           const embeddings = await generateEmbeddings(
             apiKey,
             preparedChunks.map((chunk) => chunk.content),
-            TaskType.RETRIEVAL_DOCUMENT,
+            "RETRIEVAL_DOCUMENT",
             {
               onBatchComplete: (completed, total) => {
                 send({

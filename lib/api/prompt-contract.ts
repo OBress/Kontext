@@ -1,4 +1,4 @@
-import type { GenerationConfig } from "@google/generative-ai";
+import type { GenerateContentConfig } from "@google/genai";
 
 export type PromptTaskKind =
   | "repo_instruction_synthesizer"
@@ -62,7 +62,7 @@ export const PROMPT_GENERATION_CONFIGS = {
     topP: 0.8,
     maxOutputTokens: 768,
   },
-} satisfies Record<string, GenerationConfig>;
+} satisfies Record<string, Partial<GenerateContentConfig>>;
 
 const TASK_DESCRIPTIONS: Record<PromptTaskKind, string> = {
   repo_instruction_synthesizer:

@@ -178,8 +178,17 @@ export default function RepoOverviewPage() {
           />
         )}
 
-        {/* Ingestion Status Card */}
+        {/* Combined Sync + Ingestion Status Card */}
         <GlowCard glowColor="green" className="p-5 md:col-span-2 lg:col-span-1">
+          {/* Sync Status Section */}
+          {repo?.indexed && (
+            <>
+              <SyncStatusCard embedded />
+              <div className="border-t border-[var(--alpha-white-8)] my-4" />
+            </>
+          )}
+
+          {/* Ingestion Status Section */}
           <div className="flex items-center gap-2 mb-3">
             <Database size={16} className="text-[var(--accent-green)]" />
             <h3 className="font-mono text-sm font-medium text-[var(--gray-200)] m-0">
@@ -238,7 +247,7 @@ export default function RepoOverviewPage() {
           href={`${basePath}/graph`}
           icon={Network}
           label="Architecture"
-          description="3D dependency visualization"
+          description="2D dependency visualization"
           color="var(--accent-muted)"
           disabled={!repo?.indexed}
         />
@@ -274,13 +283,6 @@ export default function RepoOverviewPage() {
           color="var(--accent-green)"
         />
       </div>
-
-      {/* Sync Status — shown after indexing */}
-      {repo?.indexed && (
-        <div className="max-w-xl">
-          <SyncStatusCard />
-        </div>
-      )}
     </div>
   );
 }

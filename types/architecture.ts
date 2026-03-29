@@ -90,10 +90,26 @@ export interface ArchitectureTrace {
   nodeIds: string[];
   edgeIds: string[];
   aliases?: string[];
+  steps: ArchitectureTraceStep[];
+}
+
+export interface ArchitectureTraceStep {
+  id: string;
+  kind: "node" | "edge";
+  refId: string;
+  label: string;
+  description: string;
+}
+
+export interface ArchitectureCodeMetadata {
+  sharedGroupId?: string | null;
+  moduleFileOwners: Record<string, string[]>;
+  fileOwners: Record<string, string[]>;
+  sharedFiles: string[];
 }
 
 export interface ArchitectureBundle {
-  schemaVersion: 2;
+  schemaVersion: 3;
   summary: string;
   generatedAt: string;
   sourceSha: string | null;
@@ -102,12 +118,20 @@ export interface ArchitectureBundle {
   edgeIndex: Record<string, ArchitectureEdgeIndexEntry>;
   aliases: Record<string, string[]>;
   traces: ArchitectureTrace[];
+  codeMetadata?: ArchitectureCodeMetadata;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+export function getArchitectureSchemaVersion(value: unknown): number | null {
+  if (!isRecord(value)) return null;
+  return typeof value.schemaVersion === "number" ? value.schemaVersion : null;
 }
 
 export function isArchitectureBundle(value: unknown): value is ArchitectureBundle {
-  if (!value || typeof value !== "object") return false;
-  const record = value as Record<string, unknown>;
-  return record.schemaVersion === 2 && !!record.views;
+  return getArchitectureSchemaVersion(value) === 3 && isRecord(value) && !!value.views;
 }
 
 export function getArchitectureView(
@@ -128,46 +152,11 @@ export function getArchitectureView(
 }
 
 export function toArchitectureBundle(
-  value: ArchitectureAnalysis | ArchitectureBundle | null | undefined,
-  sourceSha: string | null = null,
-  generatedAt?: string | null
+  value: ArchitectureAnalysis | ArchitectureBundle | null | undefined
 ): ArchitectureBundle | null {
   if (!value) return null;
   if (isArchitectureBundle(value)) return value;
-
-  const baseView: ArchitectureView = {
-    ...value,
-    id: "system",
-    label: "System",
-    defaultExpanded: [],
-  };
-
-  return {
-    schemaVersion: 2,
-    summary: value.summary,
-    generatedAt: generatedAt || new Date().toISOString(),
-    sourceSha,
-    views: {
-      overview: {
-        ...baseView,
-        id: "overview",
-        label: "Overview",
-      },
-      system: baseView,
-      code: {
-        ...baseView,
-        id: "code",
-        label: "Code",
-        defaultExpanded: value.components
-          .filter((component) => component.children && component.children.length > 0)
-          .map((component) => component.id),
-      },
-    },
-    nodeIndex: {},
-    edgeIndex: {},
-    aliases: {},
-    traces: [],
-  };
+  return null;
 }
 
 export function findArchitectureComponent(

@@ -6,6 +6,7 @@ import { validateRepoFullName } from "@/lib/api/validate";
 import { buildGraph } from "@/lib/api/graph-builder";
 import {
   getArchitectureView,
+  getArchitectureSchemaVersion,
   toArchitectureBundle,
 } from "@/types/architecture";
 
@@ -52,17 +53,24 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error;
 
-    const architectureBundle = toArchitectureBundle(
-      repoData?.architecture_analysis || null,
-      repoData?.architecture_for_sha || repoData?.last_synced_sha || null,
-      repoData?.architecture_analyzed_at || null
-    );
+    const rawArchitecture = repoData?.architecture_analysis || null;
+    const architectureBundle = toArchitectureBundle(rawArchitecture);
+    const schemaVersion = getArchitectureSchemaVersion(rawArchitecture);
+    const hasLegacyBundle = !!rawArchitecture && schemaVersion !== null && schemaVersion < 3;
 
-    const architectureStatus = repoData?.architecture_status || (architectureBundle ? "ready" : "missing");
+    const architectureStatus =
+      hasLegacyBundle
+        ? "stale"
+        : repoData?.architecture_status || (architectureBundle ? "ready" : "missing");
     const architectureForSha = repoData?.architecture_for_sha || architectureBundle?.sourceSha || null;
     const isStale =
+      hasLegacyBundle ||
       architectureStatus === "stale" ||
       (!!repoData?.last_synced_sha && architectureForSha !== repoData.last_synced_sha);
+    const architectureError =
+      hasLegacyBundle
+        ? "Architecture map is on an older schema and needs to be regenerated."
+        : repoData?.architecture_error || null;
 
     if (!files || files.length === 0) {
       return NextResponse.json({
@@ -72,7 +80,7 @@ export async function GET(request: NextRequest) {
         architectureBundle,
         architectureStatus,
         architectureForSha,
-        architectureError: repoData?.architecture_error || null,
+        architectureError,
         analyzedAt: repoData?.architecture_analyzed_at || null,
         isStale,
         message: "No file data available. Index the repository first.",
@@ -87,7 +95,7 @@ export async function GET(request: NextRequest) {
       architectureBundle,
       architectureStatus,
       architectureForSha,
-      architectureError: repoData?.architecture_error || null,
+      architectureError,
       analyzedAt: repoData?.architecture_analyzed_at || null,
       isStale,
     });

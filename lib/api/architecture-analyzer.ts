@@ -1,5 +1,5 @@
-import type { ResponseSchema } from "@google/generative-ai";
-import { SchemaType } from "@google/generative-ai";
+import type { Schema } from "@google/genai";
+import { Type } from "@google/genai";
 import type {
   ArchConnectionType,
   ArchComponentType,
@@ -56,8 +56,8 @@ function isArchConnectionType(value: unknown): value is ArchConnectionType {
   );
 }
 
-const ARCH_COMPONENT_TYPE_SCHEMA: ResponseSchema = {
-  type: SchemaType.STRING,
+const ARCH_COMPONENT_TYPE_SCHEMA: Schema = {
+  type: Type.STRING,
   format: "enum",
   enum: [
     "page",
@@ -71,8 +71,8 @@ const ARCH_COMPONENT_TYPE_SCHEMA: ResponseSchema = {
   ],
 };
 
-const ARCH_CONNECTION_TYPE_SCHEMA: ResponseSchema = {
-  type: SchemaType.STRING,
+const ARCH_CONNECTION_TYPE_SCHEMA: Schema = {
+  type: Type.STRING,
   format: "enum",
   enum: [
     "api_call",
@@ -84,70 +84,70 @@ const ARCH_CONNECTION_TYPE_SCHEMA: ResponseSchema = {
   ],
 };
 
-const ARCH_CHILD_SCHEMA: ResponseSchema = {
-  type: SchemaType.OBJECT,
+const ARCH_CHILD_SCHEMA: Schema = {
+  type: Type.OBJECT,
   properties: {
-    id: { type: SchemaType.STRING },
-    label: { type: SchemaType.STRING },
-    description: { type: SchemaType.STRING },
+    id: { type: Type.STRING },
+    label: { type: Type.STRING },
+    description: { type: Type.STRING },
     type: ARCH_COMPONENT_TYPE_SCHEMA,
     files: {
-      type: SchemaType.ARRAY,
-      items: { type: SchemaType.STRING },
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
     },
   },
   required: ["id", "label", "description", "type", "files"],
 };
 
-const ARCH_COMPONENT_SCHEMA: ResponseSchema = {
-  type: SchemaType.OBJECT,
+const ARCH_COMPONENT_SCHEMA: Schema = {
+  type: Type.OBJECT,
   properties: {
-    id: { type: SchemaType.STRING },
-    label: { type: SchemaType.STRING },
-    description: { type: SchemaType.STRING },
+    id: { type: Type.STRING },
+    label: { type: Type.STRING },
+    description: { type: Type.STRING },
     type: ARCH_COMPONENT_TYPE_SCHEMA,
     files: {
-      type: SchemaType.ARRAY,
-      items: { type: SchemaType.STRING },
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
     },
     children: {
-      type: SchemaType.ARRAY,
+      type: Type.ARRAY,
       items: ARCH_CHILD_SCHEMA,
     },
   },
   required: ["id", "label", "description", "type", "files"],
 };
 
-const ARCH_CONNECTION_SCHEMA: ResponseSchema = {
-  type: SchemaType.OBJECT,
+const ARCH_CONNECTION_SCHEMA: Schema = {
+  type: Type.OBJECT,
   properties: {
-    id: { type: SchemaType.STRING },
-    source: { type: SchemaType.STRING },
-    target: { type: SchemaType.STRING },
-    label: { type: SchemaType.STRING },
-    description: { type: SchemaType.STRING },
+    id: { type: Type.STRING },
+    source: { type: Type.STRING },
+    target: { type: Type.STRING },
+    label: { type: Type.STRING },
+    description: { type: Type.STRING },
     type: ARCH_CONNECTION_TYPE_SCHEMA,
   },
   required: ["id", "source", "target", "label", "description", "type"],
 };
 
-const ARCHITECTURE_RESPONSE_SCHEMA: ResponseSchema = {
-  type: SchemaType.OBJECT,
+const ARCHITECTURE_RESPONSE_SCHEMA: Schema = {
+  type: Type.OBJECT,
   properties: {
-    summary: { type: SchemaType.STRING },
+    summary: { type: Type.STRING },
     components: {
-      type: SchemaType.ARRAY,
-      minItems: 3,
-      maxItems: 10,
+      type: Type.ARRAY,
+      minItems: "3",
+      maxItems: "10",
       items: ARCH_COMPONENT_SCHEMA,
     },
     connections: {
-      type: SchemaType.ARRAY,
+      type: Type.ARRAY,
       items: ARCH_CONNECTION_SCHEMA,
     },
     unassignedFiles: {
-      type: SchemaType.ARRAY,
-      items: { type: SchemaType.STRING },
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
     },
   },
   required: ["summary", "components", "connections"],

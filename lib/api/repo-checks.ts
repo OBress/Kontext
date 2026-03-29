@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
-import type { ResponseSchema } from "@google/generative-ai";
-import { SchemaType } from "@google/generative-ai";
+import type { Schema } from "@google/genai";
+import { Type } from "@google/genai";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "./auth";
 import { resolveAiKey } from "./ai-key";
@@ -56,6 +56,9 @@ export interface RepoHealthSummary {
   criticalCount: number;
   highCount: number;
   resolvedRecently: number;
+  currentHeadSha: string | null;
+  latestCompletedHeadSha: string | null;
+  isCurrent: boolean;
   latestRun: {
     id: number;
     status: string;
@@ -221,50 +224,50 @@ function getLanePromptLabel(checkType: RepoCheckType) {
   }
 }
 
-const CHECK_FINDING_SCHEMA: ResponseSchema = {
-  type: SchemaType.OBJECT,
+const CHECK_FINDING_SCHEMA: Schema = {
+  type: Type.OBJECT,
   properties: {
-    fingerprint_key: { type: SchemaType.STRING },
-    title: { type: SchemaType.STRING },
-    summary: { type: SchemaType.STRING },
+    fingerprint_key: { type: Type.STRING },
+    title: { type: Type.STRING },
+    summary: { type: Type.STRING },
     severity: {
-      type: SchemaType.STRING,
+      type: Type.STRING,
       format: "enum",
       enum: ["low", "medium", "high", "critical"],
     },
-    confidence: { type: SchemaType.NUMBER },
-    category: { type: SchemaType.STRING },
-    file_path: { type: SchemaType.STRING },
-    symbol: { type: SchemaType.STRING },
-    evidence: { type: SchemaType.STRING },
-    recommendation: { type: SchemaType.STRING },
+    confidence: { type: Type.NUMBER },
+    category: { type: Type.STRING },
+    file_path: { type: Type.STRING },
+    symbol: { type: Type.STRING },
+    evidence: { type: Type.STRING },
+    recommendation: { type: Type.STRING },
     related_files: {
-      type: SchemaType.ARRAY,
-      items: { type: SchemaType.STRING },
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
     },
   },
   required: ["fingerprint_key", "title", "summary", "severity", "confidence"],
 };
 
-const CHECK_LANE_SCHEMA: ResponseSchema = {
-  type: SchemaType.OBJECT,
+const CHECK_LANE_SCHEMA: Schema = {
+  type: Type.OBJECT,
   properties: {
-    summary: { type: SchemaType.STRING },
+    summary: { type: Type.STRING },
     findings: {
-      type: SchemaType.ARRAY,
+      type: Type.ARRAY,
       items: CHECK_FINDING_SCHEMA,
-      maxItems: 5,
+      maxItems: "5",
     },
   },
   required: ["summary", "findings"],
 };
 
-const REPO_CHECK_RESPONSE_SCHEMA: ResponseSchema = {
-  type: SchemaType.OBJECT,
+const REPO_CHECK_RESPONSE_SCHEMA: Schema = {
+  type: Type.OBJECT,
   properties: {
-    overall_summary: { type: SchemaType.STRING },
+    overall_summary: { type: Type.STRING },
     checks: {
-      type: SchemaType.OBJECT,
+      type: Type.OBJECT,
       properties: {
         security: CHECK_LANE_SCHEMA,
         optimization: CHECK_LANE_SCHEMA,
@@ -294,6 +297,27 @@ export function buildRepoCheckSystemInstruction(): string {
       "Recommendations must be specific enough that an engineer knows what to inspect or change next.",
     ],
   });
+}
+
+export function deriveRepoHealthFreshness(params: {
+  currentHeadSha: string | null;
+  latestCompletedHeadSha: string | null;
+}) {
+  const { currentHeadSha, latestCompletedHeadSha } = params;
+
+  if (!currentHeadSha || !latestCompletedHeadSha) {
+    return {
+      currentHeadSha,
+      latestCompletedHeadSha,
+      isCurrent: false,
+    };
+  }
+
+  return {
+    currentHeadSha,
+    latestCompletedHeadSha,
+    isCurrent: currentHeadSha === latestCompletedHeadSha,
+  };
 }
 
 function normalizeRepoCheckResponse(value: unknown): RepoCheckModelResponse {
@@ -793,6 +817,13 @@ export async function getRepoHealthSummary(
   userId: string,
   repoFullName: string
 ): Promise<RepoHealthSummary> {
+  const { data: repo } = await supabase
+    .from("repos")
+    .select("last_synced_sha")
+    .eq("user_id", userId)
+    .eq("full_name", repoFullName)
+    .maybeSingle();
+
   const { data: findings } = await supabase
     .from("repo_check_findings")
     .select("check_type, severity, status, transition_state")
@@ -843,11 +874,29 @@ export async function getRepoHealthSummary(
     .limit(1)
     .maybeSingle();
 
+  const { data: latestCompletedRun } = await supabase
+    .from("repo_check_runs")
+    .select("head_sha")
+    .eq("user_id", userId)
+    .eq("repo_full_name", repoFullName)
+    .eq("status", "completed")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const freshness = deriveRepoHealthFreshness({
+    currentHeadSha: repo?.last_synced_sha || null,
+    latestCompletedHeadSha: latestCompletedRun?.head_sha || null,
+  });
+
   return {
     openCount,
     criticalCount,
     highCount,
     resolvedRecently,
+    currentHeadSha: freshness.currentHeadSha,
+    latestCompletedHeadSha: freshness.latestCompletedHeadSha,
+    isCurrent: freshness.isCurrent,
     latestRun: (latestRun as RepoCheckRunRow | null) || null,
     byType,
   };

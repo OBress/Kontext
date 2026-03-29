@@ -49,11 +49,15 @@ function ArchitectureNodeComponent({ id, data, selected }: NodeProps) {
     toggleGroup,
     highlightedNodeIds,
     dimUnfocused,
+    activeSimulation,
   } = useGraphStore();
   const isCollapsed = collapsedNodes.has(id);
   const color = ARCH_TYPE_COLORS[nodeData.componentType] || "#8B949E";
   const Icon = TYPE_ICON_MAP[nodeData.componentType] || Package;
   const isHighlighted = highlightedNodeIds.includes(id);
+  const isSimulationActive =
+    activeSimulation?.steps[activeSimulation.activeStepIndex]?.kind === "node" &&
+    activeSimulation.steps[activeSimulation.activeStepIndex]?.refId === id;
   const isDimmed = dimUnfocused && highlightedNodeIds.length > 0 && !isHighlighted;
 
   const handleHeaderClick = (e: React.MouseEvent) => {
@@ -72,12 +76,13 @@ function ArchitectureNodeComponent({ id, data, selected }: NodeProps) {
   return (
     <div
       className={`arch-node ${selected ? "arch-node--selected" : ""} ${
-        isHighlighted ? "arch-node--highlighted" : ""
+        isHighlighted || isSimulationActive ? "arch-node--highlighted" : ""
       }`}
       style={{
-        borderColor: selected || isHighlighted ? color : "var(--alpha-white-10)",
+        borderColor:
+          selected || isHighlighted || isSimulationActive ? color : "var(--alpha-white-10)",
         boxShadow:
-          selected || isHighlighted ? `0 0 20px ${color}30` : undefined,
+          selected || isHighlighted || isSimulationActive ? `0 0 20px ${color}30` : undefined,
         opacity: isDimmed ? 0.28 : 1,
       }}
     >

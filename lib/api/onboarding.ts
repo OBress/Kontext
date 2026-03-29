@@ -1,5 +1,5 @@
-import type { ResponseSchema } from "@google/generative-ai";
-import { SchemaType } from "@google/generative-ai";
+import type { Schema } from "@google/genai";
+import { Type } from "@google/genai";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveAiKey } from "./ai-key";
 import { generateStructuredJson } from "./embeddings";
@@ -825,55 +825,55 @@ export async function createOnboardingAssignmentForInvite(params: {
   }
 }
 
-const ONBOARDING_STEP_TYPE_SCHEMA: ResponseSchema = {
-  type: SchemaType.STRING,
+const ONBOARDING_STEP_TYPE_SCHEMA: Schema = {
+  type: Type.STRING,
   format: "enum",
   enum: [...ONBOARDING_STEP_TYPES],
 };
 
-const ONBOARDING_RESPONSE_SCHEMA: ResponseSchema = {
-  type: SchemaType.OBJECT,
+const ONBOARDING_RESPONSE_SCHEMA: Schema = {
+  type: Type.OBJECT,
   properties: {
     title: {
-      type: SchemaType.STRING,
+      type: Type.STRING,
     },
     description: {
-      type: SchemaType.STRING,
+      type: Type.STRING,
     },
     steps: {
-      type: SchemaType.ARRAY,
-      minItems: 5,
-      maxItems: 7,
+      type: Type.ARRAY,
+      minItems: "5",
+      maxItems: "7",
       items: {
-        type: SchemaType.OBJECT,
+        type: Type.OBJECT,
         properties: {
           step_type: ONBOARDING_STEP_TYPE_SCHEMA,
           title: {
-            type: SchemaType.STRING,
+            type: Type.STRING,
           },
           description: {
-            type: SchemaType.STRING,
+            type: Type.STRING,
           },
           content: {
-            type: SchemaType.STRING,
+            type: Type.STRING,
           },
           quiz_payload: {
-            type: SchemaType.OBJECT,
+            type: Type.OBJECT,
             properties: {
               question: {
-                type: SchemaType.STRING,
+                type: Type.STRING,
               },
               options: {
-                type: SchemaType.ARRAY,
+                type: Type.ARRAY,
                 items: {
-                  type: SchemaType.STRING,
+                  type: Type.STRING,
                 },
               },
               correct_option_index: {
-                type: SchemaType.INTEGER,
+                type: Type.INTEGER,
               },
               explanation: {
-                type: SchemaType.STRING,
+                type: Type.STRING,
               },
             },
           },

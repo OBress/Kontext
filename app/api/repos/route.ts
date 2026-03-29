@@ -11,6 +11,32 @@ import { resolveRepoGitHubToken } from "@/lib/api/repo-auth";
 
 const WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || "";
 
+function serializeRepoRecord(r: Record<string, unknown>) {
+  return {
+    id: r.github_id as number,
+    full_name: r.full_name as string,
+    name: r.name as string,
+    owner: r.owner as string,
+    description: (r.description as string | null) || null,
+    language: (r.language as string | null) || null,
+    stargazers_count: (r.stargazers_count as number) || 0,
+    forks_count: (r.forks_count as number) || 0,
+    updated_at: r.updated_at as string,
+    indexed: Boolean(r.indexed),
+    indexing: Boolean(r.indexing),
+    chunk_count: (r.chunk_count as number) || 0,
+    last_indexed_at: (r.last_indexed_at as string | null) || null,
+    last_synced_sha: (r.last_synced_sha as string | null) || null,
+    watched_branch: (r.watched_branch as string | null) || null,
+    default_branch: (r.default_branch as string | null) || null,
+    auto_sync_enabled: Boolean(r.auto_sync_enabled),
+    understanding_tier: (r.understanding_tier as number | null) || 2,
+    webhook_id: (r.webhook_id as number | null) || null,
+    sync_blocked_reason: (r.sync_blocked_reason as string | null) || null,
+    pending_sync_head_sha: (r.pending_sync_head_sha as string | null) || null,
+  };
+}
+
 /**
  * GET /api/repos — Returns repos based on source:
  *   default:          Only repos the user has "added" (exist in Supabase repos table)
@@ -67,36 +93,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ repos });
     }
 
+    const repoParam = request.nextUrl.searchParams.get("repo");
+
     // Default: return only added repos from Supabase
-    const { data: dbRepos } = await supabase
+    let query = supabase
       .from("repos")
       .select("*")
       .eq("user_id", user.id)
       .order("updated_at", { ascending: false });
 
-    const repos = (dbRepos || []).map((r) => ({
-      id: r.github_id,
-      full_name: r.full_name,
-      name: r.name,
-      owner: r.owner,
-      description: r.description,
-      language: r.language,
-      stargazers_count: r.stargazers_count,
-      forks_count: r.forks_count,
-      updated_at: r.updated_at,
-      indexed: r.indexed,
-      indexing: r.indexing,
-      chunk_count: r.chunk_count,
-      last_indexed_at: r.last_indexed_at,
-      last_synced_sha: r.last_synced_sha,
-      watched_branch: r.watched_branch,
-      default_branch: r.default_branch,
-      auto_sync_enabled: r.auto_sync_enabled,
-      understanding_tier: r.understanding_tier,
-      webhook_id: r.webhook_id,
-      sync_blocked_reason: r.sync_blocked_reason,
-      pending_sync_head_sha: r.pending_sync_head_sha,
-    }));
+    if (repoParam) {
+      query = query.eq("full_name", validateRepoFullName(repoParam));
+    }
+
+    const { data: dbRepos } = await query;
+    const repos = (dbRepos || []).map((r) => serializeRepoRecord(r as Record<string, unknown>));
+
+    if (repoParam) {
+      const repo = repos[0];
+      if (!repo) {
+        return NextResponse.json({ error: "Repo not found" }, { status: 404 });
+      }
+      return NextResponse.json({ repo });
+    }
 
     return NextResponse.json({ repos });
   } catch (error) {
@@ -225,4 +244,3 @@ export async function POST(request: Request) {
     return handleApiError(error);
   }
 }
-

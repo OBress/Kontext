@@ -204,7 +204,6 @@ export function AddRepoModal() {
             default_branch: repo.default_branch || "main",
             custom_access_token: accessTokenRef.current.trim() || undefined,
             // ── New config fields ──
-            understanding_tier: config.understanding_tier,
             auto_sync_enabled: config.auto_sync_enabled,
             watched_branch: config.watched_branch || repo.default_branch || "main",
           }),
@@ -228,7 +227,6 @@ export function AddRepoModal() {
           chunk_count: 0,
           sync_blocked_reason: null,
           pending_sync_head_sha: null,
-          understanding_tier: config.understanding_tier,
           auto_sync_enabled: config.auto_sync_enabled,
         });
 

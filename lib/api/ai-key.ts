@@ -1,27 +1,30 @@
 import { createAdminClient } from "./auth";
-import { encryptToken, decryptToken } from "./crypto";
 
 /**
- * Store the user's Google AI API key (encrypted) on the server.
- * This enables background processes (webhooks) to generate AI summaries
- * without the user being online.
+ * Store the user's Google AI API key on the server.
+ * Stored as plaintext in user_tokens for reliable retrieval
+ * by background processes (webhooks, polling syncs).
  */
 export async function storeAiKey(
   userId: string,
   plainKey: string
 ): Promise<void> {
   const adminDb = await createAdminClient();
-  const { ciphertext, iv, tag } = encryptToken(plainKey);
 
-  await adminDb
+  const { error } = await adminDb
     .from("user_tokens")
     .update({
-      encrypted_ai_key: ciphertext,
-      ai_key_iv: iv,
-      ai_key_tag: tag,
+      google_ai_key: plainKey,
       updated_at: new Date().toISOString(),
     })
     .eq("user_id", userId);
+
+  if (error) {
+    console.error("[ai-key] Failed to store AI key:", error.message);
+    throw new Error("Failed to store AI key");
+  }
+
+  console.log(`[ai-key] Stored AI key for user ${userId.slice(0, 8)}...`);
 }
 
 /**
@@ -31,26 +34,21 @@ export async function storeAiKey(
 export async function resolveAiKey(userId: string): Promise<string | null> {
   const adminDb = await createAdminClient();
 
-  const { data } = await adminDb
+  const { data, error } = await adminDb
     .from("user_tokens")
-    .select("encrypted_ai_key, ai_key_iv, ai_key_tag")
+    .select("google_ai_key")
     .eq("user_id", userId)
     .single();
 
-  if (!data?.encrypted_ai_key || !data?.ai_key_iv || !data?.ai_key_tag) {
+  if (error || !data) {
+    console.warn(
+      `[ai-key] No user_tokens row for user ${userId.slice(0, 8)}...:`,
+      error?.message || "no data"
+    );
     return null;
   }
 
-  try {
-    return decryptToken({
-      ciphertext: data.encrypted_ai_key,
-      iv: data.ai_key_iv,
-      tag: data.ai_key_tag,
-    });
-  } catch {
-    console.error("[ai-key] Failed to decrypt AI key for user:", userId);
-    return null;
-  }
+  return data.google_ai_key || null;
 }
 
 /**
@@ -62,9 +60,7 @@ export async function removeAiKey(userId: string): Promise<void> {
   await adminDb
     .from("user_tokens")
     .update({
-      encrypted_ai_key: null,
-      ai_key_iv: null,
-      ai_key_tag: null,
+      google_ai_key: null,
       updated_at: new Date().toISOString(),
     })
     .eq("user_id", userId);

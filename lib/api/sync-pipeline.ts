@@ -8,7 +8,7 @@
  */
 
 import { createHash } from "crypto";
-import { TaskType } from "@google/generative-ai";
+
 import { createAdminClient } from "@/lib/api/auth";
 import { resolveAiKey } from "@/lib/api/ai-key";
 import { refreshArchitectureBundle } from "@/lib/api/architecture-refresh";
@@ -18,7 +18,6 @@ import { chunkFile } from "@/lib/api/chunker";
 import { generateEmbeddings, generateFileSummary } from "@/lib/api/embeddings";
 import {
   fetchChangedFiles,
-  fetchCommitsSince,
   fetchFileContent,
   fetchLatestCommit,
   shouldIndexFile,
@@ -26,6 +25,13 @@ import {
 import { extractImports } from "@/lib/api/graph-builder";
 import { getAiBlockedStatus } from "@/lib/api/gemini";
 import { runRepoChecks } from "@/lib/api/repo-checks";
+import {
+  completeRepoJob,
+  createRepoJob,
+  failRepoJob,
+  updateRepoJob,
+  type RepoJobTrigger,
+} from "@/lib/api/repo-jobs";
 import { resolveRepoGitHubToken } from "@/lib/api/repo-auth";
 import { summarizeAndEmbedCommits } from "@/lib/api/timeline-ai";
 import { enqueueAiTask } from "@/lib/api/sync-queue";
@@ -48,7 +54,9 @@ export interface SyncPipelineParams {
     pending_sync_head_sha: string | null;
   };
   targetHeadSHA: string | null;
+  usedPendingHead?: boolean;
   isWebhookTriggered: boolean;
+  syncTrigger?: RepoJobTrigger;
   onProgress?: (data: Record<string, unknown>) => void;
 }
 
@@ -58,6 +66,9 @@ export interface SyncPipelineResult {
   filesChanged: number;
   commitsTracked: number;
   lastSyncedSha: string | null;
+  baseSha: string;
+  headSha: string | null;
+  usedPendingHead: boolean;
   pendingHeadSha?: string | null;
   newChunkCount?: number;
 }
@@ -78,6 +89,27 @@ interface PreparedChunk {
   content: string;
   token_count: number;
   metadata: Record<string, unknown>;
+}
+
+interface SyncProgressContext {
+  baseSha: string;
+  headSha: string | null;
+  usedPendingHead: boolean;
+  trigger: RepoJobTrigger;
+}
+
+interface SyncJobMetadata extends Record<string, unknown> {
+  baseSha: string;
+  headSha: string | null;
+  usedPendingHead: boolean;
+  sourceTrigger: RepoJobTrigger;
+  branch: string;
+  phase: string;
+  filesChanged: number;
+  commitsTracked: number;
+  newChunkCount: number;
+  pendingHeadSha?: string | null;
+  blockedReason?: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -121,6 +153,34 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+export function resolveSyncHeadTarget(params: {
+  explicitHeadSHA?: string | null;
+  syncBlockedReason?: string | null;
+  pendingHeadSHA?: string | null;
+}): { targetHeadSHA: string | null; usedPendingHead: boolean } {
+  if (params.explicitHeadSHA) {
+    return {
+      targetHeadSHA: params.explicitHeadSHA,
+      usedPendingHead: false,
+    };
+  }
+
+  if (
+    params.syncBlockedReason === "pending_user_key_sync" &&
+    params.pendingHeadSHA
+  ) {
+    return {
+      targetHeadSHA: params.pendingHeadSHA,
+      usedPendingHead: true,
+    };
+  }
+
+  return {
+    targetHeadSHA: null,
+    usedPendingHead: false,
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Core Pipeline                                                      */
 /* ------------------------------------------------------------------ */
@@ -146,18 +206,60 @@ export async function runSyncPipeline(
   const understandingTier = repo.understanding_tier || 2;
   const adminDb = await createAdminClient();
   const send = params.onProgress || (() => {});
+  const baseSha = repo.last_synced_sha;
+  const syncTrigger =
+    params.syncTrigger || (isWebhookTriggered ? "webhook" : "manual");
 
   let targetHeadSHA = params.targetHeadSHA;
+  const usedPendingHead = params.usedPendingHead === true;
+  let syncJobId: number | null = null;
+  let syncJobMetadata: SyncJobMetadata = {
+    baseSha,
+    headSha: targetHeadSHA,
+    usedPendingHead,
+    sourceTrigger: syncTrigger,
+    branch,
+    phase: "checking",
+    filesChanged: 0,
+    commitsTracked: 0,
+    newChunkCount: 0,
+  };
+
+  const emit = (data: Record<string, unknown>) => {
+    const context: SyncProgressContext = {
+      baseSha,
+      headSha: targetHeadSHA,
+      usedPendingHead,
+      trigger: syncTrigger,
+    };
+    send({ ...context, ...data });
+  };
+
+  const updateSyncJobState = async (
+    updates: Parameters<typeof updateRepoJob>[2],
+    metadataPatch: Partial<SyncJobMetadata> = {}
+  ) => {
+    if (!syncJobId) return;
+    syncJobMetadata = {
+      ...syncJobMetadata,
+      headSha: targetHeadSHA,
+      ...metadataPatch,
+    };
+    await updateRepoJob(adminDb, syncJobId, {
+      ...updates,
+      metadata: syncJobMetadata,
+    });
+  };
 
   try {
-    send({ status: "checking", message: "Checking for changes..." });
+    emit({ status: "checking", message: "Checking for changes..." });
 
     if (!targetHeadSHA) {
       const latest = await fetchLatestCommit(effectiveToken, owner, name, branch);
       targetHeadSHA = latest.sha;
     }
 
-    if (targetHeadSHA === repo.last_synced_sha) {
+    if (targetHeadSHA === baseSha) {
       if (repo.sync_blocked_reason || repo.pending_sync_head_sha) {
         await adminDb
           .from("repos")
@@ -171,11 +273,29 @@ export async function runSyncPipeline(
         message: "Already up to date.",
         filesChanged: 0,
         commitsTracked: 0,
-        lastSyncedSha: repo.last_synced_sha,
+        lastSyncedSha: baseSha,
+        baseSha,
+        headSha: targetHeadSHA,
+        usedPendingHead,
       };
-      send({ ...result, status: "done" });
+      emit({ ...result, status: "done" });
       return result;
     }
+
+    const syncJob = await createRepoJob(adminDb, {
+      userId,
+      repoFullName,
+      jobType: "sync",
+      trigger: syncTrigger,
+      status: "running",
+      title: usedPendingHead ? "Replaying pending sync" : "Syncing repository",
+      progressPercent: 5,
+      metadata: {
+        ...syncJobMetadata,
+        headSha: targetHeadSHA,
+      },
+    });
+    syncJobId = syncJob.id;
 
     const activeApiKey = apiKey;
 
@@ -195,23 +315,49 @@ export async function runSyncPipeline(
           "A repository update is waiting for your Google AI key. Re-open Kontext with your key and run sync to refresh the index safely.",
         filesChanged: 0,
         commitsTracked: 0,
-        lastSyncedSha: repo.last_synced_sha,
+        lastSyncedSha: baseSha,
+        baseSha,
+        headSha: targetHeadSHA,
+        usedPendingHead,
         pendingHeadSha: targetHeadSHA,
       };
-      send({ ...result, status: "pending_user_key_sync" });
+      await updateSyncJobState(
+        {
+          status: "skipped",
+          progressPercent: 100,
+          resultSummary: result.message,
+        },
+        {
+          phase: "blocked",
+          pendingHeadSha: targetHeadSHA,
+          blockedReason: "pending_user_key_sync",
+        }
+      );
+      emit({ ...result, status: "pending_user_key_sync" });
       return result;
     }
 
     // Fetch changed files
-    send({ status: "fetching", message: "Fetching changed files..." });
+    await updateSyncJobState(
+      {
+        title: "Fetching changed files",
+        progressPercent: 15,
+      },
+      { phase: "fetching" }
+    );
+    emit({ status: "fetching", message: "Fetching changed files..." });
 
-    const { files: changedFiles } = await fetchChangedFiles(
+    const {
+      files: changedFiles,
+      commits: comparedCommits,
+    } = await fetchChangedFiles(
       effectiveToken,
       owner,
       name,
-      repo.last_synced_sha,
+      baseSha,
       targetHeadSHA
     );
+    const newCommits = comparedCommits.filter((commit) => commit.sha !== baseSha);
 
     const indexableFiles = changedFiles.filter(
       (file) =>
@@ -219,13 +365,24 @@ export async function runSyncPipeline(
         (file.previous_filename ? shouldIndexFile(file.previous_filename) : false)
     );
 
-    send({
+    await updateSyncJobState(
+      {
+        progressPercent: 25,
+      },
+      {
+        phase: "fetching",
+        filesChanged: indexableFiles.length,
+        commitsTracked: newCommits.length,
+      }
+    );
+    emit({
       status: "fetching",
       message: `Found ${indexableFiles.length} changed files`,
       filesChanged: indexableFiles.length,
+      commitsTracked: newCommits.length,
     });
 
-    const filesToRemove = Array.from(
+    let filesToRemove = Array.from(
       new Set(
         indexableFiles.flatMap((file) => {
           const paths = [file.filename];
@@ -240,11 +397,40 @@ export async function runSyncPipeline(
     const fileRecords: PreparedFileRecord[] = [];
 
     if (addedOrModified.length > 0) {
-      send({
+      // ── Content-hash dedup: skip files whose content hasn't actually changed ──
+      const existingHashMap = new Map<string, string>();
+      {
+        const { data: existingFiles } = await adminDb
+          .from("repo_files")
+          .select("file_path, content_hash")
+          .eq("user_id", userId)
+          .eq("repo_full_name", repoFullName)
+          .in(
+            "file_path",
+            addedOrModified.map((f) => f.filename)
+          );
+
+        if (existingFiles) {
+          for (const ef of existingFiles) {
+            if (ef.content_hash) existingHashMap.set(ef.file_path, ef.content_hash);
+          }
+        }
+      }
+
+      await updateSyncJobState(
+        {
+          title: "Preparing changed files",
+          progressPercent: 35,
+        },
+        { phase: "chunking" }
+      );
+      emit({
         status: "chunking",
         message: `Preparing ${addedOrModified.length} changed files...`,
       });
       let filesProcessed = 0;
+      let filesSkipped = 0;
+      const skippedPaths = new Set<string>();
       let chunksCreated = 0;
 
       const preparedResults = await mapWithConcurrency(
@@ -263,6 +449,24 @@ export async function runSyncPipeline(
           const nextChunks: PreparedChunk[] = [];
 
           if (content) {
+            const newHash = hashContent(content);
+            const existingHash = existingHashMap.get(file.filename);
+
+            // If content is byte-for-byte identical, skip re-embedding
+            if (existingHash && existingHash === newHash) {
+              filesProcessed += 1;
+              filesSkipped += 1;
+              skippedPaths.add(file.filename);
+              emit({
+                status: "chunking",
+                filesProcessed,
+                filesTotal: addedOrModified.length,
+                chunksCreated,
+                message: `Skipped ${file.filename} (unchanged content)`,
+              });
+              return { nextFileRecord: null, nextChunks: [] };
+            }
+
             const extension = file.filename.split(".").pop() || "";
             const lines = content.split("\n").length;
             const imports = extractImports(content);
@@ -273,7 +477,7 @@ export async function runSyncPipeline(
               extension,
               line_count: lines,
               size_bytes: content.length,
-              content_hash: hashContent(content),
+              content_hash: newHash,
               imports,
             };
 
@@ -301,7 +505,7 @@ export async function runSyncPipeline(
 
           filesProcessed += 1;
           chunksCreated += nextChunks.length;
-          send({
+          emit({
             status: "chunking",
             filesProcessed,
             filesTotal: addedOrModified.length,
@@ -312,6 +516,14 @@ export async function runSyncPipeline(
         }
       );
 
+      if (filesSkipped > 0) {
+        // Don't delete existing chunks for files whose content didn't change
+        filesToRemove = filesToRemove.filter((p) => !skippedPaths.has(p));
+        console.log(
+          `[sync-pipeline] Skipped ${filesSkipped}/${addedOrModified.length} files (content unchanged)`
+        );
+      }
+
       for (const result of preparedResults) {
         if (result.nextFileRecord) fileRecords.push(result.nextFileRecord);
         preparedChunks.push(...result.nextChunks);
@@ -321,19 +533,30 @@ export async function runSyncPipeline(
     // Embeddings
     let serializedChunks: Array<Record<string, unknown>> = [];
     if (preparedChunks.length > 0) {
-      send({
+      await updateSyncJobState(
+        {
+          title: "Embedding changed files",
+          progressPercent: 60,
+        },
+        { phase: "embedding" }
+      );
+      emit({
         status: "embedding",
-        message: `Embedding ${preparedChunks.length} chunks...`,
+        message: `Embedding ${preparedChunks.length} chunks from ${fileRecords.length} changed file${fileRecords.length === 1 ? "" : "s"}...`,
         chunksTotal: preparedChunks.length,
       });
 
       const embeddings = await generateEmbeddings(
         activeApiKey,
         preparedChunks.map((chunk) => chunk.content),
-        TaskType.RETRIEVAL_DOCUMENT,
+        "RETRIEVAL_DOCUMENT",
         {
           onBatchComplete: (completed, total) => {
-            send({ status: "embedding", chunksEmbedded: completed, chunksTotal: total });
+            emit({
+              status: "embedding",
+              chunksEmbedded: completed,
+              chunksTotal: total,
+            });
           },
         }
       );
@@ -342,7 +565,14 @@ export async function runSyncPipeline(
     }
 
     // Atomic promotion
-    send({ status: "finalizing", message: "Promoting changed files..." });
+    await updateSyncJobState(
+      {
+        title: "Promoting changed files",
+        progressPercent: 78,
+      },
+      { phase: "finalizing" }
+    );
+    emit({ status: "finalizing", message: "Promoting changed files..." });
 
     const promotedAt = new Date().toISOString();
     const { error: replaceError } = await adminDb.rpc("replace_repo_paths", {
@@ -361,14 +591,14 @@ export async function runSyncPipeline(
     if (replaceError) throw replaceError;
 
     // Timeline
-    send({ status: "timeline", message: "Updating development timeline..." });
-    const newCommits = await fetchCommitsSince(
-      effectiveToken,
-      owner,
-      name,
-      branch,
-      repo.last_synced_sha
+    await updateSyncJobState(
+      {
+        title: "Updating timeline",
+        progressPercent: 88,
+      },
+      { phase: "timeline" }
     );
+    emit({ status: "timeline", message: "Updating development timeline..." });
 
     let commitsTracked = 0;
 
@@ -401,7 +631,7 @@ export async function runSyncPipeline(
       }
 
       if (activeApiKey) {
-        send({
+        emit({
           status: "timeline",
           message: `Summarizing ${newCommits.length} commits...`,
         });
@@ -439,6 +669,7 @@ export async function runSyncPipeline(
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId)
       .eq("repo_full_name", repoFullName);
+    const newChunkCount = chunkCount || 0;
 
     // Activity log
     if (indexableFiles.length > 0 || newCommits.length > 0) {
@@ -455,6 +686,8 @@ export async function runSyncPipeline(
           files_changed: indexableFiles.length,
           commits_tracked: newCommits.length,
           webhook_triggered: isWebhookTriggered,
+          used_pending_head: usedPendingHead,
+          base_sha: baseSha,
         },
       });
     }
@@ -486,7 +719,7 @@ export async function runSyncPipeline(
             apiKey: activeApiKey,
             triggerMode: "after_sync",
             headSha: targetHeadSHA,
-            baseSha: repo.last_synced_sha,
+            baseSha,
             changedFiles: changedFiles.map((file) => ({
               filename: file.filename,
               status: file.status,
@@ -504,9 +737,27 @@ export async function runSyncPipeline(
       filesChanged: indexableFiles.length,
       commitsTracked,
       lastSyncedSha: targetHeadSHA,
-      newChunkCount: chunkCount || 0,
+      baseSha,
+      headSha: targetHeadSHA,
+      usedPendingHead,
+      newChunkCount,
     };
-    send({ ...result, status: "done" });
+    if (syncJobId) {
+      await completeRepoJob(
+        adminDb,
+        syncJobId,
+        result.message,
+        {
+          ...syncJobMetadata,
+          headSha: targetHeadSHA,
+          phase: "done",
+          filesChanged: indexableFiles.length,
+          commitsTracked,
+          newChunkCount,
+        }
+      );
+    }
+    emit({ ...result, status: "done" });
     return result;
   } catch (error: unknown) {
     const payload = getApiErrorPayload(error);
@@ -524,7 +775,22 @@ export async function runSyncPipeline(
     }
 
     const failureStatus = blockedStatus || "error";
-    send({
+    if (syncJobId) {
+      await failRepoJob(
+        adminDb,
+        syncJobId,
+        payload.message,
+        {
+          ...syncJobMetadata,
+          headSha: targetHeadSHA,
+          phase: failureStatus,
+          pendingHeadSha: targetHeadSHA,
+          blockedReason: blockedStatus || null,
+        }
+      );
+    }
+
+    emit({
       status: failureStatus,
       message: payload.message,
       error: payload,
@@ -536,7 +802,10 @@ export async function runSyncPipeline(
       message: payload.message,
       filesChanged: 0,
       commitsTracked: 0,
-      lastSyncedSha: repo.last_synced_sha,
+      lastSyncedSha: baseSha,
+      baseSha,
+      headSha: targetHeadSHA,
+      usedPendingHead,
       pendingHeadSha: targetHeadSHA,
     };
   }
@@ -631,7 +900,9 @@ export async function executeBackgroundSync(params: {
       pending_sync_head_sha: repo.pending_sync_head_sha,
     },
     targetHeadSHA: headSHA,
+    usedPendingHead: false,
     isWebhookTriggered: true,
+    syncTrigger: params.trigger === "poll" ? "schedule" : "webhook",
     onProgress: (data) => {
       console.log(
         `[sync-pipeline] ${repoFullName}: ${data.status}${data.message ? ` — ${data.message}` : ""}`

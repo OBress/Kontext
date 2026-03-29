@@ -99,7 +99,7 @@ export function buildGraph(files: FileData[]): {
 /**
  * Try to resolve an import path to a known file in the repo.
  */
-function resolveImport(
+export function resolveImport(
   importPath: string,
   currentFile: string,
   knownPaths: Set<string>

@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI, TaskType } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import { ApiError, type ApiErrorPayload } from "./errors";
 
 export const GEMINI_GENERATION_MODEL = "gemini-3.1-flash-lite-preview";
@@ -70,8 +70,15 @@ export function normalizeGeminiError(
   const providerStatus = getProviderStatus(message);
   const operationLabel = getOperationLabel(operation);
 
+  // Also check for .status on the error object (new SDK exposes this)
+  const errorStatus =
+    typeof (error as Record<string, unknown>)?.status === "number"
+      ? ((error as Record<string, unknown>).status as number)
+      : null;
+  const effectiveStatus = providerStatus ?? errorStatus;
+
   if (
-    providerStatus === 401 ||
+    effectiveStatus === 401 ||
     lower.includes("api key not valid") ||
     lower.includes("invalid api key") ||
     lower.includes("permission denied")
@@ -88,7 +95,7 @@ export function normalizeGeminiError(
   }
 
   if (
-    providerStatus === 404 ||
+    effectiveStatus === 404 ||
     (lower.includes("model") &&
       (lower.includes("not found") || lower.includes("unsupported") || lower.includes("unavailable")))
   ) {
@@ -104,7 +111,7 @@ export function normalizeGeminiError(
   }
 
   if (
-    providerStatus === 403 &&
+    effectiveStatus === 403 &&
     (lower.includes("billing") ||
       lower.includes("payment") ||
       lower.includes("cloud billing") ||
@@ -121,7 +128,7 @@ export function normalizeGeminiError(
     );
   }
 
-  if (providerStatus === 429) {
+  if (effectiveStatus === 429) {
     if (getRetryHint(message) && !lower.includes("quota")) {
       return new ApiError(
         503,
@@ -161,26 +168,25 @@ export async function delay(ms: number) {
 }
 
 export function createGeminiClient(apiKey: string) {
-  return new GoogleGenerativeAI(apiKey);
+  return new GoogleGenAI({ apiKey });
 }
 
 export async function runGeminiHealthCheck(
   apiKey: string
 ): Promise<GeminiHealthCheck> {
-  const client = createGeminiClient(apiKey);
-  const generationModel = client.getGenerativeModel({
-    model: GEMINI_GENERATION_MODEL,
-    systemInstruction: "Reply with the single token OK.",
-  });
-  const embeddingModel = client.getGenerativeModel({
-    model: GEMINI_EMBEDDING_MODEL,
-  });
+  const ai = createGeminiClient(apiKey);
 
   let generationError: ApiErrorPayload | null = null;
   let embeddingError: ApiErrorPayload | null = null;
 
   try {
-    await generationModel.generateContent("OK");
+    await ai.models.generateContent({
+      model: GEMINI_GENERATION_MODEL,
+      contents: "OK",
+      config: {
+        systemInstruction: "Reply with the single token OK.",
+      },
+    });
   } catch (error: unknown) {
     const normalized = normalizeGeminiError(error, "generation");
     generationError = {
@@ -191,13 +197,12 @@ export async function runGeminiHealthCheck(
   }
 
   try {
-    await embeddingModel.batchEmbedContents({
-      requests: [
-        {
-          content: { role: "user", parts: [{ text: "health check" }] },
-          taskType: TaskType.RETRIEVAL_QUERY,
-        },
-      ],
+    await ai.models.embedContent({
+      model: GEMINI_EMBEDDING_MODEL,
+      contents: "health check",
+      config: {
+        taskType: "RETRIEVAL_QUERY",
+      },
     });
   } catch (error: unknown) {
     const normalized = normalizeGeminiError(error, "embedding");

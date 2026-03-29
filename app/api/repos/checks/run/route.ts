@@ -25,7 +25,7 @@ export async function POST(request: Request) {
 
     const { data: repo } = await supabase
       .from("repos")
-      .select("full_name")
+      .select("full_name, last_synced_sha")
       .eq("user_id", user.id)
       .eq("full_name", repoFullName)
       .single();
@@ -36,6 +36,13 @@ export async function POST(request: Request) {
 
     const apiKey = request.headers.get("x-google-api-key");
 
+    // For manual runs, default headSha to the repo's last synced SHA
+    // so that freshness tracking correctly marks the run as current.
+    const headSha =
+      typeof body.head_sha === "string"
+        ? body.head_sha
+        : repo.last_synced_sha || null;
+
     const result = await runRepoChecks({
       userId: user.id,
       repoFullName,
@@ -43,7 +50,7 @@ export async function POST(request: Request) {
       triggerMode:
         typeof body.trigger_mode === "string" ? body.trigger_mode : "manual",
       requestedCheckTypes: body.requested_check_types,
-      headSha: typeof body.head_sha === "string" ? body.head_sha : null,
+      headSha,
       baseSha: typeof body.base_sha === "string" ? body.base_sha : null,
       changedFiles: Array.isArray(body.changed_files) ? body.changed_files : [],
     });

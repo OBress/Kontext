@@ -113,13 +113,13 @@ export default function HomePage() {
         {/* Always show the constellation hero */}
         <div className="-m-6 flex flex-col lg:flex-row items-center justify-center min-h-[calc(100vh-3rem)] gap-8 lg:gap-12 overflow-visible">
           {/* Left — text + CTA */}
-          <div className="flex flex-col justify-center items-start lg:w-[480px] shrink-0 text-left px-10 lg:pl-12 lg:pr-6">
+          <div className="flex flex-col justify-center items-start lg:w-[480px] shrink-0 text-left px-14 lg:pl-20 lg:pr-6">
             <h1 className="font-mono text-3xl md:text-5xl font-semibold text-gradient mb-4">
               Welcome to Kontext
             </h1>
             <p className="font-mono text-sm md:text-base text-[var(--gray-400)] max-w-lg mb-10 leading-relaxed">
               Add a repository to unlock AI-powered code intelligence,
-              3D architecture visualization, and team onboarding.
+              2D architecture visualization, and team onboarding.
             </p>
 
             <div className="flex items-center gap-3 mb-12">
@@ -160,7 +160,7 @@ export default function HomePage() {
               />
               <FeatureHint
                 icon={<GitBranch size={18} className="text-[var(--accent-muted)]" />}
-                title="3D Graph"
+                title="2D Graph"
                 description="Visualize architecture & dependencies"
               />
               <FeatureHint

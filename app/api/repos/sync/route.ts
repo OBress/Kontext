@@ -5,7 +5,7 @@ import { ApiError, handleApiError } from "@/lib/api/errors";
 import { resolveRepoGitHubToken } from "@/lib/api/repo-auth";
 import { validateApiKey, validateRepoFullName } from "@/lib/api/validate";
 import { isRepoSyncing } from "@/lib/api/sync-queue";
-import { runSyncPipeline } from "@/lib/api/sync-pipeline";
+import { resolveSyncHeadTarget, runSyncPipeline } from "@/lib/api/sync-pipeline";
 
 /**
  * POST /api/repos/sync - Incremental sync pipeline with SSE progress.
@@ -121,7 +121,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const targetHeadSHA: string | null = body.head_sha || null;
+    const {
+      targetHeadSHA,
+      usedPendingHead,
+    } = resolveSyncHeadTarget({
+      explicitHeadSHA: typeof body.head_sha === "string" ? body.head_sha : null,
+      syncBlockedReason: repo.sync_blocked_reason,
+      pendingHeadSHA: repo.pending_sync_head_sha,
+    });
     const encoder = new TextEncoder();
 
     const stream = new ReadableStream({
@@ -150,7 +157,9 @@ export async function POST(request: Request) {
             pending_sync_head_sha: repo.pending_sync_head_sha,
           },
           targetHeadSHA,
+          usedPendingHead,
           isWebhookTriggered,
+          syncTrigger: isWebhookTriggered ? "webhook" : "manual",
           onProgress: send,
         });
 

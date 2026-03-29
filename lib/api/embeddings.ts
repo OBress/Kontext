@@ -1,9 +1,7 @@
 import type {
-  GenerationConfig,
-  Part,
-  ResponseSchema,
-} from "@google/generative-ai";
-import { TaskType } from "@google/generative-ai";
+  GenerateContentConfig,
+  Schema,
+} from "@google/genai";
 import { ApiError } from "./errors";
 import {
   createGeminiClient,
@@ -26,12 +24,12 @@ interface EmbeddingOptions {
 
 export interface TextGenerationOptions {
   systemInstruction?: string;
-  generationConfig?: GenerationConfig;
+  generationConfig?: Partial<GenerateContentConfig>;
 }
 
 export interface StructuredJsonGenerationOptions<T>
   extends TextGenerationOptions {
-  responseSchema: ResponseSchema;
+  responseSchema: Schema;
   validate?: (value: unknown) => value is T;
   transform?: (value: unknown) => T;
   maxAttempts?: number;
@@ -45,6 +43,50 @@ function normalizeGenerationOptions(
   }
 
   return options || {};
+}
+
+/**
+ * Convert a Schema object (with Type enum values) to plain JSON Schema.
+ * The @google/genai JS SDK expects `responseJsonSchema` with standard
+ * JSON Schema, not `responseSchema` with proprietary Type enums.
+ */
+function schemaToJsonSchema(schema: Schema): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+
+  if (schema.type) {
+    // Type enum values like "STRING" need to map to lowercase JSON Schema types
+    const typeMap: Record<string, string> = {
+      STRING: "string",
+      NUMBER: "number",
+      INTEGER: "integer",
+      BOOLEAN: "boolean",
+      OBJECT: "object",
+      ARRAY: "array",
+    };
+    result.type = typeMap[schema.type] || schema.type.toLowerCase();
+  }
+
+  if (schema.format && schema.format !== "enum") result.format = schema.format;
+  if (schema.enum) result.enum = schema.enum;
+  if (schema.description) result.description = schema.description;
+  if (schema.required) result.required = schema.required;
+
+  if (schema.properties) {
+    const props: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(schema.properties)) {
+      props[key] = schemaToJsonSchema(value as Schema);
+    }
+    result.properties = props;
+  }
+
+  if (schema.items) {
+    result.items = schemaToJsonSchema(schema.items as Schema);
+  }
+
+  if (schema.minItems) result.minItems = Number(schema.minItems);
+  if (schema.maxItems) result.maxItems = Number(schema.maxItems);
+
+  return result;
 }
 
 function parseJsonResponse(text: string): unknown {
@@ -70,7 +112,7 @@ function parseJsonResponse(text: string): unknown {
  * Generate embeddings for one or more texts using Google's gemini-embedding-001 model.
  * Returns array of 1536-dimensional float arrays.
  *
- * Uses TaskType to optimize embeddings for their intended use:
+ * Uses taskType to optimize embeddings for their intended use:
  * - RETRIEVAL_DOCUMENT: when embedding source code / documents for storage
  * - CODE_RETRIEVAL_QUERY: when embedding a user's search query about code
  * - RETRIEVAL_QUERY: when embedding a general search query
@@ -78,11 +120,10 @@ function parseJsonResponse(text: string): unknown {
 export async function generateEmbeddings(
   apiKey: string,
   texts: string[],
-  taskType: TaskType = TaskType.RETRIEVAL_DOCUMENT,
+  taskType: string = "RETRIEVAL_DOCUMENT",
   options: EmbeddingOptions = {}
 ): Promise<number[][]> {
-  const genAI = createGeminiClient(apiKey);
-  const model = genAI.getGenerativeModel({ model: GEMINI_EMBEDDING_MODEL });
+  const ai = createGeminiClient(apiKey);
   const results: number[][] = [];
 
   for (let i = 0; i < texts.length; i += GEMINI_EMBEDDING_BATCH_SIZE) {
@@ -91,16 +132,20 @@ export async function generateEmbeddings(
 
     while (true) {
       try {
-        const response = await model.batchEmbedContents({
-          requests: batch.map((text) => ({
-            content: { role: "user", parts: [{ text }] },
+        // The new SDK's embedContent accepts a contents array for batch embedding
+        const response = await ai.models.embedContent({
+          model: GEMINI_EMBEDDING_MODEL,
+          contents: batch,
+          config: {
             taskType,
             outputDimensionality: GEMINI_EMBEDDING_DIMENSIONS,
-          })),
+          },
         });
 
-        for (const embedding of response.embeddings) {
-          results.push(embedding.values);
+        if (response.embeddings) {
+          for (const embedding of response.embeddings) {
+            results.push(embedding.values || []);
+          }
         }
 
         options.onBatchComplete?.(results.length, texts.length);
@@ -131,14 +176,14 @@ export async function generateEmbeddings(
 /**
  * Generate embeddings optimized for retrieval queries.
  *
- * Use TaskType.CODE_RETRIEVAL_QUERY when the query is a natural language
+ * Use "CODE_RETRIEVAL_QUERY" when the query is a natural language
  * question about code (e.g. "list all API endpoints"). This aligns the
  * query embedding with RETRIEVAL_DOCUMENT code chunks for better recall.
  */
 export async function generateQueryEmbedding(
   apiKey: string,
   query: string,
-  taskType: TaskType = TaskType.RETRIEVAL_QUERY
+  taskType: string = "RETRIEVAL_QUERY"
 ): Promise<number[]> {
   const results = await generateEmbeddings(apiKey, [query], taskType);
   return results[0];
@@ -154,25 +199,26 @@ export async function generateChatStream(
   options?: string | TextGenerationOptions
 ): Promise<ReadableStream<Uint8Array>> {
   const normalizedOptions = normalizeGenerationOptions(options);
-  const genAI = createGeminiClient(apiKey);
-  const model = genAI.getGenerativeModel({
+  const ai = createGeminiClient(apiKey);
+
+  const response = await ai.models.generateContentStream({
     model: GEMINI_GENERATION_MODEL,
-    ...(normalizedOptions.systemInstruction
-      ? { systemInstruction: normalizedOptions.systemInstruction }
-      : {}),
-    ...(normalizedOptions.generationConfig
-      ? { generationConfig: normalizedOptions.generationConfig }
-      : {}),
+    contents: userMessage,
+    config: {
+      ...(normalizedOptions.systemInstruction
+        ? { systemInstruction: normalizedOptions.systemInstruction }
+        : {}),
+      ...(normalizedOptions.generationConfig || {}),
+    },
   });
 
-  const result = await model.generateContentStream(userMessage);
   const encoder = new TextEncoder();
 
   return new ReadableStream({
     async start(controller) {
       try {
-        for await (const chunk of result.stream) {
-          const text = chunk.text();
+        for await (const chunk of response) {
+          const text = chunk.text;
           if (text) {
             controller.enqueue(
               encoder.encode(
@@ -200,35 +246,34 @@ export async function generateChatStream(
 
 /**
  * Generate a streaming chat response with multimodal content (text + images).
- * Accepts an array of Gemini Part objects for the user message.
+ * Accepts an array of parts for the user message.
  */
 export async function generateMultimodalChatStream(
   apiKey: string,
-  parts: Part[],
+  parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }>,
   options?: string | TextGenerationOptions
 ): Promise<ReadableStream<Uint8Array>> {
   const normalizedOptions = normalizeGenerationOptions(options);
-  const genAI = createGeminiClient(apiKey);
-  const model = genAI.getGenerativeModel({
+  const ai = createGeminiClient(apiKey);
+
+  const response = await ai.models.generateContentStream({
     model: GEMINI_GENERATION_MODEL,
-    ...(normalizedOptions.systemInstruction
-      ? { systemInstruction: normalizedOptions.systemInstruction }
-      : {}),
-    ...(normalizedOptions.generationConfig
-      ? { generationConfig: normalizedOptions.generationConfig }
-      : {}),
+    contents: [{ role: "user", parts }],
+    config: {
+      ...(normalizedOptions.systemInstruction
+        ? { systemInstruction: normalizedOptions.systemInstruction }
+        : {}),
+      ...(normalizedOptions.generationConfig || {}),
+    },
   });
 
-  const result = await model.generateContentStream({
-    contents: [{ role: "user", parts }],
-  });
   const encoder = new TextEncoder();
 
   return new ReadableStream({
     async start(controller) {
       try {
-        for await (const chunk of result.stream) {
-          const text = chunk.text();
+        for await (const chunk of response) {
+          const text = chunk.text;
           if (text) {
             controller.enqueue(
               encoder.encode(
@@ -264,19 +309,22 @@ export async function generateText(
 ): Promise<string> {
   try {
     const normalizedOptions = normalizeGenerationOptions(options);
-    const genAI = createGeminiClient(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: GEMINI_GENERATION_MODEL,
+    const ai = createGeminiClient(apiKey);
+
+    const config = {
       ...(normalizedOptions.systemInstruction
         ? { systemInstruction: normalizedOptions.systemInstruction }
         : {}),
-      ...(normalizedOptions.generationConfig
-        ? { generationConfig: normalizedOptions.generationConfig }
-        : {}),
+      ...(normalizedOptions.generationConfig || {}),
+    };
+
+    const result = await ai.models.generateContent({
+      model: GEMINI_GENERATION_MODEL,
+      contents: prompt,
+      config,
     });
 
-    const result = await model.generateContent(prompt);
-    return result.response.text();
+    return result.text ?? "";
   } catch (err: unknown) {
     throw normalizeGeminiError(err, "generation");
   }
@@ -288,10 +336,10 @@ export async function generateStructuredJson<T>(
   options: StructuredJsonGenerationOptions<T>
 ): Promise<T> {
   const maxAttempts = options.maxAttempts || 2;
-  const generationConfig: GenerationConfig = {
+
+  const generationConfig: Partial<GenerateContentConfig> = {
     ...options.generationConfig,
     responseMimeType: "application/json",
-    responseSchema: options.responseSchema,
   };
 
   let lastError: unknown = null;
@@ -299,10 +347,21 @@ export async function generateStructuredJson<T>(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      const raw = await generateText(apiKey, attemptPrompt, {
-        systemInstruction: options.systemInstruction,
-        generationConfig,
+      console.log(`[generateStructuredJson] Attempt ${attempt}/${maxAttempts}, model: ${GEMINI_GENERATION_MODEL}`);
+      const ai = createGeminiClient(apiKey);
+      const result = await ai.models.generateContent({
+        model: GEMINI_GENERATION_MODEL,
+        contents: attemptPrompt,
+        config: {
+          ...(options.systemInstruction
+            ? { systemInstruction: options.systemInstruction }
+            : {}),
+          ...generationConfig,
+        },
       });
+
+      const raw = result.text ?? "";
+      console.log(`[generateStructuredJson] Success, response length: ${raw.length}`);
       const parsed = parseJsonResponse(raw);
 
       if (options.transform) {
@@ -319,6 +378,11 @@ export async function generateStructuredJson<T>(
 
       return parsed as T;
     } catch (error: unknown) {
+      console.error(`[generateStructuredJson] Attempt ${attempt} failed:`, {
+        name: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message?.slice(0, 300) : String(error).slice(0, 300),
+        status: (error as Record<string, unknown>)?.status,
+      });
       lastError = error;
       if (attempt >= maxAttempts) break;
 

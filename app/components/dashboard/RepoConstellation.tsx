@@ -33,8 +33,11 @@ interface NodePlacement extends ConstellationNode {
 const MAX_NODES = 100;
 const DUST_COUNT = 500;
 const SPHERE_RADIUS = 2.8;
-const AUTO_SPOTLIGHT_INTERVAL = 3500;
-const AUTO_SPOTLIGHT_DURATION = 2800;
+const AUTO_SPOTLIGHT_INTERVAL = 4500;
+const AUTO_SPOTLIGHT_DURATION = 3200;
+const SPOTLIGHT_FADE_MS = 200;
+const HIT_RADIUS_MIN_PX = 8;
+const HIT_RADIUS_PAD_PX = 10;
 
 /* ═══════════════════════════════════════════════════
    Helpers
@@ -225,9 +228,26 @@ function RepoNodes({
     return arr;
   }, [placements]);
 
-  const HIT_RADIUS_PX = 30; // generous pixel-based hit radius
+  // Compute a scale-aware hit radius: project the node's baseScale into
+  // screen pixels so distant/small nodes have small hitboxes and nearby
+  // large nodes have large hitboxes.
+  const getHitRadius = useCallback(
+    (p: NodePlacement, rect: DOMRect) => {
+      // Project node centre
+      const centre = new THREE.Vector3(p.x, p.y, p.z);
+      centre.project(camera);
+      // Project a point offset by baseScale in world-space
+      const edge = new THREE.Vector3(p.x + p.baseScale, p.y, p.z);
+      edge.project(camera);
+      const csx = ((centre.x + 1) / 2) * rect.width;
+      const esx = ((edge.x + 1) / 2) * rect.width;
+      const projected = Math.abs(esx - csx);
+      return Math.max(HIT_RADIUS_MIN_PX, projected + HIT_RADIUS_PAD_PX);
+    },
+    [camera]
+  );
 
-  // Find closest node to screen position within hit radius
+  // Find closest node to screen position within its individual hit radius
   const findClosestNode = useCallback(
     (clientX: number, clientY: number) => {
       const rect = gl.domElement.getBoundingClientRect();
@@ -244,15 +264,17 @@ function RepoNodes({
         const dy = clientY - sy;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
+        const hitRadius = getHitRadius(p, rect);
+
         // Only consider nodes in front of the camera (z < 1 in NDC)
-        if (dist < closestDist && dist < HIT_RADIUS_PX && pos.z < 1) {
+        if (dist < closestDist && dist < hitRadius && pos.z < 1) {
           closestDist = dist;
           closestIdx = i;
         }
       }
       return closestIdx;
     },
-    [camera, gl, placements]
+    [camera, gl, placements, getHitRadius]
   );
 
   // Pointer move → screen-space distance check
@@ -543,32 +565,25 @@ export function RepoConstellation({ repos, onNodeClick, fillContainer }: RepoCon
 
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
-  const [isUserHovering, setIsUserHovering] = useState(false);
-  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [spotlightIds, setSpotlightIds] = useState<Set<string>>(new Set());
   const spotlightTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const spotlightDurationRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [spotlightScreenPos, setSpotlightScreenPos] = useState<{ x: number; y: number } | null>(null);
+  const [spotlightOpacity, setSpotlightOpacity] = useState(0);
 
   const hoveredNode = useMemo(
     () => nodes.find((n) => n.id === hoveredId) || null,
     [nodes, hoveredId]
   );
 
+  // isUserHovering is now simply whether the mouse is on a node — no 3s linger
+  const isUserHovering = !!hoveredId;
+
   const handleHover = useCallback(
     (id: string | null, screenPos: { x: number; y: number } | null) => {
       setHoveredId(id);
       setTooltipPos(screenPos);
-
-      if (id) {
-        setIsUserHovering(true);
-        if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-      } else {
-        if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-        hoverTimeoutRef.current = setTimeout(() => {
-          setIsUserHovering(false);
-        }, 3000);
-      }
     },
     []
   );
@@ -588,21 +603,35 @@ export function RepoConstellation({ repos, onNodeClick, fillContainer }: RepoCon
     []
   );
 
-  // Auto-spotlight
+  // Auto-spotlight — synchronised lifecycle: the duration timeout is tracked
+  // in a ref so it can be cancelled when a new spotlight fires, preventing
+  // a stale timer from prematurely clearing a fresh spotlight.
   useEffect(() => {
     if (isUserHovering) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSpotlightIds(new Set());
       setSpotlightScreenPos(null);
+      setSpotlightOpacity(0);
       if (spotlightTimerRef.current) {
         clearInterval(spotlightTimerRef.current);
         spotlightTimerRef.current = null;
+      }
+      if (spotlightDurationRef.current) {
+        clearTimeout(spotlightDurationRef.current);
+        spotlightDurationRef.current = null;
       }
       return;
     }
 
     function pickSpotlight() {
       if (nodes.length === 0) return;
+
+      // Cancel any still-running duration timeout from the *previous* spotlight
+      if (spotlightDurationRef.current) {
+        clearTimeout(spotlightDurationRef.current);
+        spotlightDurationRef.current = null;
+      }
+
       const count = Math.random() > 0.5 ? 2 : 1;
       const picked = new Set<string>();
       while (picked.size < count && picked.size < nodes.length) {
@@ -610,9 +639,16 @@ export function RepoConstellation({ repos, onNodeClick, fillContainer }: RepoCon
         picked.add(nodes[idx].id);
       }
       setSpotlightIds(picked);
-      setTimeout(() => {
-        setSpotlightIds(new Set());
-        setSpotlightScreenPos(null);
+      setSpotlightOpacity(1); // fade in
+
+      // Schedule fade-out, then clear
+      spotlightDurationRef.current = setTimeout(() => {
+        setSpotlightOpacity(0); // fade out
+        // After fade completes, remove the spotlight entirely
+        setTimeout(() => {
+          setSpotlightIds(new Set());
+          setSpotlightScreenPos(null);
+        }, SPOTLIGHT_FADE_MS);
       }, AUTO_SPOTLIGHT_DURATION);
     }
 
@@ -622,6 +658,7 @@ export function RepoConstellation({ repos, onNodeClick, fillContainer }: RepoCon
     return () => {
       clearTimeout(initialTimeout);
       if (spotlightTimerRef.current) clearInterval(spotlightTimerRef.current);
+      if (spotlightDurationRef.current) clearTimeout(spotlightDurationRef.current);
     };
   }, [isUserHovering, nodes]);
 
@@ -663,6 +700,7 @@ export function RepoConstellation({ repos, onNodeClick, fillContainer }: RepoCon
         node={displayedTooltipNode}
         position={activeTooltipPos}
         visible={!!displayedTooltipNode && !!activeTooltipPos}
+        opacity={hoveredId ? 1 : spotlightOpacity}
       />
     </div>
   );

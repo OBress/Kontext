@@ -24,10 +24,14 @@ function GroupNodeComponent({ id, data, selected }: NodeProps) {
     toggleCollapsed,
     highlightedNodeIds,
     dimUnfocused,
+    activeSimulation,
   } = useGraphStore();
   const color = ARCH_TYPE_COLORS[nodeData.componentType] || "#8B949E";
   const isCollapsed = collapsedNodes.has(id);
   const isHighlighted = highlightedNodeIds.includes(id);
+  const isSimulationActive =
+    activeSimulation?.steps[activeSimulation.activeStepIndex]?.kind === "node" &&
+    activeSimulation.steps[activeSimulation.activeStepIndex]?.refId === id;
   const isDimmed = dimUnfocused && highlightedNodeIds.length > 0 && !isHighlighted;
 
   const handleClick = (e: React.MouseEvent) => {
@@ -45,10 +49,11 @@ function GroupNodeComponent({ id, data, selected }: NodeProps) {
     <div
       className={`group-node ${selected ? "group-node--selected" : ""} ${
         nodeData.isExpanded ? "group-node--expanded" : ""
-      } ${isHighlighted ? "arch-node--highlighted" : ""}`}
+      } ${isHighlighted || isSimulationActive ? "arch-node--highlighted" : ""}`}
       style={{
-        borderColor: selected || isHighlighted ? color : `${color}30`,
-        boxShadow: selected || isHighlighted ? `0 0 20px ${color}25` : undefined,
+        borderColor: selected || isHighlighted || isSimulationActive ? color : `${color}30`,
+        boxShadow:
+          selected || isHighlighted || isSimulationActive ? `0 0 20px ${color}25` : undefined,
         minWidth: nodeData.isExpanded ? 400 : 220,
         minHeight: nodeData.isExpanded ? 200 : undefined,
         opacity: isDimmed ? 0.28 : 1,

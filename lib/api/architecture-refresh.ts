@@ -1,15 +1,18 @@
 import { createAdminClient } from "./auth";
 import { analyzeArchitecture } from "./architecture-analyzer";
+import { resolveImport } from "./graph-builder";
 import type {
   ArchComponent,
   ArchConnection,
   ArchitectureAnalysis,
   ArchitectureBundle,
+  ArchitectureCodeMetadata,
   ArchitectureEdgeIndexEntry,
   ArchitectureLayerId,
   ArchitectureNodeIndexEntry,
   ArchitectureStatus,
   ArchitectureTrace,
+  ArchitectureTraceStep,
   ArchitectureView,
 } from "@/types/architecture";
 
@@ -25,6 +28,22 @@ interface ChunkSample {
   file_path: string;
   content: string;
 }
+
+interface ResolvedFileGraph {
+  filesByPath: Map<string, FileMetadata>;
+  importsBySource: Map<string, string[]>;
+  importersByTarget: Map<string, string[]>;
+  directoryFiles: Map<string, string[]>;
+}
+
+interface ModuleCandidateSet {
+  module: ArchComponent;
+  scores: Map<string, number>;
+}
+
+const MAX_VISIBLE_CODE_FILES = 10;
+const MAX_SHARED_VISIBLE_FILES = 10;
+const SHARED_GROUP_ID = "code-cross-cutting-shared";
 
 function getFileImportance(filePath: string, lineCount: number | null): number {
   let score = 0;
@@ -181,8 +200,7 @@ function buildOverviewView(base: ArchitectureAnalysis): ArchitectureView {
     if (!sourceBucket || !targetBucket || sourceBucket === targetBucket) continue;
 
     const id = `${sourceBucket}-to-${targetBucket}`;
-    const existing = edgeMap.get(id);
-    if (existing) continue;
+    if (edgeMap.has(id)) continue;
 
     edgeMap.set(id, {
       id,
@@ -204,19 +222,6 @@ function buildOverviewView(base: ArchitectureAnalysis): ArchitectureView {
   };
 }
 
-function buildCodeView(base: ArchitectureAnalysis): ArchitectureView {
-  return {
-    id: "code",
-    label: "Code",
-    summary: base.summary,
-    components: base.components,
-    connections: base.connections,
-    defaultExpanded: base.components
-      .filter((component) => component.children && component.children.length > 0)
-      .map((component) => component.id),
-  };
-}
-
 function buildSystemView(base: ArchitectureAnalysis): ArchitectureView {
   return {
     id: "system",
@@ -226,6 +231,363 @@ function buildSystemView(base: ArchitectureAnalysis): ArchitectureView {
     connections: base.connections,
     defaultExpanded: [],
   };
+}
+
+function pathDirectory(filePath: string): string {
+  return filePath.split("/").slice(0, -1).join("/");
+}
+
+function classifyFileType(filePath: string, fallbackType: ArchComponent["type"]): ArchComponent["type"] {
+  const lower = filePath.toLowerCase();
+
+  if (/\/page\.[a-z0-9]+$/.test(lower)) return "page";
+  if (lower.includes("/api/") || /\/route\.[a-z0-9]+$/.test(lower)) return "api";
+  if (/(schema|migration|supabase|database|repo_chunks|repo_files|sql)/.test(lower)) {
+    return "database";
+  }
+  if (/(worker|queue|pipeline|ingest|sync|timeline|webhook|embedding|chunk)/.test(lower)) {
+    return "worker";
+  }
+  if (
+    /(middleware|config|next\.config|tsconfig|eslint|postcss|package\.json|toml|\.env)/.test(lower)
+  ) {
+    return "config";
+  }
+
+  return fallbackType === "external" ? "shared" : fallbackType;
+}
+
+function formatFileLabel(filePath: string): string {
+  const parts = filePath.split("/");
+  const fileName = parts[parts.length - 1] || filePath;
+  const parent = parts.length > 1 ? parts[parts.length - 2] : "";
+  if (
+    parent &&
+    ["page.tsx", "page.ts", "route.ts", "route.js", "layout.tsx", "layout.ts", "index.ts", "index.tsx", "index.js"].includes(fileName)
+  ) {
+    return `${parent}/${fileName}`;
+  }
+  return parent ? `${parent}/${fileName}` : fileName;
+}
+
+function buildResolvedFileGraph(files: FileMetadata[]): ResolvedFileGraph {
+  const filesByPath = new Map(files.map((file) => [file.file_path, file]));
+  const pathSet = new Set(files.map((file) => file.file_path));
+  const importsBySource = new Map<string, string[]>();
+  const importersByTarget = new Map<string, string[]>();
+  const directoryFiles = new Map<string, string[]>();
+
+  for (const file of files) {
+    const directory = pathDirectory(file.file_path);
+    directoryFiles.set(directory, [...(directoryFiles.get(directory) || []), file.file_path]);
+  }
+
+  for (const file of files) {
+    const resolvedImports = dedupeStrings(
+      (file.imports || [])
+        .map((entry) => resolveImport(entry, file.file_path, pathSet))
+        .filter((entry): entry is string => Boolean(entry))
+    );
+
+    importsBySource.set(file.file_path, resolvedImports);
+
+    for (const targetPath of resolvedImports) {
+      importersByTarget.set(targetPath, [
+        ...(importersByTarget.get(targetPath) || []),
+        file.file_path,
+      ]);
+    }
+  }
+
+  return {
+    filesByPath,
+    importsBySource,
+    importersByTarget,
+    directoryFiles,
+  };
+}
+
+function addScore(scoreMap: Map<string, number>, filePath: string, delta: number) {
+  scoreMap.set(filePath, (scoreMap.get(filePath) || 0) + delta);
+}
+
+function buildModuleCandidateSets(
+  systemView: ArchitectureView,
+  fileGraph: ResolvedFileGraph
+): ModuleCandidateSet[] {
+  return systemView.components.map((component) => {
+    const seedFiles = dedupeStrings([
+      ...component.files,
+      ...(component.children?.flatMap((child) => child.files) || []),
+    ]).filter((filePath) => fileGraph.filesByPath.has(filePath));
+
+    const scores = new Map<string, number>();
+
+    for (const seedFile of seedFiles) {
+      addScore(scores, seedFile, 120);
+
+      for (const targetPath of fileGraph.importsBySource.get(seedFile) || []) {
+        addScore(scores, targetPath, 70);
+      }
+
+      for (const sourcePath of fileGraph.importersByTarget.get(seedFile) || []) {
+        addScore(scores, sourcePath, 60);
+      }
+
+      for (const siblingPath of fileGraph.directoryFiles.get(pathDirectory(seedFile)) || []) {
+        if (siblingPath !== seedFile) {
+          addScore(scores, siblingPath, 26);
+        }
+      }
+    }
+
+    for (const [filePath, score] of scores) {
+      const file = fileGraph.filesByPath.get(filePath);
+      scores.set(filePath, score + Math.max(0, getFileImportance(filePath, file?.line_count || 0) / 4));
+    }
+
+    return { module: component, scores };
+  });
+}
+
+function sortScoredFiles(
+  scores: Map<string, number>,
+  fileGraph: ResolvedFileGraph
+): string[] {
+  return [...scores.entries()]
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      const aImportance = getFileImportance(a[0], fileGraph.filesByPath.get(a[0])?.line_count || 0);
+      const bImportance = getFileImportance(b[0], fileGraph.filesByPath.get(b[0])?.line_count || 0);
+      if (bImportance !== aImportance) return bImportance - aImportance;
+      return a[0].localeCompare(b[0]);
+    })
+    .map(([filePath]) => filePath);
+}
+
+function buildFileChild(
+  filePath: string,
+  parentType: ArchComponent["type"],
+  parentLabel: string
+): ArchComponent {
+  return {
+    id: `file:${filePath}`,
+    label: formatFileLabel(filePath),
+    description: `${filePath} participates in ${parentLabel.toLowerCase()}.`,
+    type: classifyFileType(filePath, parentType),
+    files: [filePath],
+  };
+}
+
+function buildCodeView(
+  systemView: ArchitectureView,
+  files: FileMetadata[]
+): { view: ArchitectureView; metadata: ArchitectureCodeMetadata } {
+  const fileGraph = buildResolvedFileGraph(files);
+  const moduleCandidates = buildModuleCandidateSets(systemView, fileGraph);
+  const fileOwners = new Map<string, string[]>();
+
+  for (const entry of moduleCandidates) {
+    const sortedPaths = sortScoredFiles(entry.scores, fileGraph);
+    for (const filePath of sortedPaths) {
+      fileOwners.set(filePath, [...(fileOwners.get(filePath) || []), entry.module.id]);
+    }
+  }
+
+  const sharedFiles = [...fileOwners.entries()]
+    .filter(([, owners]) => owners.length >= 2)
+    .map(([filePath]) => filePath);
+  const sharedFileSet = new Set(sharedFiles);
+
+  const parentByFile = new Map<string, string>();
+  const moduleFileOwners: Record<string, string[]> = {};
+  const connectivity = new Map<string, number>();
+
+  const components: ArchComponent[] = moduleCandidates.map((entry) => {
+    const sortedPaths = sortScoredFiles(entry.scores, fileGraph);
+    const ownedPaths = sortedPaths.filter((filePath) => !sharedFileSet.has(filePath));
+    const visibleChildren = ownedPaths
+      .slice(0, MAX_VISIBLE_CODE_FILES)
+      .map((filePath) => buildFileChild(filePath, entry.module.type, entry.module.label));
+
+    for (const filePath of ownedPaths) {
+      parentByFile.set(filePath, entry.module.id);
+    }
+
+    moduleFileOwners[entry.module.id] = ownedPaths;
+
+    return {
+      id: entry.module.id,
+      label: entry.module.label,
+      description: entry.module.description,
+      type: entry.module.type,
+      files: ownedPaths,
+      children: visibleChildren.length > 0 ? visibleChildren : undefined,
+    };
+  });
+
+  const visibleFileNodeIds = new Map<string, string>();
+  for (const component of components) {
+    for (const child of component.children || []) {
+      const filePath = child.files[0];
+      if (filePath) {
+        visibleFileNodeIds.set(filePath, child.id);
+      }
+    }
+  }
+
+  let sharedGroupId: string | null = null;
+  if (sharedFiles.length > 0) {
+    sharedGroupId = SHARED_GROUP_ID;
+    for (const filePath of sharedFiles) {
+      parentByFile.set(filePath, SHARED_GROUP_ID);
+    }
+
+    const visibleSharedChildren = sharedFiles
+      .sort((a, b) => {
+        const ownerDelta = (fileOwners.get(b)?.length || 0) - (fileOwners.get(a)?.length || 0);
+        if (ownerDelta !== 0) return ownerDelta;
+        return a.localeCompare(b);
+      })
+      .slice(0, MAX_SHARED_VISIBLE_FILES)
+      .map((filePath) => buildFileChild(filePath, "shared", "Cross-cutting shared files"));
+
+    for (const child of visibleSharedChildren) {
+      const filePath = child.files[0];
+      if (filePath) {
+        visibleFileNodeIds.set(filePath, child.id);
+      }
+    }
+
+    components.push({
+      id: SHARED_GROUP_ID,
+      label: "Cross-Cutting Shared Files",
+      description:
+        "Highly shared internal files that participate in multiple code modules and would otherwise be duplicated.",
+      type: "shared",
+      files: sharedFiles,
+      children: visibleSharedChildren.length > 0 ? visibleSharedChildren : undefined,
+    });
+  }
+
+  const connections: ArchConnection[] = [];
+  const moduleEdgeCounts = new Map<string, number>();
+
+  for (const [sourcePath, targetPaths] of fileGraph.importsBySource.entries()) {
+    const sourceParent = parentByFile.get(sourcePath);
+
+    for (const targetPath of targetPaths) {
+      const targetParent = parentByFile.get(targetPath);
+      if (!sourceParent || !targetParent) continue;
+
+      connectivity.set(sourceParent, (connectivity.get(sourceParent) || 0) + 1);
+      if (targetParent !== sourceParent) {
+        connectivity.set(targetParent, (connectivity.get(targetParent) || 0) + 1);
+      }
+
+      if (sourceParent === targetParent) {
+        // Keep internal traffic visible in the connectivity score above without adding a module edge.
+      } else {
+        const moduleEdgeKey = `${sourceParent}::${targetParent}`;
+        moduleEdgeCounts.set(moduleEdgeKey, (moduleEdgeCounts.get(moduleEdgeKey) || 0) + 1);
+      }
+
+      const sourceNodeId = visibleFileNodeIds.get(sourcePath);
+      const targetNodeId = visibleFileNodeIds.get(targetPath);
+
+      if (!sourceNodeId || !targetNodeId) continue;
+
+      connections.push({
+        id: `code:${sourceNodeId}->${targetNodeId}`,
+        source: sourceNodeId,
+        target: targetNodeId,
+        label: "imports",
+        description: `${sourcePath} imports ${targetPath}.`,
+        type: "import",
+      });
+    }
+  }
+
+  for (const [key, count] of moduleEdgeCounts.entries()) {
+    const [source, target] = key.split("::");
+    connections.push({
+      id: `code-module:${source}->${target}`,
+      source,
+      target,
+      label: count === 1 ? "cross-module import" : `${count} cross-module imports`,
+      description:
+        count === 1
+          ? "One visible file import crosses this module boundary."
+          : `${count} internal file imports cross this module boundary.`,
+      type: "import",
+    });
+  }
+
+  const defaultExpanded = components
+    .filter((component) => component.id !== SHARED_GROUP_ID && (component.children?.length || 0) > 0)
+    .sort((a, b) => (connectivity.get(b.id) || 0) - (connectivity.get(a.id) || 0))
+    .slice(0, 4)
+    .map((component) => component.id);
+
+  return {
+    view: {
+      id: "code",
+      label: "Code",
+      summary: `${systemView.summary} The code layer adds file-level ownership and resolved internal import edges.`,
+      components,
+      connections,
+      defaultExpanded,
+    },
+    metadata: {
+      sharedGroupId,
+      moduleFileOwners,
+      fileOwners: Object.fromEntries(fileOwners.entries()),
+      sharedFiles,
+    },
+  };
+}
+
+function buildComponentLookup(view: ArchitectureView): Map<string, ArchComponent> {
+  const lookup = new Map<string, ArchComponent>();
+
+  for (const component of view.components) {
+    lookup.set(component.id, component);
+    for (const child of component.children || []) {
+      lookup.set(child.id, child);
+    }
+  }
+
+  return lookup;
+}
+
+function buildTraceSteps(
+  sourceLabel: string,
+  targetLabel: string,
+  connection: ArchConnection
+): ArchitectureTraceStep[] {
+  return [
+    {
+      id: `${connection.id}:source`,
+      kind: "node",
+      refId: connection.source,
+      label: sourceLabel,
+      description: `Start at ${sourceLabel}.`,
+    },
+    {
+      id: `${connection.id}:edge`,
+      kind: "edge",
+      refId: connection.id,
+      label: connection.label,
+      description: connection.description,
+    },
+    {
+      id: `${connection.id}:target`,
+      kind: "node",
+      refId: connection.target,
+      label: targetLabel,
+      description: `Arrive at ${targetLabel}.`,
+    },
+  ];
 }
 
 function addNodeIndexEntry(
@@ -282,15 +644,13 @@ function buildTraces(views: Record<ArchitectureLayerId, ArchitectureView>): Arch
   for (const [layerId, view] of Object.entries(views) as Array<
     [ArchitectureLayerId, ArchitectureView]
   >) {
-    for (const connection of view.connections) {
-      const sourceLabel =
-        view.components.find((component) => component.id === connection.source)?.label ||
-        connection.source;
-      const targetLabel =
-        view.components.find((component) => component.id === connection.target)?.label ||
-        connection.target;
+    const componentLookup = buildComponentLookup(view);
 
+    for (const connection of view.connections) {
+      const sourceLabel = componentLookup.get(connection.source)?.label || connection.source;
+      const targetLabel = componentLookup.get(connection.target)?.label || connection.target;
       const traceId = `${layerId}:${connection.id}`;
+
       traces.set(traceId, {
         id: traceId,
         label: `${sourceLabel} to ${targetLabel}`,
@@ -305,6 +665,7 @@ function buildTraces(views: Record<ArchitectureLayerId, ArchitectureView>): Arch
           targetLabel.toLowerCase(),
           `${sourceLabel.toLowerCase()} ${targetLabel.toLowerCase()}`,
         ]),
+        steps: buildTraceSteps(sourceLabel, targetLabel, connection),
       });
     }
   }
@@ -314,11 +675,12 @@ function buildTraces(views: Record<ArchitectureLayerId, ArchitectureView>): Arch
 
 export function buildArchitectureBundle(
   analysis: ArchitectureAnalysis,
-  sourceSha: string | null
+  sourceSha: string | null,
+  files: FileMetadata[]
 ): ArchitectureBundle {
   const system = buildSystemView(analysis);
   const overview = buildOverviewView(analysis);
-  const code = buildCodeView(analysis);
+  const { view: code, metadata: codeMetadata } = buildCodeView(system, files);
   const views = { overview, system, code };
 
   const nodeIndex: Record<string, ArchitectureNodeIndexEntry> = {};
@@ -345,7 +707,7 @@ export function buildArchitectureBundle(
   }
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     summary: analysis.summary,
     generatedAt: new Date().toISOString(),
     sourceSha,
@@ -354,6 +716,7 @@ export function buildArchitectureBundle(
     edgeIndex,
     aliases,
     traces: buildTraces(views),
+    codeMetadata,
   };
 }
 
@@ -380,7 +743,8 @@ export async function loadArchitectureInputs(params: {
   if (filesError) throw filesError;
 
   const sortedFiles = (files || []).sort(
-    (a, b) => getFileImportance(b.file_path, b.line_count) - getFileImportance(a.file_path, a.line_count)
+    (a, b) =>
+      getFileImportance(b.file_path, b.line_count) - getFileImportance(a.file_path, a.line_count)
   );
 
   const priorityFiles = sortedFiles.slice(0, 40).map((file) => file.file_path);
@@ -454,7 +818,8 @@ export async function refreshArchitectureBundle(params: {
 
   const bundle = buildArchitectureBundle(
     analysis,
-    params.sourceSha !== undefined ? params.sourceSha : sourceSha
+    params.sourceSha !== undefined ? params.sourceSha : sourceSha,
+    files
   );
 
   await adminDb

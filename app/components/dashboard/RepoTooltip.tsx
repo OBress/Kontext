@@ -7,6 +7,7 @@ interface RepoTooltipProps {
   node: ConstellationNode | null;
   position: { x: number; y: number } | null;
   visible: boolean;
+  opacity?: number;
 }
 
 function formatStars(stars: number): string {
@@ -16,7 +17,7 @@ function formatStars(stars: number): string {
   return String(stars);
 }
 
-export function RepoTooltip({ node, position, visible }: RepoTooltipProps) {
+export function RepoTooltip({ node, position, visible, opacity = 1 }: RepoTooltipProps) {
   if (!node || !position || !visible) return null;
 
   const langColor = getLanguageColor(node.language);
@@ -29,11 +30,13 @@ export function RepoTooltip({ node, position, visible }: RepoTooltipProps) {
 
   return (
     <div
-      className="fixed z-50 pointer-events-none animate-fade-in-up"
+      className="fixed z-50 pointer-events-none"
       style={{
         left: position.x,
         top: position.y,
         transform: "translate(-50%, -120%)",
+        opacity,
+        transition: "opacity 200ms ease",
       }}
     >
       <div

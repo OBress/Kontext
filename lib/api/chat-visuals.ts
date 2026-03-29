@@ -156,11 +156,7 @@ async function fetchArchitectureBundle(params: {
     .eq("full_name", repoFullName)
     .single();
 
-  return toArchitectureBundle(
-    data?.architecture_analysis || null,
-    data?.architecture_for_sha || data?.last_synced_sha || null,
-    data?.architecture_analyzed_at || null
-  );
+  return toArchitectureBundle(data?.architecture_analysis || null);
 }
 
 async function buildArchitectureVisual(params: {

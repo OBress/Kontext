@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useAppStore } from "@/lib/store/app-store";
 import { useCurrentRepo } from "@/hooks/use-current-repo";
 import { BranchDropdown } from "@/app/components/shared/BranchDropdown";
+import { fetchRepoSnapshot } from "@/lib/client/repo-store";
 import {
   RefreshCw,
   CheckCircle2,
@@ -12,9 +13,6 @@ import {
   Settings2,
   Zap,
   Radio,
-  Brain,
-  Sparkles,
-  Eye,
 } from "lucide-react";
 
 interface SyncCheckResult {
@@ -32,10 +30,25 @@ interface SyncCheckResult {
   pendingSyncHeadSha?: string | null;
 }
 
+interface SyncStreamEvent {
+  status?: string;
+  message?: string;
+  lastSyncedSha?: string | null;
+  pendingHeadSha?: string | null;
+  newChunkCount?: number;
+  chunksEmbedded?: number;
+  chunksTotal?: number;
+  filesChanged?: number;
+  commitsTracked?: number;
+  baseSha?: string;
+  headSha?: string | null;
+  usedPendingHead?: boolean;
+}
+
 function getSyncBlockedMessage(reason: string | null | undefined) {
   switch (reason) {
     case "pending_user_key_sync":
-      return "A webhook detected new commits, but no browser-provided Google AI key was available to safely re-embed the changed files.";
+      return "A webhook detected new commits, but no server-side Google AI key was available to re-embed the changed files. Your browser key will be synced automatically — click below to retry.";
     case "blocked_quota":
       return "Sync is blocked because the Google project behind this key hit its Gemini embedding quota.";
     case "blocked_billing":
@@ -47,17 +60,31 @@ function getSyncBlockedMessage(reason: string | null | undefined) {
   }
 }
 
-export function SyncStatusCard() {
+function formatShortSha(sha: string | null | undefined) {
+  return sha ? sha.slice(0, 7) : null;
+}
+
+export function SyncStatusCard({ embedded = false }: { embedded?: boolean }) {
   const activeRepo = useCurrentRepo();
   const { apiKey, updateRepo } = useAppStore();
   const [checking, setChecking] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [checkResult, setCheckResult] = useState<SyncCheckResult | null>(null);
   const [syncProgress, setSyncProgress] = useState<string>("");
+  const [syncEvent, setSyncEvent] = useState<SyncStreamEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [registeringWebhook, setRegisteringWebhook] = useState(false);
 
   const hasWebhook = !!activeRepo?.webhook_id;
+
+  const refreshRepoFromServer = useCallback(async () => {
+    if (!activeRepo) return null;
+    const repo = await fetchRepoSnapshot(activeRepo.full_name);
+    if (repo) {
+      updateRepo(activeRepo.full_name, repo);
+    }
+    return repo;
+  }, [activeRepo, updateRepo]);
 
   const checkForUpdates = useCallback(async () => {
     if (!activeRepo) return;
@@ -85,8 +112,18 @@ export function SyncStatusCard() {
 
   const runSync = useCallback(async () => {
     if (!activeRepo || !apiKey) return;
+    const requestedHeadSha =
+      activeRepo.sync_blocked_reason === "pending_user_key_sync"
+        ? activeRepo.pending_sync_head_sha || null
+        : checkResult?.currentSha || null;
+
     setSyncing(true);
-    setSyncProgress("Starting sync...");
+    setSyncProgress(
+      activeRepo.sync_blocked_reason === "pending_user_key_sync"
+        ? "Replaying pending sync..."
+        : "Starting sync..."
+    );
+    setSyncEvent(null);
     setError(null);
 
     try {
@@ -96,7 +133,10 @@ export function SyncStatusCard() {
           "Content-Type": "application/json",
           "x-google-api-key": apiKey,
         },
-        body: JSON.stringify({ repo_full_name: activeRepo.full_name }),
+        body: JSON.stringify({
+          repo_full_name: activeRepo.full_name,
+          ...(requestedHeadSha ? { head_sha: requestedHeadSha } : {}),
+        }),
       });
 
       if (!res.ok) throw new Error("Sync failed to start");
@@ -114,16 +154,21 @@ export function SyncStatusCard() {
 
           for (const line of lines) {
             try {
-              const data = JSON.parse(line.slice(6));
+              const data = JSON.parse(line.slice(6)) as SyncStreamEvent;
+              setSyncEvent((previous) => ({ ...(previous || {}), ...data }));
               if (data.message) setSyncProgress(data.message);
               if (data.status === "done") {
                 setCheckResult(null); // Reset so user checks again
-                // Refresh repo data
                 updateRepo(activeRepo.full_name, {
                   last_synced_sha: data.lastSyncedSha,
+                  chunk_count:
+                    typeof data.newChunkCount === "number"
+                      ? data.newChunkCount
+                      : activeRepo.chunk_count,
                   sync_blocked_reason: null,
                   pending_sync_head_sha: null,
                 });
+                await refreshRepoFromServer();
               }
               if (
                 data.status === "blocked_quota" ||
@@ -133,7 +178,8 @@ export function SyncStatusCard() {
               ) {
                 updateRepo(activeRepo.full_name, {
                   sync_blocked_reason: data.status,
-                  pending_sync_head_sha: data.pendingHeadSha || activeRepo.pending_sync_head_sha || null,
+                  pending_sync_head_sha:
+                    data.pendingHeadSha || activeRepo.pending_sync_head_sha || null,
                 });
                 setError(data.message);
               }
@@ -150,7 +196,7 @@ export function SyncStatusCard() {
       setSyncing(false);
       setSyncProgress("");
     }
-  }, [activeRepo, apiKey, updateRepo]);
+  }, [activeRepo, apiKey, checkResult?.currentSha, refreshRepoFromServer, updateRepo]);
 
   const tryRegisterWebhook = useCallback(async () => {
     if (!activeRepo) return;
@@ -194,11 +240,19 @@ export function SyncStatusCard() {
 
   const hasSha = !!activeRepo.last_synced_sha;
   const blockedMessage = getSyncBlockedMessage(activeRepo.sync_blocked_reason);
+  const syncRangeText =
+    syncEvent?.baseSha && syncEvent?.headSha
+      ? `${syncEvent.usedPendingHead ? "Replaying pending sync" : "Sync range"} ${formatShortSha(syncEvent.baseSha)} -> ${formatShortSha(syncEvent.headSha)}`
+      : null;
+  const syncScopeText =
+    typeof syncEvent?.filesChanged === "number"
+      ? `${syncEvent.filesChanged} changed file${syncEvent.filesChanged === 1 ? "" : "s"}`
+      : null;
 
-  return (
-    <div className="rounded-xl border border-[var(--alpha-white-5)] bg-[var(--alpha-white-3)] p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-mono font-semibold text-[var(--gray-200)] flex items-center gap-2">
+  const content = (
+    <>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-mono font-semibold text-[var(--gray-200)] flex items-center gap-2 m-0">
           <Radio size={15} className="text-[var(--accent-green)]" />
           Sync Status
         </h3>
@@ -254,13 +308,25 @@ export function SyncStatusCard() {
         </div>
       )}
 
-      {blockedMessage && (
+      {blockedMessage && !syncing && (
         <div className="mb-3 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-3 text-xs font-mono text-amber-200">
           <p className="m-0">{blockedMessage}</p>
           {activeRepo.pending_sync_head_sha && (
             <p className="m-0 mt-1 text-xs text-amber-300/80">
               Pending head: {activeRepo.pending_sync_head_sha.slice(0, 7)}
             </p>
+          )}
+          {activeRepo.sync_blocked_reason === "pending_user_key_sync" && apiKey && !syncing && (
+            <button
+              onClick={runSync}
+              className="mt-2 flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono rounded-md
+                bg-amber-500/10 border border-amber-500/30
+                text-amber-300 hover:bg-amber-500/20
+                transition-all cursor-pointer"
+            >
+              <Zap size={11} />
+              Replay Pending Sync
+            </button>
           )}
         </div>
       )}
@@ -294,9 +360,17 @@ export function SyncStatusCard() {
 
       {/* Sync progress */}
       {syncing && (
-        <div className="mb-3 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs font-mono text-blue-300 flex items-center gap-2">
-          <Loader2 size={14} className="animate-spin" />
-          {syncProgress}
+        <div className="mb-3 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs font-mono text-blue-300">
+          <div className="flex items-center gap-2">
+            <Loader2 size={14} className="animate-spin" />
+            <span>{syncProgress}</span>
+          </div>
+          {(syncRangeText || syncScopeText) && (
+            <div className="mt-2 space-y-1 text-[11px] text-blue-200/80">
+              {syncRangeText && <p className="m-0">{syncRangeText}</p>}
+              {syncScopeText && <p className="m-0">{syncScopeText}</p>}
+            </div>
+          )}
         </div>
       )}
 
@@ -335,45 +409,26 @@ export function SyncStatusCard() {
           </button>
         )}
       </div>
+    </>
+  );
+
+  if (embedded) return <div>{content}</div>;
+
+  return (
+    <div className="rounded-xl border border-[var(--alpha-white-5)] bg-[var(--alpha-white-3)] p-5">
+      {content}
     </div>
   );
 }
 
 // ─── Sync Settings Card ────────────────────────────────────────────
 
-const TIER_CONFIG = [
-  {
-    value: 1,
-    label: "Quick Scan",
-    icon: Eye,
-    description: "Future lightweight mode with reduced AI spend",
-    cost: "~Free",
-    color: "text-emerald-400",
-  },
-  {
-    value: 2,
-    label: "Standard",
-    icon: Brain,
-    description: "Current default: full codebase embedding with 1536-dim Gemini vectors",
-    cost: "$0.02-0.10",
-    color: "text-blue-400",
-  },
-  {
-    value: 3,
-    label: "Deep Dive",
-    icon: Sparkles,
-    description: "Adds file summaries on refreshed files during sync",
-    cost: "$0.10-0.50",
-    color: "text-purple-400",
-  },
-];
-
 export function SyncSettingsCard() {
   const activeRepo = useCurrentRepo();
   const { updateRepo } = useAppStore();
   const [saving, setSaving] = useState(false);
   const [autoSync, setAutoSync] = useState(activeRepo?.auto_sync_enabled || false);
-  const [tier, setTier] = useState<number>(activeRepo?.understanding_tier || 2);
+
   const [branch, setBranch] = useState(activeRepo?.watched_branch || activeRepo?.default_branch || "main");
   const [message, setMessage] = useState<string | null>(null);
   const [branches, setBranches] = useState<string[]>([]);
@@ -473,7 +528,7 @@ export function SyncSettingsCard() {
       </div>
 
       {/* Branch */}
-      <div className="mb-4 pb-4 border-b border-[var(--alpha-white-5)]">
+      <div>
         <label className="text-xs font-mono text-[var(--gray-300)] block mb-1.5">Watched Branch</label>
         <BranchDropdown
           value={branch}
@@ -484,37 +539,6 @@ export function SyncSettingsCard() {
           branches={branchOptions}
           loading={branchesLoading}
         />
-      </div>
-
-      {/* Understanding Tier */}
-      <div>
-        <label className="text-xs font-mono text-[var(--gray-300)] block mb-2">Understanding Tier</label>
-        <div className="space-y-2">
-          {TIER_CONFIG.map((t) => (
-            <button
-              key={t.value}
-              onClick={() => {
-                setTier(t.value);
-                saveSettings({ understanding_tier: t.value });
-              }}
-              disabled={saving}
-              className={`w-full flex items-start gap-3 p-3 rounded-lg text-left transition-all ${
-                tier === t.value
-                  ? "bg-[var(--accent-green)]/10 border border-[var(--accent-green)]/30"
-                  : "bg-[var(--alpha-white-3)] border border-[var(--alpha-white-5)] hover:border-[var(--alpha-white-10)]"
-              }`}
-            >
-              <t.icon size={16} className={`mt-0.5 ${t.color}`} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-mono font-semibold text-[var(--gray-200)]">{t.label}</span>
-                  <span className="text-xs font-mono text-[var(--gray-500)]">{t.cost}</span>
-                </div>
-                <p className="text-xs font-mono text-[var(--gray-500)] mt-0.5">{t.description}</p>
-              </div>
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* Save message */}
@@ -528,4 +552,3 @@ export function SyncSettingsCard() {
     </div>
   );
 }
-

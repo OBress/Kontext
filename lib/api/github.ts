@@ -344,7 +344,11 @@ export async function fetchChangedFiles(
   name: string,
   baseSHA: string,
   headSHA: string
-): Promise<{ files: GitHubChangedFile[]; totalCommits: number }> {
+): Promise<{
+  files: GitHubChangedFile[];
+  totalCommits: number;
+  commits: GitHubCommit[];
+}> {
   const res = await fetch(
     `${GITHUB_API}/repos/${owner}/${name}/compare/${baseSHA}...${headSHA}`,
     { headers: headers(token) }
@@ -357,6 +361,7 @@ export async function fetchChangedFiles(
   const data = await res.json();
   const totalCommits: number = data.total_commits || 0;
   let files: GitHubChangedFile[] = data.files || [];
+  const commits: GitHubCommit[] = data.commits || [];
 
   // GitHub Compare API only returns first 300 files.
   // If there are more, iterate through individual commits.
@@ -366,7 +371,7 @@ export async function fetchChangedFiles(
     );
   }
 
-  return { files, totalCommits };
+  return { files, totalCommits, commits };
 }
 
 /**

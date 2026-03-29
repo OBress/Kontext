@@ -20,6 +20,7 @@ import {
   History,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { RepoCheckSettingsCard } from "@/app/components/repo/RepoCheckSettingsCard";
 import { SyncSettingsCard } from "@/app/components/repo/SyncPanel";
 
 export default function RepoSettingsPage() {
@@ -157,6 +158,9 @@ export default function RepoSettingsPage() {
 
       {/* Sync Settings */}
       <SyncSettingsCard />
+
+      {/* Check Automation */}
+      <RepoCheckSettingsCard />
 
       {/* Danger Zone */}
       <GlowCard glowColor="none" className="p-0 overflow-hidden border-red-500/20">

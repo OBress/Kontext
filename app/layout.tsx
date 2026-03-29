@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Kontext — AI Repository Intelligence",
   description:
-    "AI-powered repository analysis, 3D architecture visualization, RAG chatbot, and team onboarding for your codebase.",
+    "AI-powered repository analysis, 2D architecture visualization, RAG chatbot, and team onboarding for your codebase.",
 };
 
 export default function RootLayout({

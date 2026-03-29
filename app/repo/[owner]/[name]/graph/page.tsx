@@ -8,10 +8,10 @@ const ArchitectureCanvas = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="w-full h-full flex items-center justify-center">
+      <div className="flex h-full w-full items-center justify-center">
         <div className="text-center">
           <div
-            className="w-16 h-16 border border-[var(--alpha-white-10)] rounded-lg animate-spin-slow mx-auto mb-4"
+            className="mx-auto mb-4 h-16 w-16 animate-spin-slow rounded-lg border border-[var(--alpha-white-10)]"
             style={{ borderTopColor: "var(--accent-green)" }}
           />
           <p className="font-mono text-sm text-[var(--gray-500)]">
@@ -29,10 +29,10 @@ export default function GraphPage() {
 
   return (
     <div
-      className="relative rounded-xl overflow-hidden border border-[var(--alpha-white-5)]"
+      className="relative w-full overflow-hidden rounded-xl border border-[var(--alpha-white-5)] shadow-[0_24px_80px_rgba(0,0,0,0.24)]"
       style={{
-        height: "calc(100vh - 200px)",
-        minHeight: 500,
+        height: "calc(100vh - 168px)",
+        minHeight: 620,
         background: "radial-gradient(ellipse at center, #0A0A14 0%, #000000 70%)",
       }}
     >

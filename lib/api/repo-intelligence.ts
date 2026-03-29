@@ -1,4 +1,4 @@
-import { TaskType } from "@google/generative-ai";
+
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   buildGitHubBlobUrl,
@@ -182,7 +182,7 @@ export async function retrieveRepoContext(params: {
   const queryEmbedding = await generateQueryEmbedding(
     apiKey,
     query,
-    TaskType.RETRIEVAL_QUERY
+    "RETRIEVAL_QUERY"
   );
 
   const { data: chunks, error } = await supabase.rpc("hybrid_match_chunks", {

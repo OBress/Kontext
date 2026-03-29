@@ -2,17 +2,12 @@
 
 import { motion } from "framer-motion";
 import {
-  Zap,
-  Brain,
-  Sparkles,
   GitCommitHorizontal,
   RefreshCw,
-  DollarSign,
 } from "lucide-react";
 import { BranchDropdown } from "@/app/components/shared/BranchDropdown";
 
 export interface IngestionConfig {
-  understanding_tier: 1 | 2 | 3;
   watched_branch: string;
   backfill_timeline: boolean;
   auto_sync_enabled: boolean;
@@ -20,7 +15,6 @@ export interface IngestionConfig {
 }
 
 export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
-  understanding_tier: 2,
   watched_branch: "main",
   backfill_timeline: true,
   auto_sync_enabled: true,
@@ -36,11 +30,6 @@ interface IngestionConfigPanelProps {
   branchesLoading?: boolean;
 }
 
-const TIERS = [
-  { value: 1 as const, name: "Light", icon: Zap, cost: 1, color: "var(--accent-green)" },
-  { value: 2 as const, name: "Standard", icon: Brain, cost: 2, color: "var(--accent-amber)" },
-  { value: 3 as const, name: "Deep Dive", icon: Sparkles, cost: 3, color: "#A371F7" },
-];
 
 const DEPTH_OPTIONS = [
   { value: 20, label: "20" },
@@ -88,55 +77,6 @@ export function IngestionConfigPanel({
       )}
 
       <div className="px-5 py-5 space-y-5">
-        {/* ── Tier Selector ─────────────────────────────────────── */}
-        <div>
-          <div className="font-mono text-xs font-semibold text-[var(--gray-300)] uppercase tracking-wider mb-2.5">
-            Understanding Depth
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            {TIERS.map((tier) => {
-              const isSelected = config.understanding_tier === tier.value;
-              const Icon = tier.icon;
-              return (
-                <button
-                  key={tier.value}
-                  onClick={() => update({ understanding_tier: tier.value })}
-                  className="relative flex items-center justify-center gap-2.5 py-3 px-2 rounded-lg transition-all cursor-pointer bg-transparent border"
-                  style={{
-                    borderColor: isSelected ? `${tier.color}50` : "var(--alpha-white-8)",
-                    background: isSelected ? `color-mix(in srgb, ${tier.color} 8%, transparent)` : "var(--surface-1)",
-                  }}
-                >
-                  {isSelected && (
-                    <motion.div
-                      layoutId="tier-ring"
-                      className="absolute inset-0 rounded-lg"
-                      style={{ border: `1.5px solid ${tier.color}40` }}
-                      transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                    />
-                  )}
-                  <Icon size={16} style={{ color: isSelected ? tier.color : "var(--gray-500)" }} />
-                  <span
-                    className="font-mono text-sm font-bold relative z-10"
-                    style={{ color: isSelected ? tier.color : "var(--gray-300)" }}
-                  >
-                    {tier.name}
-                  </span>
-                  <span className="flex items-center gap-0 relative z-10 ml-auto">
-                    {Array.from({ length: 3 }, (_, i) => (
-                      <DollarSign
-                        key={i}
-                        size={9}
-                        className={i < tier.cost ? "text-[var(--accent-green)]" : "text-[var(--gray-700)]"}
-                      />
-                    ))}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
         {/* ── 2-column: Branch + Auto-Sync ──────────────────────── */}
         <div className="grid grid-cols-2 gap-3">
           {/* Branch */}

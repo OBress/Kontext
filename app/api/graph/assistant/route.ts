@@ -57,11 +57,7 @@ export async function POST(request: Request) {
       .eq("full_name", repoFullName)
       .single();
 
-    const bundle = toArchitectureBundle(
-      repoData?.architecture_analysis || null,
-      repoData?.architecture_for_sha || repoData?.last_synced_sha || null,
-      repoData?.architecture_analyzed_at || null
-    );
+    const bundle = toArchitectureBundle(repoData?.architecture_analysis || null);
 
     const answer = await answerRepoQuestion({
       apiKey,
