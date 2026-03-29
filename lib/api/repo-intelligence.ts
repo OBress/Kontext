@@ -179,6 +179,9 @@ const ACTIVITY_PATTERNS =
 const COMMIT_PATTERNS =
   /\b(commit|push|change|diff|what changed|who changed|when.*change|history|log|blame|authored|wrote)\b/i;
 
+const CODE_LOOKUP_PATTERNS =
+  /\b(file|files|function|functions|class|classes|component|components|hook|hooks|endpoint|endpoints|route|routes|api|service|services|schema|sql|migration|config|where is|which file|implementation|symbol|method|methods)\b/i;
+
 function detectQueryIntent(query: string) {
   const q = query.toLowerCase();
   return {
@@ -187,6 +190,7 @@ function detectQueryIntent(query: string) {
     isArchitectureQuery: ARCHITECTURE_PATTERNS.test(q),
     isActivityQuery: ACTIVITY_PATTERNS.test(q),
     isCommitQuery: COMMIT_PATTERNS.test(q),
+    isCodeLookupQuery: CODE_LOOKUP_PATTERNS.test(q),
   };
 }
 
@@ -247,6 +251,16 @@ export async function retrieveRepoContext(params: {
   } = params;
 
   const intent = detectQueryIntent(query);
+  const embeddingTaskType =
+    intent.isCodeLookupQuery || intent.isArchitectureQuery || intent.isHealthQuery
+      ? "CODE_RETRIEVAL_QUERY"
+      : "RETRIEVAL_QUERY";
+  const effectiveMatchCount =
+    intent.isCodeLookupQuery || intent.isArchitectureQuery
+      ? Math.max(matchCount, 40)
+      : intent.isCommitQuery || intent.isRecencyQuery
+        ? Math.max(matchCount, 30)
+        : matchCount;
 
   // ── Repo metadata (expanded) ─────────────────────────────────────────
   const repoQueryBuilder = supabase
@@ -266,13 +280,13 @@ export async function retrieveRepoContext(params: {
   const queryEmbedding = await generateQueryEmbedding(
     apiKey,
     query,
-    "RETRIEVAL_QUERY"
+    embeddingTaskType
   );
 
   const { data: chunks, error } = await supabase.rpc("hybrid_match_chunks", {
     query_text: query,
     query_embedding: JSON.stringify(queryEmbedding),
-    match_count: matchCount,
+    match_count: effectiveMatchCount,
     filter_repo: repoFullName,
     filter_user_id: userId,
   });
@@ -356,7 +370,7 @@ export async function retrieveRepoContext(params: {
 
   if (includeTimeline) {
     const timelineMatchCount =
-      intent.isRecencyQuery || intent.isCommitQuery ? 8 : 3;
+      intent.isRecencyQuery || intent.isCommitQuery ? 12 : 4;
     const { data: timelineChunks, error: timelineError } = await supabase.rpc(
       "match_timeline",
       {
@@ -409,7 +423,7 @@ export async function retrieveRepoContext(params: {
         .eq("repo_full_name", repoFullName)
         .neq("author_name", "system")
         .order("committed_at", { ascending: false })
-        .limit(10);
+        .limit(intent.isCommitQuery || intent.isRecencyQuery ? 25 : 10);
 
       if (recentCommits && recentCommits.length > 0) {
         const rows = recentCommits as RecentCommitRow[];
@@ -619,9 +633,9 @@ export function buildRepoAnswerSystemPrompt(): string {
     mission:
       "Answer repository questions using only the supplied evidence pack. The pack may include code context, commit history, architecture analysis, health findings, activity events, and repository metadata.",
     outputStyle: [
-      "Be brief and direct. Use short paragraphs or bullets only when they add clarity.",
+      "Be brief and direct.",
       "Wrap repository file paths in backticks exactly as they appear in the evidence pack.",
-      "Do not emit Mermaid, JSON payloads, fenced visual blocks, or tool-call markup.",
+      "Use Markdown bullets or compact tables when the question is list-shaped.",
       'If the evidence is not strong enough, say "Insufficient evidence" and suggest the next file or area to inspect.',
     ],
     taskRules: [
@@ -630,7 +644,9 @@ export function buildRepoAnswerSystemPrompt(): string {
       "Use health findings when the question is about security, quality, bugs, or audit results.",
       "Use activity feed when the question is about PRs, issues, releases, workflows, or CI/CD.",
       "When the user asks about the 'last' or 'most recent' commit, prefer the Recent commit history block ordered by date.",
+      "For narrowly scoped recency questions, stay focused on the newest relevant commit unless the user explicitly asks for more history.",
       "When listing items such as files or endpoints, be thorough within the supplied evidence.",
+      "Do not invent custom JSON payloads or Mermaid blocks in the answer text.",
       "Do not imply certainty beyond the retrieved context.",
     ],
   });
@@ -646,6 +662,7 @@ export function buildRepoAnswerPrompt(params: {
   healthFindingsBlock?: string;
   activityBlock?: string;
   repoMetadataBlock?: string;
+  conversationHistoryBlock?: string;
   extraInstructions?: string;
   question: string;
 }): string {
@@ -659,6 +676,7 @@ export function buildRepoAnswerPrompt(params: {
     healthFindingsBlock,
     activityBlock,
     repoMetadataBlock,
+    conversationHistoryBlock,
     extraInstructions,
     question,
   } = params;
@@ -669,6 +687,16 @@ export function buildRepoAnswerPrompt(params: {
     reason: string;
     content: string;
   }> = [];
+
+  if (conversationHistoryBlock) {
+    supplementalExcerpts.push({
+      title: "Recent chat history",
+      source: repoFullName,
+      reason:
+        "Use this only to resolve follow-up references such as 'that commit' or 'that file'.",
+      content: conversationHistoryBlock,
+    });
+  }
 
   if (recentCommitsBlock) {
     supplementalExcerpts.push({
@@ -771,9 +799,10 @@ export function buildRepoAnswerPrompt(params: {
     "- Start with the direct answer.",
     "- Keep the answer grounded in the evidence pack.",
     "- Mention relevant file paths in backticks when they support the answer.",
+    "- Use flat bullets or a compact Markdown table when the request is list-shaped or comparative.",
     "- For recency questions (last/latest/newest), use the Recent commit history which is ordered by date.",
+    "- Stay scoped to the newest relevant commit unless the user asks for broader history.",
     "- Include commit SHAs, dates, and authors when answering commit-related questions.",
-    "- Do not generate diagrams, charts, fenced JSON, or structured tool payloads.",
     "- If evidence is partial, say so briefly instead of guessing.",
   ]
     .filter(Boolean)
@@ -792,6 +821,7 @@ export async function answerRepoQuestion(params: {
   healthFindingsBlock?: string;
   activityBlock?: string;
   repoMetadataBlock?: string;
+  conversationHistoryBlock?: string;
   extraInstructions?: string;
 }): Promise<string> {
   return generateText(
@@ -816,6 +846,7 @@ export async function streamRepoAnswer(params: {
   healthFindingsBlock?: string;
   activityBlock?: string;
   repoMetadataBlock?: string;
+  conversationHistoryBlock?: string;
   extraInstructions?: string;
   attachedFileBlocks?: string;
   imageParts?: Array<{ mimeType: string; data: string }>;

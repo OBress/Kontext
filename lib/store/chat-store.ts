@@ -1,50 +1,33 @@
 "use client";
 
 import { create } from "zustand";
+import type {
+  ChatAnswerMode,
+  ChatCitation,
+  ChatFreshnessMeta,
+  ChatMessage,
+  ChatSourceMode,
+  TimelineCitation,
+} from "@/types/chat";
 
-export type ChatAnswerMode = "grounded" | "partial" | "insufficient_evidence";
+export type {
+  ChatAnswerMode,
+  ChatAttachedImage,
+  ChatCitation,
+  ChatFreshnessMeta,
+  ChatMessage,
+  ChatSourceMode,
+  PersistedChatMessage,
+  TimelineCitation,
+} from "@/types/chat";
 
-export interface ChatCitation {
-  citation_id: string;
-  index_version_id: string | null;
-  commit_sha: string | null;
-  file_path: string;
-  line_start: number;
-  line_end: number;
-  language: string;
-  snippet: string;
-  retrieval_score: number;
-  github_url: string | null;
-}
-
-export interface TimelineCitation {
-  sha: string;
-  date: string;
-  committed_at: string;
-  ai_summary: string;
-  message: string;
-  author: string;
-  author_avatar_url: string | null;
-  push_group_id: string | null;
-  similarity: number;
-}
-
-export interface ChatAttachedImage {
-  name: string;
-  mimeType: string;
-  dataUrl: string;
-}
-
-export interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: Date;
-  citations?: ChatCitation[];
+interface LastAssistantContext {
+  citations: ChatCitation[];
+  answerMode: ChatAnswerMode;
   timelineCitations?: TimelineCitation[];
-  answerMode?: ChatAnswerMode;
-  attachedFiles?: string[];
-  attachedImages?: ChatAttachedImage[];
+  sourceMode?: ChatSourceMode;
+  resolvedCommitSha?: string | null;
+  freshness?: ChatFreshnessMeta | null;
 }
 
 interface ChatState {
@@ -53,12 +36,9 @@ interface ChatState {
   currentCitations: ChatCitation[];
 
   addMessage: (message: ChatMessage) => void;
+  setMessages: (messages: ChatMessage[]) => void;
   updateLastMessage: (content: string) => void;
-  setLastAssistantContext: (
-    citations: ChatCitation[],
-    answerMode: ChatAnswerMode,
-    timelineCitations?: TimelineCitation[]
-  ) => void;
+  setLastAssistantContext: (context: LastAssistantContext) => void;
   setIsStreaming: (streaming: boolean) => void;
   clearChat: () => void;
 }
@@ -70,6 +50,16 @@ export const useChatStore = create<ChatState>((set) => ({
 
   addMessage: (message) =>
     set((state) => ({ messages: [...state.messages, message] })),
+
+  setMessages: (messages) =>
+    set({
+      messages,
+      currentCitations:
+        [...messages]
+          .reverse()
+          .find((message) => message.role === "assistant" && message.citations)
+          ?.citations || [],
+    }),
 
   updateLastMessage: (content) =>
     set((state) => {
@@ -83,7 +73,14 @@ export const useChatStore = create<ChatState>((set) => ({
       return { messages };
     }),
 
-  setLastAssistantContext: (citations, answerMode, timelineCitations) =>
+  setLastAssistantContext: ({
+    citations,
+    answerMode,
+    timelineCitations,
+    sourceMode,
+    resolvedCommitSha,
+    freshness,
+  }) =>
     set((state) => {
       const messages = [...state.messages];
 
@@ -94,6 +91,9 @@ export const useChatStore = create<ChatState>((set) => ({
             citations,
             timelineCitations,
             answerMode,
+            sourceMode,
+            resolvedCommitSha: resolvedCommitSha ?? null,
+            freshness: freshness ?? null,
           };
           break;
         }

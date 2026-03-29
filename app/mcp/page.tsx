@@ -23,37 +23,90 @@ import {
 // ── Tool definitions ────────────────────────────────
 const mcpTools = [
   {
+    name: "list_repos",
+    description: "List repositories available to the MCP key, including indexing and sync metadata.",
+    params: { repo_full_name: "string? (filter to one repo)", limit: "number? (default: 100)" },
+  },
+  {
+    name: "get_repo_overview",
+    description: "Return the same repo overview data shown in the UI: repo card metadata, sync status, recent runs, activity, and commits.",
+    params: { repo_full_name: "string" },
+  },
+  {
     name: "search_code",
-    description: "Semantic search across all indexed repositories using vector similarity. Returns matching code chunks ranked by relevance.",
-    params: { query: "string", max_results: "number (default: 5)" },
+    description: "Semantic search across indexed code with grounded snippets, line ranges, and GitHub links when available.",
+    params: {
+      repo_full_name: "string? (optional unless key is repo-scoped)",
+      query: "string",
+      max_results: "number (default: 5)",
+    },
   },
   {
     name: "get_file",
-    description: "Retrieve the full content of a specific file from the indexed codebase, reconstructed from stored chunks.",
-    params: { path: "string (relative file path)" },
+    description: "Retrieve an indexed file with reconstructed content plus commit and index metadata.",
+    params: {
+      repo_full_name: "string? (recommended for account-wide keys)",
+      path: "string (relative file path)",
+    },
   },
   {
     name: "list_files",
-    description: "List all indexed files, optionally filtered by a glob pattern. Returns file paths, extensions, and line counts.",
-    params: { pattern: "string? (glob, e.g. 'components/**/*.tsx')" },
+    description: "List indexed files for one repo or across all repos, optionally filtered by a glob pattern.",
+    params: {
+      repo_full_name: "string? (optional unless key is repo-scoped)",
+      pattern: "string? (glob, e.g. 'components/**/*.tsx')",
+      limit: "number? (default: 200)",
+    },
   },
   {
     name: "ask_question",
-    description: "Ask a natural language question about the codebase. Uses RAG to find relevant code context, then generates an answer via Gemini.",
-    params: { question: "string" },
+    description: "Ask a grounded natural language question about the codebase using RAG, timeline, architecture, health, and activity context.",
+    params: {
+      repo_full_name: "string? (optional unless key is repo-scoped)",
+      question: "string",
+    },
+  },
+  {
+    name: "get_repo_graph",
+    description: "Return the dependency graph and architecture analysis bundle used by the graph UI.",
+    params: { repo_full_name: "string" },
+  },
+  {
+    name: "get_sync_status",
+    description: "Return sync state, the latest sync job, and live upstream commit status when available.",
+    params: { repo_full_name: "string" },
+  },
+  {
+    name: "get_timeline",
+    description: "Return the grouped commit timeline, pagination, and timeline stats for the repository.",
+    params: {
+      repo_full_name: "string",
+      limit: "number? (default: 50)",
+      offset: "number? (default: 0)",
+    },
+  },
+  {
+    name: "get_recent_activity",
+    description: "Return the recent activity feed, respecting the user’s saved activity filters by default.",
+    params: {
+      repo_full_name: "string? (optional unless key is repo-scoped)",
+      limit: "number? (default: 20)",
+      event_types: "string[]? (optional filter)",
+    },
   },
   {
     name: "get_repo_health",
-    description: "Retrieve Kontext's latest repo health summary, including open findings and the latest automated check run.",
-    params: { repo_full_name: "string? (optional when key is repo-scoped)" },
+    description: "Retrieve Kontext's latest repo health summary, including freshness against the current synced head.",
+    params: { repo_full_name: "string" },
   },
   {
     name: "list_findings",
-    description: "List current automated findings from Kontext checks, filtered by status or check lane.",
+    description: "List current automated findings from Kontext checks, filtered by status, lane, or dismissal state.",
     params: {
-      repo_full_name: "string? (optional when key is repo-scoped)",
+      repo_full_name: "string? (optional unless key is repo-scoped)",
       status: "string? (open | resolved)",
       check_type: "string? (security | optimization | consistency | change_impact)",
+      include_dismissed: "boolean? (default: false)",
       limit: "number? (default: 20)",
     },
   },
@@ -63,10 +116,33 @@ const mcpTools = [
     params: { finding_id: "number" },
   },
   {
+    name: "list_check_runs",
+    description: "List recent repo-health runs for one repo or across all repos.",
+    params: {
+      repo_full_name: "string? (optional unless key is repo-scoped)",
+      limit: "number? (default: 20)",
+    },
+  },
+  {
+    name: "list_check_configs",
+    description: "Return repo-health automation settings for the repository.",
+    params: { repo_full_name: "string" },
+  },
+  {
+    name: "get_team_workspace",
+    description: "Return team members, pending invites, onboarding templates, and assignment summaries for the repository.",
+    params: { repo_full_name: "string" },
+  },
+  {
+    name: "get_onboarding_experience",
+    description: "Return the current user's onboarding assignment or preview experience for the repository.",
+    params: { repo_full_name: "string" },
+  },
+  {
     name: "rerun_checks",
     description: "Ask Kontext to rerun its automated checks so an external agent can verify that a fix actually resolved the issue.",
     params: {
-      repo_full_name: "string? (optional when key is repo-scoped)",
+      repo_full_name: "string",
       check_types: "string[]? (subset of lanes to rerun)",
     },
   },
@@ -109,7 +185,6 @@ const integrations: IntegrationConfig[] = [
               url: `${url}/api/mcp/sse`,
               headers: {
                 Authorization: `Bearer ${key || "kt_your_key_here"}`,
-                "x-google-api-key": "your_google_ai_key",
               },
             },
           },
@@ -130,7 +205,6 @@ const integrations: IntegrationConfig[] = [
               url: `${url}/api/mcp/sse`,
               headers: {
                 Authorization: `Bearer ${key || "kt_your_key_here"}`,
-                "x-google-api-key": "your_google_ai_key",
               },
             },
           },
@@ -147,10 +221,9 @@ const integrations: IntegrationConfig[] = [
         {
           mcpServers: {
             kontext: {
-              url: `${url}/api/mcp/sse`,
+              serverUrl: `${url}/api/mcp/sse`,
               headers: {
                 Authorization: `Bearer ${key || "kt_your_key_here"}`,
-                "x-google-api-key": "your_google_ai_key",
               },
             },
           },
@@ -170,7 +243,6 @@ const integrations: IntegrationConfig[] = [
               url: `${url}/api/mcp/sse`,
               headers: {
                 Authorization: `Bearer ${key || "kt_your_key_here"}`,
-                "x-google-api-key": "your_google_ai_key",
               },
             },
           },
@@ -302,7 +374,7 @@ export default function McpPage() {
                   MCP Server Active
                 </h3>
                 <p className="font-mono text-xs text-[var(--gray-500)] m-0">
-                  Uptime: {formatUptime(uptime)} · 4 tools exposed
+                  Uptime: {formatUptime(uptime)} · {mcpTools.length} tools exposed
                 </p>
               </div>
             </div>

@@ -1,6 +1,7 @@
 import { createAdminClient } from "./auth";
 import { analyzeArchitecture } from "./architecture-analyzer";
 import { resolveImport } from "./graph-builder";
+import { enqueueAiTask } from "./sync-queue";
 import type {
   ArchComponent,
   ArchConnection,
@@ -767,6 +768,13 @@ export async function loadArchitectureInputs(params: {
   };
 }
 
+export function buildArchitectureRefreshTaskId(
+  repoFullName: string,
+  sourceSha?: string | null
+) {
+  return `arch-refresh:${repoFullName}:${sourceSha || "latest"}`;
+}
+
 export async function refreshArchitectureBundle(params: {
   userId: string;
   repoFullName: string;
@@ -873,6 +881,8 @@ export async function queueArchitectureRefresh(params: {
     return;
   }
 
+  const apiKey = params.apiKey;
+
   await adminDb
     .from("repos")
     .update({
@@ -882,21 +892,32 @@ export async function queueArchitectureRefresh(params: {
     .eq("user_id", params.userId)
     .eq("full_name", params.repoFullName);
 
-  void refreshArchitectureBundle({
+  return enqueueAiTask({
     userId: params.userId,
     repoFullName: params.repoFullName,
-    apiKey: params.apiKey,
-    sourceSha: params.sourceSha,
-  }).catch(async (error) => {
-    console.error("[architecture] Background refresh failed:", error);
-    await adminDb
-      .from("repos")
-      .update({
-        architecture_status: "error" satisfies ArchitectureStatus,
-        architecture_error:
-          error instanceof Error ? error.message : "Architecture refresh failed.",
-      })
-      .eq("user_id", params.userId)
-      .eq("full_name", params.repoFullName);
+    taskId: buildArchitectureRefreshTaskId(params.repoFullName, params.sourceSha),
+    execute: async () => {
+      try {
+        await refreshArchitectureBundle({
+          userId: params.userId,
+          repoFullName: params.repoFullName,
+          apiKey,
+          sourceSha: params.sourceSha,
+        });
+      } catch (error) {
+        console.error("[architecture] Background refresh failed:", error);
+        await adminDb
+          .from("repos")
+          .update({
+            architecture_status: "error" satisfies ArchitectureStatus,
+            architecture_error:
+              error instanceof Error ? error.message : "Architecture refresh failed.",
+          })
+          .eq("user_id", params.userId)
+          .eq("full_name", params.repoFullName);
+
+        throw error;
+      }
+    },
   });
 }

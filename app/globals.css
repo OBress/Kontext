@@ -1039,7 +1039,6 @@
 }
 
 .architecture-assistant--floating {
-  resize: both;
   overflow: hidden;
   min-width: 420px;
   min-height: 420px;
@@ -1091,6 +1090,35 @@
   color: var(--gray-100);
   font-size: 18px;
   font-weight: 600;
+}
+
+.architecture-assistant__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.architecture-assistant__clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--alpha-white-10);
+  background: var(--alpha-white-5);
+  color: var(--gray-400);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.architecture-assistant__clear:hover {
+  border-color: rgba(248, 81, 73, 0.22);
+  background: rgba(248, 81, 73, 0.08);
+  color: var(--accent-red);
 }
 
 .architecture-assistant__close {
@@ -1307,6 +1335,26 @@
   cursor: not-allowed;
 }
 
+.architecture-assistant__resize-handle {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  padding: 0;
+  border-radius: 6px;
+  background:
+    linear-gradient(135deg, transparent 0 38%, rgba(255, 255, 255, 0.14) 38% 46%, transparent 46% 58%, rgba(63, 185, 80, 0.55) 58% 66%, transparent 66% 100%);
+  cursor: nwse-resize;
+  opacity: 0.9;
+  touch-action: none;
+}
+
+.architecture-assistant__resize-handle:hover {
+  opacity: 1;
+}
+
 /* ── React Flow Controls ── */
 
 .architecture-controls {
@@ -1350,6 +1398,10 @@
 
   .architecture-assistant {
     border-radius: 20px;
+  }
+
+  .architecture-assistant__resize-handle {
+    display: none;
   }
 
   .architecture-assistant-fab {

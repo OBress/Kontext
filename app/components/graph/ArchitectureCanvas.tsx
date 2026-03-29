@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Background,
   BackgroundVariant,
@@ -35,6 +35,12 @@ import { ArchitectureEdge } from "./ArchitectureEdge";
 import { ArchitectureNode } from "./ArchitectureNode";
 import { GroupNode } from "./GroupNode";
 import type { ArchitectureAssistantAction } from "@/lib/api/architecture-actions";
+import {
+  getArchitectureAutoFocusMaxZoom,
+  getArchitectureAutoFocusMinZoom,
+  getArchitectureAutoFocusPadding,
+  type ArchitectureAssistantViewportState,
+} from "@/lib/graph/architecture-focus";
 import { useAppStore } from "@/lib/store/app-store";
 import type { ChatCitation } from "@/lib/store/chat-store";
 import { useGraphStore } from "@/lib/store/graph-store";
@@ -43,6 +49,7 @@ import {
   type ArchComponent,
   type ArchitectureBundle,
   type ArchitectureLayerId,
+  type ArchitectureStatus,
   type ArchitectureView,
 } from "@/types/architecture";
 
@@ -203,11 +210,23 @@ function viewToFlowElements(
 }
 
 function countSummary(view: ArchitectureView | null) {
-  if (!view) return "Architecture bundle not ready yet";
+  if (!view) return "Architecture map not ready yet";
   const nodeCount =
     view.components.length +
     view.components.reduce((total, component) => total + (component.children?.length || 0), 0);
   return `${nodeCount} components - ${view.connections.length} connections`;
+}
+
+function getArchitectureStatusHint(status: ArchitectureStatus): string | null {
+  if (status === "queued") {
+    return "Architecture refresh is queued in the background.";
+  }
+
+  if (status === "analyzing") {
+    return "Architecture map is being prepared in the background.";
+  }
+
+  return null;
 }
 
 interface ArchitectureCanvasProps {
@@ -250,7 +269,8 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [assistantOpen, setAssistantOpen] = useState(false);
-  const autoAnalyzeRef = useRef(false);
+  const [assistantViewportState, setAssistantViewportState] =
+    useState<ArchitectureAssistantViewportState | null>(null);
 
   const loadGraph = useCallback(async () => {
     const response = await fetch(`/api/graph?repo=${encodeURIComponent(repoFullName)}`);
@@ -355,6 +375,10 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
       if (!response.ok) {
         const errData = await response.json().catch(() => null);
         console.error("Analysis failed:", errData);
+        setArchitectureError(
+          errData?.error?.message || "Architecture refresh failed."
+        );
+        setArchitectureStatus("error");
         return;
       }
 
@@ -369,6 +393,10 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
       setIsArchitectureStale(false);
     } catch (error) {
       console.error("Analysis error:", error);
+      setArchitectureError(
+        error instanceof Error ? error.message : "Architecture refresh failed."
+      );
+      setArchitectureStatus("error");
     } finally {
       setIsAnalyzing(false);
     }
@@ -384,14 +412,6 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
     setIsAnalyzing,
     setIsArchitectureStale,
   ]);
-
-  useEffect(() => {
-    if (autoAnalyzeRef.current) return;
-    if (architectureBundle || !apiKey) return;
-    if (!["missing", "stale", "error"].includes(architectureStatus)) return;
-    autoAnalyzeRef.current = true;
-    void handleAnalyze();
-  }, [apiKey, architectureBundle, architectureStatus, handleAnalyze]);
 
   const onSelectionChange = useCallback(
     (params: OnSelectionChangeParams) => {
@@ -415,15 +435,22 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
           .map((nodeId) => reactFlow.getNode(nodeId))
           .filter((node): node is Node => Boolean(node));
         if (matchedNodes.length > 0) {
+          const currentZoom = reactFlow.getZoom();
+
           reactFlow.fitView({
             nodes: matchedNodes,
             duration: 520,
-            padding: 0.24,
+            padding: getArchitectureAutoFocusPadding(assistantViewportState),
+            minZoom: getArchitectureAutoFocusMinZoom(currentZoom),
+            maxZoom: getArchitectureAutoFocusMaxZoom(
+              currentZoom,
+              assistantViewportState
+            ),
           });
         }
       }, 220);
     },
-    [reactFlow]
+    [assistantViewportState, reactFlow]
   );
 
   const ensureExpandedGroups = useCallback(
@@ -508,6 +535,10 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
     },
     [focusFilePath]
   );
+
+  const handleClearAssistantChat = useCallback(() => {
+    clearHighlights();
+  }, [clearHighlights]);
 
   const applyAssistantAction = useCallback(
     (action: ArchitectureAssistantAction) => {
@@ -601,6 +632,13 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
     setExpandedGroups([]);
   }, [setExpandedGroups]);
 
+  const panelHint = useMemo(() => {
+    if (architectureError) return architectureError;
+    if (activeSimulation) return activeSimulation.summary;
+    if (activeTrace) return "Tracing highlighted path on the graph.";
+    return getArchitectureStatusHint(architectureStatus);
+  }, [activeSimulation, activeTrace, architectureError, architectureStatus]);
+
   return (
     <div className="architecture-canvas">
       <ReactFlow
@@ -684,7 +722,7 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
           {isAnalyzing && (
             <div className="analyze-status">
               <Loader2 size={16} className="animate-spin" />
-              <span>Analyzing codebase...</span>
+              <span>Refreshing architecture map...</span>
             </div>
           )}
 
@@ -696,7 +734,7 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
                   <span className={`architecture-status-pill architecture-status-pill--${architectureStatus}`}>
                     {architectureStatus}
                   </span>
-                  {isArchitectureStale && (
+                  {isArchitectureStale && architectureStatus !== "stale" && (
                     <span className="architecture-status-pill architecture-status-pill--stale">
                       stale
                     </span>
@@ -708,26 +746,22 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
                     </span>
                   )}
                 </div>
-                {architectureError && <span className="analyze-hint">{architectureError}</span>}
-                {activeSimulation && (
-                  <span className="analyze-hint">{activeSimulation.summary}</span>
-                )}
-                {!activeSimulation && activeTrace && (
-                  <span className="analyze-hint">Tracing highlighted path on the graph.</span>
-                )}
+                {panelHint && <span className="analyze-hint">{panelHint}</span>}
               </div>
               <button
                 onClick={handleAnalyze}
                 disabled={!apiKey || isAnalyzing}
                 className="analyze-refresh-btn"
-                title="Refresh architecture"
+                title="Refresh architecture map"
               >
                 {architectureData ? <RefreshCw size={13} /> : <Brain size={13} />}
               </button>
             </div>
           )}
 
-          {!apiKey && <p className="analyze-hint">Set your AI API key to analyze or chat</p>}
+          {!apiKey && (
+            <p className="analyze-hint">Set your AI API key to refresh the map or use chat</p>
+          )}
         </Panel>
       </ReactFlow>
 
@@ -744,6 +778,8 @@ function ArchitectureCanvasInner({ repoFullName }: ArchitectureCanvasProps) {
         layer={activeLayer}
         open={assistantOpen}
         onClose={() => setAssistantOpen(false)}
+        onClearChat={handleClearAssistantChat}
+        onViewportStateChange={setAssistantViewportState}
         onAction={applyAssistantAction}
         onOpenCitation={handleOpenCitation}
         onOpenFilePath={focusFilePath}

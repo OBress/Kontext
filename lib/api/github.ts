@@ -73,6 +73,15 @@ export interface GitHubCommit {
   } | null;
 }
 
+export interface GitHubCommitDetails extends GitHubCommit {
+  files?: GitHubChangedFile[];
+  stats?: {
+    additions: number;
+    deletions: number;
+    total: number;
+  };
+}
+
 export interface GitHubChangedFile {
   filename: string;
   status: "added" | "removed" | "modified" | "renamed" | "copied" | "changed" | "unchanged";
@@ -282,6 +291,24 @@ export async function fetchLatestCommit(
     throw githubError("No commits found on this branch.");
   }
   return commits[0];
+}
+
+export async function fetchCommitDetails(
+  token: string,
+  owner: string,
+  name: string,
+  sha: string
+): Promise<GitHubCommitDetails> {
+  const res = await fetch(
+    `${GITHUB_API}/repos/${owner}/${name}/commits/${encodeURIComponent(sha)}`,
+    { headers: headers(token) }
+  );
+
+  if (!res.ok) {
+    throw githubError(`Failed to fetch commit details: ${res.status}`);
+  }
+
+  return res.json();
 }
 
 /**

@@ -15,11 +15,21 @@ import {
   MessageCircleMore,
   Send,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import { formatLineRange } from "@/lib/code";
 import type { ArchitectureLayerId } from "@/types/architecture";
 import type { ArchitectureAssistantAction } from "@/lib/api/architecture-actions";
+import type { ArchitectureAssistantViewportState } from "@/lib/graph/architecture-focus";
+import {
+  clampAssistantWindowPosition,
+  clampAssistantWindowSize,
+  DEFAULT_ASSISTANT_HEIGHT,
+  DEFAULT_ASSISTANT_WIDTH,
+  getDefaultAssistantWindowPosition,
+  type AssistantViewport,
+} from "@/lib/graph/architecture-assistant-window";
 import type { ChatAnswerMode, ChatCitation } from "@/lib/store/chat-store";
 import { RichMarkdownMessage } from "@/app/components/chat/RichMarkdownMessage";
 
@@ -33,42 +43,16 @@ interface AssistantMessage {
 }
 
 const STORAGE_KEY = "kontext.architecture.assistant.window.v1";
-const DEFAULT_WIDTH = 560;
-const DEFAULT_HEIGHT = 640;
-const MIN_WIDTH = 420;
-const MIN_HEIGHT = 420;
 
-function clampSize(size: { width: number; height: number }) {
-  if (typeof window === "undefined") return size;
-  return {
-    width: Math.min(Math.max(size.width, MIN_WIDTH), window.innerWidth - 24),
-    height: Math.min(Math.max(size.height, MIN_HEIGHT), window.innerHeight - 32),
-  };
-}
-
-function clampPosition(
-  position: { x: number; y: number },
-  size: { width: number; height: number }
-) {
-  if (typeof window === "undefined") return position;
-  return {
-    x: Math.min(Math.max(position.x, 12), Math.max(12, window.innerWidth - size.width - 12)),
-    y: Math.min(Math.max(position.y, 12), Math.max(12, window.innerHeight - size.height - 12)),
-  };
-}
-
-function getDefaultPosition(size: { width: number; height: number }) {
+function getViewport(): AssistantViewport {
   if (typeof window === "undefined") {
-    return { x: 24, y: 96 };
+    return { width: 1440, height: 960 };
   }
 
-  return clampPosition(
-    {
-      x: window.innerWidth - size.width - 32,
-      y: window.innerHeight - size.height - 32,
-    },
-    size
-  );
+  return {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  };
 }
 
 function answerModeLabel(mode?: ChatAnswerMode) {
@@ -110,6 +94,8 @@ export function ArchitectureAssistant({
   layer,
   open,
   onClose,
+  onClearChat,
+  onViewportStateChange,
   onAction,
   onOpenCitation,
   onOpenFilePath,
@@ -119,6 +105,8 @@ export function ArchitectureAssistant({
   layer: ArchitectureLayerId;
   open: boolean;
   onClose: () => void;
+  onClearChat: () => void;
+  onViewportStateChange: (state: ArchitectureAssistantViewportState | null) => void;
   onAction: (action: ArchitectureAssistantAction) => void;
   onOpenCitation: (citation: ChatCitation) => void;
   onOpenFilePath: (filePath: string, lineStart?: number, lineEnd?: number) => void;
@@ -128,14 +116,36 @@ export function ArchitectureAssistant({
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [size, setSize] = useState({ width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
+  const [size, setSize] = useState({
+    width: DEFAULT_ASSISTANT_WIDTH,
+    height: DEFAULT_ASSISTANT_HEIGHT,
+  });
   const [position, setPosition] = useState({ x: 24, y: 96 });
   const endRef = useRef<HTMLDivElement>(null);
-  const windowRef = useRef<HTMLDivElement>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    return () => {
+      streamAbortRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mounted || !open) {
+      onViewportStateChange(null);
+      return;
+    }
+
+    onViewportStateChange({
+      open,
+      isMobile,
+      width: size.width,
+    });
+  }, [isMobile, mounted, onViewportStateChange, open, size.width]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -161,18 +171,35 @@ export function ArchitectureAssistant({
           position?: { x: number; y: number };
           size?: { width: number; height: number };
         };
-        const nextSize = clampSize(parsed.size || { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
+        const viewport = getViewport();
+        const nextSize = clampAssistantWindowSize(
+          parsed.size || {
+            width: DEFAULT_ASSISTANT_WIDTH,
+            height: DEFAULT_ASSISTANT_HEIGHT,
+          },
+          viewport
+        );
         setSize(nextSize);
-        setPosition(clampPosition(parsed.position || getDefaultPosition(nextSize), nextSize));
+        setPosition(
+          clampAssistantWindowPosition(
+            parsed.position || getDefaultAssistantWindowPosition(nextSize, viewport),
+            nextSize,
+            viewport
+          )
+        );
         return;
       } catch {
         // Ignore malformed persisted state and fall back to defaults.
       }
     }
 
-    const nextSize = clampSize({ width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
+    const viewport = getViewport();
+    const nextSize = clampAssistantWindowSize(
+      { width: DEFAULT_ASSISTANT_WIDTH, height: DEFAULT_ASSISTANT_HEIGHT },
+      viewport
+    );
     setSize(nextSize);
-    setPosition(getDefaultPosition(nextSize));
+    setPosition(getDefaultAssistantWindowPosition(nextSize, viewport));
   }, [isMobile, mounted, open]);
 
   useEffect(() => {
@@ -191,38 +218,22 @@ export function ArchitectureAssistant({
   }, [messages, isStreaming]);
 
   useEffect(() => {
-    if (!mounted || !open || isMobile || !windowRef.current || typeof ResizeObserver === "undefined") {
-      return;
-    }
-
-    const observer = new ResizeObserver((entries) => {
-      const nextRect = entries[0]?.contentRect;
-      if (!nextRect) return;
-      const nextSize = clampSize({
-        width: Math.round(nextRect.width),
-        height: Math.round(nextRect.height),
-      });
-      setSize((current) =>
-        current.width === nextSize.width && current.height === nextSize.height ? current : nextSize
-      );
-      setPosition((current) => clampPosition(current, nextSize));
-    });
-
-    observer.observe(windowRef.current);
-    return () => observer.disconnect();
-  }, [isMobile, mounted, open]);
-
-  useEffect(() => {
     if (!mounted || !open || isMobile) return;
 
     const handleResize = () => {
-      setSize((current) => clampSize(current));
-      setPosition((current) => clampPosition(current, clampSize(size)));
+      const viewport = getViewport();
+      setSize((current) => {
+        const nextSize = clampAssistantWindowSize(current, viewport);
+        setPosition((currentPosition) =>
+          clampAssistantWindowPosition(currentPosition, nextSize, viewport)
+        );
+        return nextSize;
+      });
     };
 
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [isMobile, mounted, open, size]);
+  }, [isMobile, mounted, open]);
 
   const sendPrompt = useCallback(
     async (prompt: string) => {
@@ -245,6 +256,8 @@ export function ArchitectureAssistant({
       setIsStreaming(true);
 
       let assistantContent = "";
+      const abortController = new AbortController();
+      streamAbortRef.current = abortController;
 
       try {
         const response = await fetch("/api/graph/assistant", {
@@ -253,6 +266,7 @@ export function ArchitectureAssistant({
             "Content-Type": "application/json",
             "x-google-api-key": apiKey,
           },
+          signal: abortController.signal,
           body: JSON.stringify({
             repo_full_name: repoFullName,
             message: trimmedPrompt,
@@ -306,19 +320,21 @@ export function ArchitectureAssistant({
             }
 
             if (payload.type === "action") {
-              if (payload.action.type === "simulate_flow") {
+              const action = payload.action;
+
+              if (action.type === "simulate_flow") {
                 setMessages((prev) =>
                   prev.map((message) =>
                     message.id === assistantId
                       ? {
                           ...message,
-                          playbackSummary: payload.action.summary,
+                          playbackSummary: action.summary,
                         }
                       : message
                   )
                 );
               }
-              onAction(payload.action);
+              onAction(action);
               continue;
             }
 
@@ -335,6 +351,9 @@ export function ArchitectureAssistant({
           }
         }
       } catch (error) {
+        if (abortController.signal.aborted) {
+          return;
+        }
         const messageText =
           error instanceof Error ? error.message : "Assistant request failed";
         setMessages((prev) =>
@@ -343,33 +362,85 @@ export function ArchitectureAssistant({
           )
         );
       } finally {
-        setIsStreaming(false);
+        if (streamAbortRef.current === abortController) {
+          streamAbortRef.current = null;
+          setIsStreaming(false);
+        }
       }
     },
     [apiKey, isStreaming, layer, onAction, repoFullName]
   );
 
+  const handleClearChat = useCallback(() => {
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+    setMessages([]);
+    setInput("");
+    setIsStreaming(false);
+    onClearChat();
+  }, [onClearChat]);
+
   const handleHeaderPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      if (isMobile || !windowRef.current) return;
+      if (isMobile) return;
       if ((event.target as HTMLElement).closest("button")) return;
 
       const startPointer = { x: event.clientX, y: event.clientY };
       const startPosition = position;
-      const nextSize = clampSize(size);
+      const viewport = getViewport();
+      const nextSize = clampAssistantWindowSize(size, viewport);
 
       const handlePointerMove = (moveEvent: PointerEvent) => {
         const deltaX = moveEvent.clientX - startPointer.x;
         const deltaY = moveEvent.clientY - startPointer.y;
         setPosition(
-          clampPosition(
+          clampAssistantWindowPosition(
             {
               x: startPosition.x + deltaX,
               y: startPosition.y + deltaY,
             },
-            nextSize
+            nextSize,
+            viewport
           )
         );
+      };
+
+      const handlePointerUp = () => {
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", handlePointerUp);
+      };
+
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp);
+    },
+    [isMobile, position, size]
+  );
+
+  const handleResizePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (isMobile) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const startPointer = { x: event.clientX, y: event.clientY };
+      const startSize = size;
+      const startPosition = position;
+      const viewport = getViewport();
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        const deltaX = moveEvent.clientX - startPointer.x;
+        const deltaY = moveEvent.clientY - startPointer.y;
+        const nextSize = clampAssistantWindowSize(
+          {
+            width: startSize.width + deltaX,
+            height: startSize.height + deltaY,
+          },
+          viewport
+        );
+
+        setSize(nextSize);
+        setPosition(clampAssistantWindowPosition(startPosition, nextSize, viewport));
       };
 
       const handlePointerUp = () => {
@@ -398,11 +469,11 @@ export function ArchitectureAssistant({
 
     return (
       <div
-        ref={windowRef}
-        className={`architecture-assistant architecture-assistant--floating ${
+        className={`architecture-assistant architecture-assistant--floating nowheel nopan ${
           isMobile ? "architecture-assistant--mobile" : ""
         }`}
         style={windowStyle}
+        onWheelCapture={(event) => event.stopPropagation()}
       >
         <div
           className="architecture-assistant__header architecture-assistant__header--drag"
@@ -412,9 +483,17 @@ export function ArchitectureAssistant({
             <div className="architecture-assistant__eyebrow">Architecture Assistant</div>
             <div className="architecture-assistant__title">Graph-aware copilot</div>
           </div>
-          <button onClick={onClose} className="architecture-assistant__close">
-            <X size={16} />
-          </button>
+          <div className="architecture-assistant__header-actions">
+            {messages.length > 0 && (
+              <button onClick={handleClearChat} className="architecture-assistant__clear">
+                <Trash2 size={13} />
+                Clear
+              </button>
+            )}
+            <button onClick={onClose} className="architecture-assistant__close">
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         <div className="architecture-assistant__messages">
@@ -519,11 +598,23 @@ export function ArchitectureAssistant({
             {isStreaming ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
           </button>
         </div>
+
+        {!isMobile && (
+          <button
+            type="button"
+            className="architecture-assistant__resize-handle"
+            onPointerDown={handleResizePointerDown}
+            aria-label="Resize assistant window"
+            tabIndex={-1}
+          />
+        )}
       </div>
     );
   }, [
     apiKey,
+    handleClearChat,
     handleHeaderPointerDown,
+    handleResizePointerDown,
     input,
     isMobile,
     isStreaming,

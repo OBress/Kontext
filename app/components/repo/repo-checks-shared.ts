@@ -39,6 +39,7 @@ export interface RepoCheckFinding {
   recommendation: string | null;
   evidence: string | null;
   updated_at: string;
+  dismissed_at: string | null;
 }
 
 export interface RepoHealthSummary {

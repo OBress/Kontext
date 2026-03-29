@@ -13,6 +13,8 @@ const jiti = createJiti(import.meta.url, {
 
 const architectureRefresh = jiti("../../lib/api/architecture-refresh.ts");
 const architectureActions = jiti("../../lib/api/architecture-actions.ts");
+const assistantWindow = jiti("../../lib/graph/architecture-assistant-window.ts");
+const architectureFocus = jiti("../../lib/graph/architecture-focus.ts");
 
 function run(name, fn) {
   try {
@@ -255,6 +257,60 @@ run("simulation queries emit playback steps for the highlighted code path", () =
   assert.ok(simulation.steps.length >= 3);
   assert.match(simulation.summary, /Simulating flow from/i);
   assert.equal(simulation.layerId, "code");
+});
+
+run("assistant window sizing clamps within the viewport without shrinking stable layouts", () => {
+  const viewport = { width: 1600, height: 1200 };
+  const size = assistantWindow.clampAssistantWindowSize(
+    { width: 560, height: 640 },
+    viewport
+  );
+  assert.deepEqual(size, { width: 560, height: 640 });
+
+  const position = assistantWindow.clampAssistantWindowPosition(
+    { x: 1400, y: 1100 },
+    size,
+    viewport
+  );
+  assert.deepEqual(position, { x: 1028, y: 548 });
+});
+
+run("assistant window default position stays anchored to the lower-right corner", () => {
+  const viewport = { width: 1440, height: 960 };
+  const size = assistantWindow.clampAssistantWindowSize(
+    { width: 560, height: 640 },
+    viewport
+  );
+  const position = assistantWindow.getDefaultAssistantWindowPosition(size, viewport);
+
+  assert.deepEqual(position, { x: 848, y: 288 });
+});
+
+run("assistant-aware auto focus leaves room for the chat window and caps zoom", () => {
+  const assistant = {
+    open: true,
+    isMobile: false,
+    width: 560,
+  };
+
+  assert.deepEqual(architectureFocus.getArchitectureAutoFocusPadding(assistant), {
+    top: 72,
+    right: 616,
+    bottom: 72,
+    left: 96,
+  });
+  assert.equal(
+    architectureFocus.getArchitectureAutoFocusMaxZoom(0.35, assistant),
+    0.62
+  );
+  assert.equal(
+    architectureFocus.getArchitectureAutoFocusMaxZoom(0.9, assistant),
+    0.9
+  );
+  assert.equal(
+    architectureFocus.getArchitectureAutoFocusMinZoom(0.4),
+    0.22
+  );
 });
 
 console.log("All architecture bundle regression checks passed.");

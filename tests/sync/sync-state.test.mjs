@@ -13,10 +13,22 @@ const jiti = createJiti(import.meta.url, {
 
 const syncPipeline = jiti("../../lib/api/sync-pipeline.ts");
 const repoChecks = jiti("../../lib/api/repo-checks.ts");
+const syncQueue = jiti("../../lib/api/sync-queue.ts");
+const architectureRefresh = jiti("../../lib/api/architecture-refresh.ts");
 
 function run(name, fn) {
   try {
     fn();
+    console.log(`PASS ${name}`);
+  } catch (error) {
+    console.error(`FAIL ${name}`);
+    throw error;
+  }
+}
+
+async function runAsync(name, fn) {
+  try {
+    await fn();
     console.log(`PASS ${name}`);
   } catch (error) {
     console.error(`FAIL ${name}`);
@@ -74,6 +86,85 @@ run("repo health freshness is current when the completed run matches the synced 
   });
 
   assert.equal(freshness.isCurrent, true);
+});
+
+run("architecture refresh task ids stay unique per repository and sha", () => {
+  const first = architectureRefresh.buildArchitectureRefreshTaskId(
+    "owen/kontext",
+    "sha-123"
+  );
+  const second = architectureRefresh.buildArchitectureRefreshTaskId(
+    "owen/other-repo",
+    "sha-123"
+  );
+
+  assert.notEqual(first, second);
+  assert.match(first, /owen\/kontext/);
+});
+
+await runAsync("queued architecture refreshes deduplicate before they start running", async () => {
+  syncQueue.resetSyncQueueForTests();
+  try {
+    const releases = [];
+    const blockers = Array.from(
+      { length: syncQueue.MAX_CONCURRENT_PER_USER },
+      (_, index) => {
+        const hold = new Promise((resolve) => {
+          releases.push(resolve);
+        });
+
+        const result = syncQueue.enqueueAiTask({
+          userId: "user-1",
+          repoFullName: `owen/blocker-${index}`,
+          taskId: `blocker:${index}`,
+          execute: () => hold,
+        });
+
+        assert.equal(result.status, "started");
+        return hold;
+      }
+    );
+
+    let executions = 0;
+    let queuedRunResolve;
+    const queuedRun = new Promise((resolve) => {
+      queuedRunResolve = resolve;
+    });
+    const taskId = architectureRefresh.buildArchitectureRefreshTaskId(
+      "owen/kontext",
+      "sha-queued"
+    );
+
+    const first = syncQueue.enqueueAiTask({
+      userId: "user-1",
+      repoFullName: "owen/kontext",
+      taskId,
+      execute: async () => {
+        executions += 1;
+        queuedRunResolve();
+      },
+    });
+    const second = syncQueue.enqueueAiTask({
+      userId: "user-1",
+      repoFullName: "owen/kontext",
+      taskId,
+      execute: async () => {
+        executions += 1;
+        queuedRunResolve();
+      },
+    });
+
+    assert.equal(first.status, "queued");
+    assert.equal(second.status, "deduplicated");
+
+    releases.forEach((release) => release());
+    await Promise.all(blockers);
+    await queuedRun;
+
+    assert.equal(executions, 1);
+  } finally {
+    syncQueue.resetSyncQueueForTests();
+  }
 });
 
 console.log("All sync state regression checks passed.");

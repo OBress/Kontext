@@ -10,8 +10,11 @@ import {
   ChevronRight,
   ClipboardCopy,
   ExternalLink,
+  Eye,
+  EyeOff,
   FileCode,
   Loader2,
+  RotateCcw,
   Settings2,
   Shield,
   Sparkles,
@@ -138,12 +141,12 @@ function SummaryMetric({
   hint: string;
 }) {
   return (
-    <div className="rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--alpha-white-3)] px-4 py-3">
+    <div className="rounded-xl border border-[var(--alpha-white-8)] bg-[var(--alpha-white-3)] px-3 py-2">
       <p className="m-0 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--gray-500)]">
         {label}
       </p>
-      <p className={`mt-2 font-mono text-2xl ${tone}`}>{value}</p>
-      <p className="mt-1 font-mono text-xs text-[var(--gray-500)]">{hint}</p>
+      <p className={`mt-1 font-mono text-lg ${tone}`}>{value}</p>
+      <p className="mt-0.5 font-mono text-[10px] text-[var(--gray-500)]">{hint}</p>
     </div>
   );
 }
@@ -305,11 +308,15 @@ function FindingInspectorModal({
   finding,
   repoFullName,
   onClose,
+  onDismiss,
 }: {
   finding: RepoCheckFinding;
   repoFullName: string;
   onClose: () => void;
+  onDismiss: (findingId: number, restore: boolean) => Promise<void>;
 }) {
+  const [dismissing, setDismissing] = useState(false);
+  const isDismissed = !!finding.dismissed_at;
   const [fileData, setFileData] = useState<LoadedFile | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -422,6 +429,29 @@ function FindingInspectorModal({
                 </a>
               )}
               <button
+                onClick={async () => {
+                  setDismissing(true);
+                  await onDismiss(finding.id, isDismissed);
+                  setDismissing(false);
+                  if (!isDismissed) onClose();
+                }}
+                disabled={dismissing}
+                className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 font-mono text-xs transition-colors disabled:opacity-50 ${
+                  isDismissed
+                    ? "border-[var(--accent-green)]/20 bg-[var(--accent-green)]/10 text-[var(--accent-green)] hover:bg-[var(--accent-green)]/20"
+                    : "border-amber-500/20 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20"
+                }`}
+              >
+                {dismissing ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : isDismissed ? (
+                  <RotateCcw size={12} />
+                ) : (
+                  <EyeOff size={12} />
+                )}
+                {isDismissed ? "Restore" : "Dismiss"}
+              </button>
+              <button
                 onClick={onClose}
                 className="rounded-xl border border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] p-2 text-[var(--gray-400)] transition-colors hover:text-[var(--gray-100)]"
               >
@@ -508,83 +538,52 @@ function AutomationStatusCard({
 
   return (
     <GlowCard glowColor="none" className="overflow-hidden">
-      <div className="border-b border-[var(--alpha-white-8)] px-5 py-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <Sparkles size={15} className="text-[var(--accent-green)]" />
-              <h3 className="m-0 font-mono text-sm font-semibold text-[var(--gray-200)]">
-                Automation Snapshot
-              </h3>
-            </div>
-            <p className="mt-2 font-mono text-xs leading-relaxed text-[var(--gray-500)]">
-              Configuration lives in Settings now, so this page can stay focused on
-              triage and investigation.
-            </p>
-          </div>
-
-          <Link
-            href={settingsHref}
-            className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] px-3 py-2 font-mono text-xs text-[var(--gray-300)] transition-colors hover:border-[var(--accent-green)]/30 hover:text-[var(--accent-green)] no-underline"
-          >
-            <Settings2 size={12} />
-            Settings
-          </Link>
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--alpha-white-8)] px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Sparkles size={14} className="text-[var(--accent-green)]" />
+          <h3 className="m-0 font-mono text-sm font-semibold text-[var(--gray-200)]">
+            Automation
+          </h3>
+          <span className="font-mono text-[10px] text-[var(--gray-500)]">
+            {enabledCount} on · {automatedCount} auto
+          </span>
         </div>
+        <Link
+          href={settingsHref}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] px-2.5 py-1.5 font-mono text-[10px] text-[var(--gray-300)] transition-colors hover:border-[var(--accent-green)]/30 hover:text-[var(--accent-green)] no-underline"
+        >
+          <Settings2 size={11} />
+          Settings
+        </Link>
       </div>
 
-      <div className="space-y-3 p-5">
-        <div className="grid grid-cols-2 gap-3">
-          <SummaryMetric
-            label="Enabled"
-            value={enabledCount}
-            tone="text-[var(--gray-100)]"
-            hint="Active check lanes"
-          />
-          <SummaryMetric
-            label="Auto-run"
-            value={automatedCount}
-            tone="text-[var(--accent-green)]"
-            hint="Runs without manual clicks"
-          />
-        </div>
-
-        <div className="space-y-2">
-          {configs.map((config) => (
-            <div
-              key={config.check_type}
-              className="rounded-2xl border border-[var(--alpha-white-8)] bg-[var(--alpha-white-3)] px-4 py-3"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="m-0 font-mono text-sm text-[var(--gray-200)]">
-                    {CHECK_LABELS[config.check_type].title}
-                  </p>
-                  <p className="mt-1 font-mono text-xs leading-relaxed text-[var(--gray-500)]">
-                    {CHECK_LABELS[config.check_type].description}
-                  </p>
-                </div>
-
-                <div className="shrink-0 text-right">
-                  <span
-                    className={`rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] ${
-                      config.enabled
-                        ? "border-[var(--accent-green)]/25 bg-[var(--accent-green)]/10 text-[var(--accent-green)]"
-                        : "border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-[var(--gray-500)]"
-                    }`}
-                  >
-                    {config.enabled ? "On" : "Off"}
-                  </span>
-                  <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--gray-500)]">
-                    {config.enabled
-                      ? TRIGGER_MODE_LABELS[config.trigger_mode]
-                      : "Disabled"}
-                  </p>
-                </div>
-              </div>
+      <div className="divide-y divide-[var(--alpha-white-6)]">
+        {configs.map((config) => (
+          <div
+            key={config.check_type}
+            className="flex items-center justify-between gap-3 px-4 py-2"
+          >
+            <p className="m-0 font-mono text-xs text-[var(--gray-200)]">
+              {CHECK_LABELS[config.check_type].title}
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <span
+                className={`rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] ${
+                  config.enabled
+                    ? "border-[var(--accent-green)]/25 bg-[var(--accent-green)]/10 text-[var(--accent-green)]"
+                    : "border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-[var(--gray-500)]"
+                }`}
+              >
+                {config.enabled ? "On" : "Off"}
+              </span>
+              <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-[var(--gray-500)]">
+                {config.enabled
+                  ? TRIGGER_MODE_LABELS[config.trigger_mode]
+                  : "—"}
+              </span>
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </div>
     </GlowCard>
   );
@@ -679,6 +678,7 @@ export function RepoChecksWorkspace() {
   const [copied, setCopied] = useState(false);
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
   const [checkTypeFilter, setCheckTypeFilter] = useState<CheckTypeFilter>("all");
+  const [showDismissed, setShowDismissed] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -698,7 +698,7 @@ export function RepoChecksWorkspace() {
           "Failed to load recent check runs"
         ),
         fetchJson<{ findings?: RepoCheckFinding[] }>(
-          `/api/repos/checks/findings?repo=${encodeURIComponent(repoFullName)}&status=open&limit=40`,
+          `/api/repos/checks/findings?repo=${encodeURIComponent(repoFullName)}&status=open&limit=40${showDismissed ? "&include_dismissed=true" : ""}`,
           "Failed to load open findings"
         ),
       ]);
@@ -782,7 +782,7 @@ export function RepoChecksWorkspace() {
     }
 
     setLoading(false);
-  }, [repoFullName, setRepoCheckRun, setRepoHealthSummary]);
+  }, [repoFullName, setRepoCheckRun, setRepoHealthSummary, showDismissed]);
 
   const observedRunSignature = observedRun
     ? `${observedRun.id}:${observedRun.status}:${observedRun.headSha || ""}:${observedRun.createdAt}`
@@ -845,6 +845,40 @@ export function RepoChecksWorkspace() {
       setRunning(false);
     }
   };
+
+  const dismissFinding = useCallback(async (findingId: number, restore: boolean) => {
+    try {
+      const res = await fetch("/api/repos/checks/findings/dismiss", {
+        method: restore ? "DELETE" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ finding_ids: [findingId] }),
+      });
+
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+        throw new Error(data?.error?.message || "Failed to update finding");
+      }
+
+      // Optimistically update local state
+      setFindings((prev) =>
+        prev.map((f) =>
+          f.id === findingId
+            ? { ...f, dismissed_at: restore ? null : new Date().toISOString() }
+            : f
+        ).filter((f) => showDismissed || !f.dismissed_at)
+      );
+
+      setNotice({
+        tone: "success",
+        text: restore ? "Finding restored." : "Finding dismissed.",
+      });
+    } catch (err: unknown) {
+      setNotice({
+        tone: "error",
+        text: err instanceof Error ? err.message : "Failed to update finding.",
+      });
+    }
+  }, [showDismissed]);
 
   const severityCounts = useMemo(() => {
     let critical = 0;
@@ -959,133 +993,6 @@ export function RepoChecksWorkspace() {
   return (
     <>
       <div className="space-y-5 pb-6">
-        <GlowCard glowColor="cyan" className="overflow-hidden">
-          <div className="border-b border-[var(--alpha-white-8)] bg-[radial-gradient(circle_at_top_left,rgba(63,185,80,0.12),transparent_40%),linear-gradient(180deg,rgba(13,17,23,0.95),rgba(13,17,23,0.82))] px-6 py-6">
-            <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-              <div className="max-w-3xl">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Shield size={16} className="text-[var(--accent-amber)]" />
-                  <span className="rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--gray-400)]">
-                    Repo health workspace
-                  </span>
-                </div>
-
-                <h2 className="mt-4 font-mono text-2xl leading-tight text-[var(--gray-100)]">
-                  Review what needs attention, not a wall of equally weighted cards.
-                </h2>
-                <p className="mt-3 max-w-2xl font-mono text-sm leading-relaxed text-[var(--gray-400)]">
-                  Open findings stay front and center, recent runs move into a
-                  secondary rail, and automation rules now live in Settings where
-                  they belong.
-                </p>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <HeroPill label="Open" value={summary?.openCount || findings.length} />
-                  <HeroPill
-                    label="Needs fast review"
-                    value={severityCounts.critical + severityCounts.high}
-                  />
-                  <HeroPill label="Enabled checks" value={enabledCheckCount} />
-                  <HeroPill label="Auto-run checks" value={automatedCheckCount} />
-                </div>
-              </div>
-
-              <div className="w-full max-w-md rounded-3xl border border-[var(--alpha-white-8)] bg-black/20 p-5 backdrop-blur-sm">
-                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--gray-500)]">
-                  Latest run
-                </p>
-                {latestRun ? (
-                  <>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <RunStatusBadge status={latestRun.status} />
-                      <TriggerBadge mode={latestRun.trigger_mode} />
-                    </div>
-                    <p className="mt-3 font-mono text-xs text-[var(--gray-300)]">
-                      {new Date(latestRun.created_at).toLocaleString()}
-                    </p>
-                    <p className="mt-2 font-mono text-xs leading-relaxed text-[var(--gray-500)]">
-                      {summary?.isCurrent === false && isVerifyingCurrentHead
-                        ? "A fresh repo-health run is still verifying the current synced head."
-                        : latestRun.summary ||
-                          "The latest run did not return a summary."}
-                    </p>
-                  </>
-                ) : (
-                  <p className="mt-3 font-mono text-xs leading-relaxed text-[var(--gray-500)]">
-                    No runs yet. Kick off a manual pass to seed the workspace.
-                  </p>
-                )}
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    onClick={runChecks}
-                    disabled={running}
-                    className="inline-flex items-center gap-2 rounded-xl border border-[var(--accent-green)]/20 bg-[var(--accent-green)]/10 px-4 py-2 font-mono text-sm text-[var(--accent-green)] transition-colors hover:bg-[var(--accent-green)]/20 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {running ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Zap size={14} />
-                    )}
-                    Run Checks Now
-                  </button>
-
-                  <Link
-                    href={`${basePath}/settings`}
-                    className="inline-flex items-center gap-2 rounded-xl border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] px-4 py-2 font-mono text-sm text-[var(--gray-300)] transition-colors hover:border-[var(--accent-green)]/30 hover:text-[var(--accent-green)] no-underline"
-                  >
-                    <Settings2 size={14} />
-                    Manage Automation
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </div>
-          {summary && summary.isCurrent === false && (
-            <div className="border-t border-[var(--alpha-white-8)] px-6 py-4">
-              <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3">
-                <p className="m-0 font-mono text-xs leading-relaxed text-amber-200">
-                  {isVerifyingCurrentHead
-                    ? `Verifying fixes on ${summary.currentHeadSha?.slice(0, 7)} now.`
-                    : staleSummaryText}
-                </p>
-              </div>
-            </div>
-          )}
-          <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-5">
-            <SummaryMetric
-              label="Open Findings"
-              value={summary?.openCount || findings.length}
-              tone="text-[var(--gray-100)]"
-              hint="Currently unresolved"
-            />
-            <SummaryMetric
-              label="Critical"
-              value={severityCounts.critical}
-              tone="text-red-300"
-              hint="Highest priority"
-            />
-            <SummaryMetric
-              label="High"
-              value={severityCounts.high}
-              tone="text-amber-300"
-              hint="Review soon"
-            />
-            <SummaryMetric
-              label="Medium"
-              value={severityCounts.medium}
-              tone="text-blue-300"
-              hint="Still worth triage"
-            />
-            <SummaryMetric
-              label="Resolved"
-              value={summary?.resolvedRecently || 0}
-              tone="text-[var(--accent-green)]"
-              hint="Closed recently"
-            />
-          </div>
-        </GlowCard>
-
         {notice && (
           <div
             className={`rounded-2xl border px-4 py-3 font-mono text-xs ${
@@ -1100,7 +1007,97 @@ export function RepoChecksWorkspace() {
           </div>
         )}
 
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        {/* Row 1: Overview + Run Checks (left) | Automation Snapshot (right) */}
+        <div className="grid gap-4 xl:grid-cols-2">
+          <GlowCard glowColor="cyan" className="overflow-hidden">
+            <div className="border-b border-[var(--alpha-white-8)] bg-[radial-gradient(circle_at_top_left,rgba(63,185,80,0.12),transparent_40%)] px-4 py-3">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <Shield size={15} className="text-[var(--accent-amber)]" />
+                  <h3 className="m-0 font-mono text-sm font-semibold text-[var(--gray-200)]">
+                    Repo Health
+                  </h3>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={runChecks}
+                    disabled={running}
+                    className="inline-flex items-center gap-2 rounded-xl border border-[var(--accent-green)]/20 bg-[var(--accent-green)]/10 px-3 py-1.5 font-mono text-xs text-[var(--accent-green)] transition-colors hover:bg-[var(--accent-green)]/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {running ? (
+                      <Loader2 size={13} className="animate-spin" />
+                    ) : (
+                      <Zap size={13} />
+                    )}
+                    Run Checks
+                  </button>
+                  <Link
+                    href={`${basePath}/settings`}
+                    className="inline-flex items-center gap-2 rounded-xl border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] px-3 py-1.5 font-mono text-xs text-[var(--gray-300)] transition-colors hover:border-[var(--accent-green)]/30 hover:text-[var(--accent-green)] no-underline"
+                  >
+                    <Settings2 size={13} />
+                    Settings
+                  </Link>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center divide-x divide-[var(--alpha-white-8)] border-b border-[var(--alpha-white-8)]">
+              {[
+                { label: "Open", value: summary?.openCount || findings.length, tone: "text-[var(--gray-100)]" },
+                { label: "Critical", value: severityCounts.critical, tone: "text-red-300" },
+                { label: "High", value: severityCounts.high, tone: "text-amber-300" },
+                { label: "Medium", value: severityCounts.medium, tone: "text-blue-300" },
+                { label: "Resolved", value: summary?.resolvedRecently || 0, tone: "text-[var(--accent-green)]" },
+              ].map((stat) => (
+                <div key={stat.label} className="flex-1 px-3 py-2 text-center">
+                  <p className="m-0 font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--gray-500)]">{stat.label}</p>
+                  <p className={`m-0 mt-0.5 font-mono text-base font-semibold ${stat.tone}`}>{stat.value}</p>
+                </div>
+              ))}
+            </div>
+
+            {latestRun && (
+              <div className="px-4 py-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <RunStatusBadge status={latestRun.status} />
+                  <TriggerBadge mode={latestRun.trigger_mode} />
+                  <span className="font-mono text-[10px] text-[var(--gray-400)]">
+                    {new Date(latestRun.created_at).toLocaleString()}
+                  </span>
+                </div>
+                <p className="mt-1 font-mono text-[10px] leading-relaxed text-[var(--gray-500)] line-clamp-1">
+                  {summary?.isCurrent === false && isVerifyingCurrentHead
+                    ? "A fresh repo-health run is still verifying the current synced head."
+                    : latestRun.summary ||
+                      "The latest run did not return a summary."}
+                </p>
+              </div>
+            )}
+
+            {summary && summary.isCurrent === false && (
+              <div className="border-t border-[var(--alpha-white-8)] px-4 py-2.5">
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2">
+                  <p className="m-0 font-mono text-xs leading-relaxed text-amber-200">
+                    {isVerifyingCurrentHead
+                      ? `Verifying fixes on ${summary.currentHeadSha?.slice(0, 7)} now.`
+                      : staleSummaryText}
+                  </p>
+                </div>
+              </div>
+            )}
+          </GlowCard>
+
+          <div className="self-start">
+            <AutomationStatusCard
+              configs={configs}
+              settingsHref={`${basePath}/settings`}
+            />
+          </div>
+        </div>
+
+        {/* Row 2: Open Findings (left) | Recent Runs (right) */}
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <div className="min-w-0">
             <GlowCard glowColor="none" className="overflow-hidden">
               <div className="border-b border-[var(--alpha-white-8)] px-5 py-4">
@@ -1122,26 +1119,39 @@ export function RepoChecksWorkspace() {
                   </div>
 
                   {filteredFindings.length > 0 && (
-                    <button
-                      onClick={() => void copyVisibleFindings()}
-                      className="inline-flex items-center gap-2 self-start rounded-xl border px-3 py-2 font-mono text-xs transition-colors"
-                      style={{
-                        color: copied ? "var(--accent-green)" : "var(--gray-300)",
-                        borderColor: copied
-                          ? "rgba(63,185,80,0.28)"
-                          : "var(--alpha-white-10)",
-                        background: copied
-                          ? "rgba(63,185,80,0.1)"
-                          : "var(--alpha-white-5)",
-                      }}
-                    >
-                      {copied ? <Check size={13} /> : <ClipboardCopy size={13} />}
-                      {copied
-                        ? "Copied"
-                        : filteredFindings.length === findings.length
-                          ? "Copy All"
-                          : "Copy Visible"}
-                    </button>
+                    <div className="flex items-center gap-2 self-start">
+                      <button
+                        onClick={() => setShowDismissed((prev) => !prev)}
+                        className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 font-mono text-xs transition-colors ${
+                          showDismissed
+                            ? "border-amber-500/20 bg-amber-500/10 text-amber-300"
+                            : "border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-[var(--gray-400)] hover:text-[var(--gray-300)]"
+                        }`}
+                      >
+                        {showDismissed ? <Eye size={13} /> : <EyeOff size={13} />}
+                        {showDismissed ? "Showing dismissed" : "Show dismissed"}
+                      </button>
+                      <button
+                        onClick={() => void copyVisibleFindings()}
+                        className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 font-mono text-xs transition-colors"
+                        style={{
+                          color: copied ? "var(--accent-green)" : "var(--gray-300)",
+                          borderColor: copied
+                            ? "rgba(63,185,80,0.28)"
+                            : "var(--alpha-white-10)",
+                          background: copied
+                            ? "rgba(63,185,80,0.1)"
+                            : "var(--alpha-white-5)",
+                        }}
+                      >
+                        {copied ? <Check size={13} /> : <ClipboardCopy size={13} />}
+                        {copied
+                          ? "Copied"
+                          : filteredFindings.length === findings.length
+                            ? "Copy All"
+                            : "Copy Visible"}
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1233,11 +1243,25 @@ export function RepoChecksWorkspace() {
                     </div>
                   ) : (
                     filteredFindings.map((finding) => (
-                      <button
+                      <div
                         key={finding.id}
-                        onClick={() => setInspectedFinding(finding)}
-                        className="group w-full rounded-3xl border border-[var(--alpha-white-8)] bg-[linear-gradient(180deg,rgba(255,255,255,0.035),rgba(255,255,255,0.02))] px-5 py-4 text-left transition-all duration-200 hover:-translate-y-[1px] hover:border-[var(--accent-green)]/25 hover:bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.028))]"
+                        className={`group relative w-full rounded-3xl border border-[var(--alpha-white-8)] bg-[linear-gradient(180deg,rgba(255,255,255,0.035),rgba(255,255,255,0.02))] px-5 py-4 text-left transition-all duration-200 ${
+                          finding.dismissed_at
+                            ? "opacity-50"
+                            : "hover:-translate-y-[1px] hover:border-[var(--accent-green)]/25 hover:bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.028))]"
+                        }`}
                       >
+                        {finding.dismissed_at && (
+                          <div className="absolute right-3 top-3 z-10">
+                            <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-amber-300">
+                              Dismissed
+                            </span>
+                          </div>
+                        )}
+                        <button
+                          onClick={() => setInspectedFinding(finding)}
+                          className="w-full text-left"
+                        >
                         <div className="flex flex-wrap items-start gap-2">
                           <SeverityBadge severity={finding.severity} />
                           <span className="rounded-full border border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--gray-400)]">
@@ -1282,7 +1306,28 @@ export function RepoChecksWorkspace() {
                             className="mt-1 shrink-0 text-[var(--gray-600)] transition-colors group-hover:text-[var(--accent-green)]"
                           />
                         </div>
-                      </button>
+                        </button>
+
+                        <div className="mt-3 flex items-center justify-end gap-2 border-t border-[var(--alpha-white-5)] pt-3">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void dismissFinding(finding.id, !!finding.dismissed_at);
+                            }}
+                            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-mono text-[11px] transition-colors ${
+                              finding.dismissed_at
+                                ? "border-[var(--accent-green)]/20 bg-[var(--accent-green)]/10 text-[var(--accent-green)] hover:bg-[var(--accent-green)]/20"
+                                : "border-[var(--alpha-white-10)] bg-[var(--alpha-white-5)] text-[var(--gray-400)] hover:text-amber-300 hover:border-amber-500/20 hover:bg-amber-500/10"
+                            }`}
+                          >
+                            {finding.dismissed_at ? (
+                              <><RotateCcw size={11} /> Restore</>
+                            ) : (
+                              <><EyeOff size={11} /> Dismiss</>
+                            )}
+                          </button>
+                        </div>
+                      </div>
                     ))
                   )}
                 </div>
@@ -1290,11 +1335,7 @@ export function RepoChecksWorkspace() {
             </GlowCard>
           </div>
 
-          <div className="space-y-5 self-start xl:sticky xl:top-4">
-            <AutomationStatusCard
-              configs={configs}
-              settingsHref={`${basePath}/settings`}
-            />
+          <div className="self-start xl:sticky xl:top-4">
             <RecentRunsCard runs={runs} />
           </div>
         </div>
@@ -1305,6 +1346,7 @@ export function RepoChecksWorkspace() {
           finding={inspectedFinding}
           repoFullName={repoFullName}
           onClose={() => setInspectedFinding(null)}
+          onDismiss={dismissFinding}
         />
       )}
     </>

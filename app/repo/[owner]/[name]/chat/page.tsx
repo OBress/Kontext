@@ -7,6 +7,7 @@ import {
   ChatCitation,
   ChatMessage,
   ChatAttachedImage,
+  PersistedChatMessage,
 } from "@/lib/store/chat-store";
 import { useAppStore } from "@/lib/store/app-store";
 import { formatLineRange } from "@/lib/code";
@@ -53,6 +54,11 @@ interface RepoFileEntry {
   file_path: string;
   extension: string | null;
   line_count: number | null;
+}
+
+interface ChatSessionPayload {
+  repo_full_name: string;
+  messages: PersistedChatMessage[];
 }
 
 interface TreeNode {
@@ -239,13 +245,11 @@ function FileMentionDropdown({
   query,
   files,
   onSelect,
-  onClose,
   selectedIndex,
 }: {
   query: string;
   files: RepoFileEntry[];
   onSelect: (path: string) => void;
-  onClose: () => void;
   selectedIndex: number;
 }) {
   const q = query.toLowerCase();
@@ -292,6 +296,37 @@ function citationCacheKey(citation: ChatCitation): string {
 function formatTimestamp(value?: string | null): string {
   if (!value) return "Unknown freshness";
   return `Indexed ${new Date(value).toLocaleString()}`;
+}
+
+function hydrateChatMessages(messages: PersistedChatMessage[]): ChatMessage[] {
+  return messages.map((message) => ({
+    ...message,
+    timestamp: new Date(message.timestamp),
+  }));
+}
+
+function findLastAssistantCitation(messages: ChatMessage[]): ChatCitation | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== "assistant" || !message.citations?.[0]) continue;
+    return message.citations[0];
+  }
+
+  return null;
+}
+
+function formatSourceLabel(sourceMode?: ChatMessage["sourceMode"]): string | null {
+  if (sourceMode === "live") return "Live GitHub";
+  if (sourceMode === "mixed") return "Mixed sources";
+  if (sourceMode === "indexed") return "Indexed data";
+  return null;
+}
+
+function formatAnswerModeLabel(answerMode?: ChatMessage["answerMode"]): string | null {
+  if (answerMode === "grounded") return "Grounded";
+  if (answerMode === "partial") return "Partial evidence";
+  if (answerMode === "insufficient_evidence") return "Insufficient evidence";
+  return null;
 }
 
 function HighlightedCode({
@@ -398,6 +433,13 @@ function MessageBubble({
   onOpenFilePath: (filePath: string, lineStart?: number, lineEnd?: number) => void;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
+  const sourceLabel = formatSourceLabel(message.sourceMode);
+  const answerModeLabel = formatAnswerModeLabel(message.answerMode);
+  const freshnessLabel = message.freshness?.stale
+    ? "Indexed copy is stale"
+    : message.freshness?.liveHeadSha
+      ? "Indexed copy is current"
+      : null;
 
   const handleCopy = (code: string) => {
     navigator.clipboard.writeText(code);
@@ -406,6 +448,9 @@ function MessageBubble({
   };
 
   if (message.role === "user") {
+    const previewImages = (message.attachedImages || []).filter((img) => Boolean(img.dataUrl));
+    const storedImageLabels = (message.attachedImages || []).filter((img) => !img.dataUrl);
+
     return (
       <div className="flex justify-end">
         <div className="max-w-[80%] rounded-2xl bg-[var(--surface-3)] px-4 py-3">
@@ -424,9 +469,9 @@ function MessageBubble({
             </div>
           )}
           {/* Attached images */}
-          {message.attachedImages && message.attachedImages.length > 0 && (
+          {previewImages.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2">
-              {message.attachedImages.map((img, idx) => (
+              {previewImages.map((img, idx) => (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   key={idx}
@@ -434,6 +479,19 @@ function MessageBubble({
                   alt={img.name}
                   className="h-20 w-auto rounded-lg border border-[var(--alpha-white-8)] object-cover"
                 />
+              ))}
+            </div>
+          )}
+          {storedImageLabels.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {storedImageLabels.map((img, idx) => (
+                <span
+                  key={`${img.name}-${idx}`}
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] px-2 py-0.5 font-mono text-xs text-[var(--gray-300)]"
+                >
+                  <Paperclip size={10} />
+                  {img.name}
+                </span>
               ))}
             </div>
           )}
@@ -463,6 +521,37 @@ function MessageBubble({
               {message.timestamp.toLocaleTimeString()}
             </span>
           </div>
+
+          {(sourceLabel || answerModeLabel || message.resolvedCommitSha || freshnessLabel) && (
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              {sourceLabel && (
+                <span className="rounded-full border border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--gray-400)]">
+                  {sourceLabel}
+                </span>
+              )}
+              {answerModeLabel && (
+                <span className="rounded-full border border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--gray-400)]">
+                  {answerModeLabel}
+                </span>
+              )}
+              {message.resolvedCommitSha && (
+                <span className="rounded-full border border-[var(--accent-green)]/20 bg-[var(--accent-green)]/10 px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--accent-green)]">
+                  Commit {message.resolvedCommitSha.slice(0, 7)}
+                </span>
+              )}
+              {freshnessLabel && (
+                <span className="rounded-full border border-[var(--alpha-white-8)] bg-[var(--alpha-white-5)] px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--gray-400)]">
+                  {freshnessLabel}
+                </span>
+              )}
+            </div>
+          )}
+
+          {message.freshness?.note && (
+            <p className="mb-3 rounded-xl border border-[var(--alpha-white-8)] bg-[var(--alpha-white-4)] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--gray-400)]">
+              {message.freshness.note}
+            </p>
+          )}
 
           <div className="prose prose-invert prose-sm max-w-none font-mono text-sm text-[var(--gray-200)] [&_p]:m-0 [&_p]:mb-3 [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-sm [&_h2]:text-[var(--gray-100)] [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-sm [&_h3]:text-[var(--gray-100)] [&_pre]:m-0 [&_strong]:text-[var(--gray-100)] [&_ul]:my-2">
             <ReactMarkdown
@@ -758,7 +847,6 @@ function ChatInput({
             query={mentionQuery}
             files={repoFiles}
             onSelect={handleMentionSelect}
-            onClose={() => setMentionOpen(false)}
             selectedIndex={mentionIndex}
           />
         )}
@@ -968,6 +1056,7 @@ export default function ChatPage() {
     messages,
     isStreaming,
     addMessage,
+    setMessages,
     updateLastMessage,
     setLastAssistantContext,
     setIsStreaming,
@@ -1016,17 +1105,6 @@ export default function ChatPage() {
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [messages.length]);
-
-  useEffect(() => {
-    clearChat();
-    setSelectedCitation(null);
-    setInspectorMode("snippet");
-    setRightPanelMode("tree");
-    setMobileInspectorOpen(false);
-    setFileCache({});
-    setFileErrors({});
-    setTreeAttachedFiles([]);
-  }, [clearChat, repoFullName]);
 
   // Fetch repo files for tree and @-mention
   useEffect(() => {
@@ -1088,6 +1166,51 @@ export default function ChatPage() {
   );
 
   useEffect(() => {
+    let active = true;
+
+    clearChat();
+    setSelectedCitation(null);
+    setInspectorMode("snippet");
+    setRightPanelMode("tree");
+    setMobileInspectorOpen(false);
+    setFileCache({});
+    setFileErrors({});
+    setLoadingFileKey(null);
+    setTreeAttachedFiles([]);
+
+    const loadSession = async () => {
+      try {
+        const response = await fetch(
+          `/api/chat/session?repo=${encodeURIComponent(repoFullName)}`
+        );
+        if (!response.ok) {
+          throw new Error("Unable to load saved chat session");
+        }
+
+        const payload = (await response.json()) as ChatSessionPayload;
+        if (!active) return;
+
+        const hydratedMessages = hydrateChatMessages(payload.messages || []);
+        setMessages(hydratedMessages);
+
+        const initialCitation = findLastAssistantCitation(hydratedMessages);
+        if (initialCitation) {
+          setSelectedCitation(initialCitation);
+        }
+      } catch {
+        if (!active) return;
+        setMessages([]);
+      }
+    };
+
+    void loadSession();
+
+    return () => {
+      active = false;
+    };
+  }, [clearChat, repoFullName, setMessages]);
+
+  useEffect(() => {
     if (!selectedCitation) return;
     void loadCitationFile(selectedCitation);
   }, [loadCitationFile, selectedCitation]);
@@ -1115,10 +1238,12 @@ export default function ChatPage() {
       abortRef.current = controller;
 
       // Convert image dataUrls to base64 for API
-      const apiImages = images.map((img) => ({
-        mimeType: img.mimeType,
-        data: img.dataUrl.replace(/^data:[^;]+;base64,/, ""),
-      }));
+      const apiImages = images
+        .filter((img) => Boolean(img.dataUrl))
+        .map((img) => ({
+          mimeType: img.mimeType,
+          data: img.dataUrl!.replace(/^data:[^;]+;base64,/, ""),
+        }));
 
       try {
         const response = await fetch("/api/chat", {
@@ -1130,6 +1255,7 @@ export default function ChatPage() {
           body: JSON.stringify({
             message: content,
             repo_full_name: repoFullName,
+            history: messages,
             attached_files: files.length > 0 ? files : undefined,
             attached_images: apiImages.length > 0 ? apiImages : undefined,
           }),
@@ -1167,9 +1293,14 @@ export default function ChatPage() {
 
               if (data.type === "context") {
                 setLastAssistantContext(
-                  data.citations || [],
-                  data.answerMode,
-                  data.timelineCitations || []
+                  {
+                    citations: data.citations || [],
+                    answerMode: data.answerMode,
+                    timelineCitations: data.timelineCitations || [],
+                    sourceMode: data.sourceMode,
+                    resolvedCommitSha: data.resolvedCommitSha || null,
+                    freshness: data.freshness || null,
+                  }
                 );
                 if (data.citations?.[0]) {
                   selectCitation(data.citations[0]);
@@ -1206,6 +1337,7 @@ export default function ChatPage() {
     [
       addMessage,
       apiKey,
+      messages,
       repoFullName,
       selectCitation,
       setIsStreaming,
@@ -1219,13 +1351,26 @@ export default function ChatPage() {
     setIsStreaming(false);
   };
 
-  const handleClearChat = () => {
+  const handleClearChat = async () => {
+    abortRef.current?.abort();
+    setIsStreaming(false);
     clearChat();
     setSelectedCitation(null);
     setInspectorMode("snippet");
     setRightPanelMode("tree");
     setMobileInspectorOpen(false);
     setTreeAttachedFiles([]);
+    setFileCache({});
+    setFileErrors({});
+    setLoadingFileKey(null);
+
+    try {
+      await fetch(`/api/chat/session?repo=${encodeURIComponent(repoFullName)}`, {
+        method: "DELETE",
+      });
+    } catch {
+      // Ignore best-effort session clear failures.
+    }
   };
 
   const handleOpenFilePath = useCallback(

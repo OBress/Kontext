@@ -99,6 +99,9 @@ const userWaitQueues = new Map<string, QueuedTask[]>();
 /** Active AI task IDs for deduplication — key: "userId:taskId" */
 const activeAiTaskIds = new Set<string>();
 
+/** Queued AI task IDs for deduplication before they start running */
+const queuedAiTaskIds = new Set<string>();
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
@@ -130,6 +133,10 @@ function getQueue(userId: string): QueuedTask[] {
   return q;
 }
 
+function aiDedupeKey(userId: string, taskId: string): string {
+  return `${userId}:${taskId}`;
+}
+
 function drainQueue(userId: string): void {
   const q = userWaitQueues.get(userId);
   if (!q || q.length === 0) return;
@@ -152,6 +159,7 @@ function drainQueue(userId: string): void {
 
       void runSyncTask(entry);
     } else {
+      queuedAiTaskIds.delete(aiDedupeKey(entry.userId, entry.taskId));
       void runAiTask(entry);
     }
   }
@@ -230,7 +238,7 @@ async function runSyncTask(task: QueuedSyncTask): Promise<void> {
 /* ------------------------------------------------------------------ */
 
 async function runAiTask(task: QueuedAiTask): Promise<void> {
-  const dedupeKey = `${task.userId}:${task.taskId}`;
+  const dedupeKey = aiDedupeKey(task.userId, task.taskId);
   activeAiTaskIds.add(dedupeKey);
   incActive(task.userId);
 
@@ -322,14 +330,15 @@ export function enqueueAiTask(params: {
   taskId: string;
   execute: () => Promise<unknown>;
 }): EnqueueAiResult {
-  const dedupeKey = `${params.userId}:${params.taskId}`;
+  const dedupeKey = aiDedupeKey(params.userId, params.taskId);
 
-  if (activeAiTaskIds.has(dedupeKey)) {
+  if (activeAiTaskIds.has(dedupeKey) || queuedAiTaskIds.has(dedupeKey)) {
     console.log(`[sync-queue] AI task ${params.taskId} deduplicated`);
     return { status: "deduplicated" };
   }
 
   if (getActive(params.userId) >= MAX_CONCURRENT_PER_USER) {
+    queuedAiTaskIds.add(dedupeKey);
     getQueue(params.userId).push({
       type: "ai",
       userId: params.userId,
@@ -354,6 +363,14 @@ export function enqueueAiTask(params: {
   });
 
   return { status: "started" };
+}
+
+export function resetSyncQueueForTests() {
+  repoSyncLocks.clear();
+  userActiveCount.clear();
+  userWaitQueues.clear();
+  activeAiTaskIds.clear();
+  queuedAiTaskIds.clear();
 }
 
 /**

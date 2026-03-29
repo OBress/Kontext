@@ -11,7 +11,7 @@ import { createHash } from "crypto";
 
 import { createAdminClient } from "@/lib/api/auth";
 import { resolveAiKey } from "@/lib/api/ai-key";
-import { refreshArchitectureBundle } from "@/lib/api/architecture-refresh";
+import { queueArchitectureRefresh } from "@/lib/api/architecture-refresh";
 import { getApiErrorPayload } from "@/lib/api/errors";
 import { logActivity } from "@/lib/api/activity";
 import { chunkFile } from "@/lib/api/chunker";
@@ -693,17 +693,11 @@ export async function runSyncPipeline(
     }
 
     // Post-sync AI jobs — via the queue for concurrency control
-    enqueueAiTask({
+    await queueArchitectureRefresh({
       userId,
       repoFullName,
-      taskId: `arch-refresh:${targetHeadSHA}`,
-      execute: () =>
-        refreshArchitectureBundle({
-          userId,
-          repoFullName,
-          apiKey: activeApiKey,
-          sourceSha: targetHeadSHA,
-        }),
+      apiKey: activeApiKey,
+      sourceSha: targetHeadSHA,
     });
 
     if (targetHeadSHA && (indexableFiles.length > 0 || newCommits.length > 0)) {

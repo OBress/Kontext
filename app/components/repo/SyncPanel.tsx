@@ -181,10 +181,10 @@ export function SyncStatusCard({ embedded = false }: { embedded?: boolean }) {
                   pending_sync_head_sha:
                     data.pendingHeadSha || activeRepo.pending_sync_head_sha || null,
                 });
-                setError(data.message);
+                setError(data.message || "Sync is waiting on a required prerequisite.");
               }
               if (data.status === "error") {
-                setError(data.message);
+                setError(data.message || "Sync failed.");
               }
             } catch {}
           }

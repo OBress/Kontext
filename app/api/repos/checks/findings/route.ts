@@ -5,8 +5,10 @@ import { REPO_CHECK_TYPES } from "@/lib/api/repo-checks";
 import { validateRepoFullName } from "@/lib/api/validate";
 
 /**
- * GET /api/repos/checks/findings?repo=owner/name&status=open&limit=50
+ * GET /api/repos/checks/findings?repo=owner/name&status=open&limit=50&include_dismissed=true
+ * By default, dismissed findings are excluded. Pass include_dismissed=true to show them.
  */
+
 export async function GET(request: NextRequest) {
   try {
     const { user, supabase } = await getAuthenticatedUser();
@@ -25,6 +27,8 @@ export async function GET(request: NextRequest) {
         REPO_CHECK_TYPES.includes(value as (typeof REPO_CHECK_TYPES)[number])
       );
 
+    const includeDismissed = request.nextUrl.searchParams.get("include_dismissed") === "true";
+
     let query = supabase
       .from("repo_check_findings")
       .select("*")
@@ -32,6 +36,10 @@ export async function GET(request: NextRequest) {
       .eq("repo_full_name", repoFullName)
       .order("updated_at", { ascending: false })
       .limit(limit);
+
+    if (!includeDismissed) {
+      query = query.is("dismissed_at", null);
+    }
 
     if (status === "open" || status === "resolved") {
       query = query.eq("status", status);
@@ -43,6 +51,7 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await query;
     if (error) throw error;
+
 
     return NextResponse.json({ findings: data || [] });
   } catch (error) {

@@ -8,7 +8,7 @@
     "dev:tunnel": "source .env.local && concurrently \"next dev\" \"cloudflared tunnel run --token $CLOUDFLARE_TUNNEL_TOKEN\"",
     "lint": "eslint",
     "test:prompts": "node tests/prompts/prompt-builders.test.mjs",
-    "test": "npm run test:prompts && node tests/chat/chat-visuals.test.mjs && node tests/architecture/architecture-bundle.test.mjs && node tests/sync/sync-state.test.mjs",
+    "test": "npm run test:prompts && node tests/chat/chat-orchestrator.test.mjs && node tests/chat/chat-history.test.mjs && node tests/chat/chat-visuals.test.mjs && node tests/architecture/architecture-bundle.test.mjs && node tests/sync/sync-state.test.mjs",
     "start": "next start",
     "db:migration:new": "supabase migration new",
     "db:push": "supabase db push && npm run db:dump && npm run db:types",
@@ -68,6 +68,7 @@
     "eslint": "^9",
     "eslint-config-next": "^16.1.7",
     "postcss": "8.5.6",
+    "puppeteer": "^24.40.0",
     "supabase": "^2.84.4",
     "tailwindcss": "^4",
     "typescript": "^5"
