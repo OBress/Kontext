@@ -2,35 +2,41 @@
 
 import { useEffect, useRef } from "react";
 import { useAppStore } from "@/lib/store/app-store";
-import { persistAiKeyToServer } from "@/lib/client/ai-key-persist";
+import { persistAiKeyToServer, loadAiKeyFromServer } from "@/lib/client/ai-key-persist";
 
 /**
- * Ensures the user's API key (from localStorage) is always synced to the
- * server so background processes (webhooks, polling) can use it.
+ * Ensures the user's API key is always synced between client and server.
  *
- * Runs once on mount and again whenever the API key changes.
- * This closes the gap where `persistAiKeyToServer` silently fails or the
- * user sets a key on one device but uses another.
+ * On mount: if no key in localStorage, loads from the server (survives cookie clears).
+ * On change: pushes new key to the server for background processes.
  */
 export function useAiKeySync() {
   const apiKey = useAppStore((s) => s.apiKey);
   const lastSyncedRef = useRef<string | null>(null);
+  const loadedFromServerRef = useRef(false);
 
+  // Pull: restore key from server if localStorage is empty
   useEffect(() => {
-    // Nothing to sync
-    if (!apiKey) return;
+    if (loadedFromServerRef.current) return;
+    loadedFromServerRef.current = true;
 
-    // Already synced this exact key in this session
+    if (!apiKey) {
+      loadAiKeyFromServer();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Push: sync key changes to the server
+  useEffect(() => {
+    if (!apiKey) return;
     if (lastSyncedRef.current === apiKey) return;
 
-    // Mark it immediately to avoid duplicate calls during re-renders
     lastSyncedRef.current = apiKey;
 
     persistAiKeyToServer(apiKey).then((ok) => {
       if (!ok) {
-        // Reset so we retry on next render
         lastSyncedRef.current = null;
       }
     });
   }, [apiKey]);
 }
+

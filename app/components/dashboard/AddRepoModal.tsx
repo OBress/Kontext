@@ -253,145 +253,17 @@ export function AddRepoModal() {
           });
 
           try {
-            const ingestRes = await fetch("/api/repos/ingest", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "x-google-api-key": apiKey,
-              },
-              body: JSON.stringify({
+            const { streamIngestion } = await import("@/lib/client/ingestion-stream");
+            await streamIngestion(
+              repo.full_name,
+              apiKey,
+              {
                 repo_full_name: repo.full_name,
-                // ── New config fields ──
                 backfill_timeline: config.backfill_timeline,
                 timeline_commit_depth: config.timeline_commit_depth,
-              }),
-            });
-
-            if (!ingestRes.ok || !ingestRes.body) {
-              throw new Error("Ingestion request failed");
-            }
-
-            // Read SSE stream
-            const reader = ingestRes.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = "";
-
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split("\n\n");
-              buffer = lines.pop() || "";
-
-              for (const line of lines) {
-                const dataLine = line.replace(/^data: /, "").trim();
-                if (!dataLine) continue;
-                try {
-                  const event = JSON.parse(dataLine);
-
-                  if (event.status === "fetching") {
-                    setIngestionStatus(repo.full_name, {
-                      status: "fetching",
-                      progress: 5,
-                      filesTotal: 0,
-                      filesProcessed: 0,
-                      chunksCreated: 0,
-                      chunksTotal: 0,
-                      message: event.message || "Fetching repository tree...",
-                    });
-                  } else if (event.status === "chunking") {
-                    const pct = event.filesTotal
-                      ? Math.round((event.filesProcessed / event.filesTotal) * 50) + 10
-                      : 10;
-                    setIngestionStatus(repo.full_name, {
-                      status: "chunking",
-                      progress: pct,
-                      filesTotal: event.filesTotal || 0,
-                      filesProcessed: event.filesProcessed || 0,
-                      chunksCreated: event.chunksCreated || 0,
-                      chunksTotal: 0,
-                      message: `Processing files (${event.filesProcessed}/${event.filesTotal})...`,
-                    });
-                  } else if (event.status === "embedding") {
-                    const pct = event.chunksTotal
-                      ? Math.round((event.chunksEmbedded / event.chunksTotal) * 30) + 60
-                      : 60;
-                    setIngestionStatus(repo.full_name, {
-                      status: "embedding",
-                      progress: pct,
-                      filesTotal: event.filesTotal || 0,
-                      filesProcessed: event.filesProcessed || 0,
-                      chunksCreated: event.chunksEmbedded || 0,
-                      chunksTotal: event.chunksTotal || 0,
-                      message: `Embedding chunks (${event.chunksEmbedded || 0}/${event.chunksTotal || 0})...`,
-                    });
-                  } else if (event.status === "finalizing" || event.status === "timeline") {
-                    setIngestionStatus(repo.full_name, {
-                      status: event.status,
-                      progress: event.status === "finalizing" ? 95 : 98,
-                      filesTotal: event.filesTotal || 0,
-                      filesProcessed: event.filesProcessed || 0,
-                      chunksCreated: event.chunksCreated || 0,
-                      chunksTotal: event.chunksTotal || 0,
-                      message: event.message || "Finalizing index...",
-                    });
-                  } else if (
-                    event.status === "blocked_quota" ||
-                    event.status === "blocked_billing" ||
-                    event.status === "blocked_model"
-                  ) {
-                    setIngestionStatus(repo.full_name, {
-                      status: event.status,
-                      progress: 0,
-                      filesTotal: event.filesTotal || 0,
-                      filesProcessed: event.filesProcessed || 0,
-                      chunksCreated: event.chunksCreated || 0,
-                      chunksTotal: event.chunksTotal || 0,
-                      error: event.message,
-                      message: event.message,
-                    });
-                    updateRepo(repo.full_name, { indexing: false });
-                  } else if (event.status === "done") {
-                    setIngestionStatus(repo.full_name, {
-                      status: "done",
-                      progress: 100,
-                      filesTotal: event.filesTotal || 0,
-                      filesProcessed: event.filesProcessed || 0,
-                      chunksCreated: event.chunksCreated || 0,
-                      chunksTotal: event.chunksCreated || 0,
-                      message: "Ingestion complete!",
-                    });
-                    updateRepo(repo.full_name, {
-                      indexed: true,
-                      indexing: false,
-                      chunk_count: event.chunksCreated || 0,
-                      last_synced_sha: event.lastSyncedSha || null,
-                      sync_blocked_reason: null,
-                      pending_sync_head_sha: null,
-                    });
-                    // Auto-clear status after 5 seconds
-                    setTimeout(() => {
-                      useAppStore.getState().clearIngestionStatus(repo.full_name);
-                    }, 5000);
-                  } else if (event.status === "error") {
-                    setIngestionStatus(repo.full_name, {
-                      status: "error",
-                      progress: 0,
-                      filesTotal: 0,
-                      filesProcessed: 0,
-                      chunksCreated: 0,
-                      chunksTotal: 0,
-                      error: event.message,
-                      message: event.message,
-                    });
-                    updateRepo(repo.full_name, { indexing: false });
-                  }
-                } catch {
-                  // skip malformed JSON
-                }
-              }
-            }
+              },
+              { setIngestionStatus, updateRepo }
+            );
           } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : "Ingestion failed";
             setIngestionStatus(repo.full_name, {

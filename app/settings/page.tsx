@@ -242,7 +242,7 @@ export default function SettingsPage() {
                   )}
                 </div>
               )}
-              <p className="font-mono text-xs text-[var(--gray-600)] mt-2 m-0">Stored in your browser&apos;s localStorage. Sent to our servers only to execute your request.</p>
+              <p className="font-mono text-xs text-[var(--gray-600)] mt-2 m-0">Stored securely on the server. Persists across devices and browser clears.</p>
             </GlowCard>
 
             {/* Activity Preferences */}

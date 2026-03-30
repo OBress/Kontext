@@ -1,8 +1,23 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/api/auth";
 import { handleApiError } from "@/lib/api/errors";
-import { storeAiKey, removeAiKey } from "@/lib/api/ai-key";
+import { storeAiKey, removeAiKey, resolveAiKey } from "@/lib/api/ai-key";
 import { validateApiKey } from "@/lib/api/validate";
+
+/**
+ * GET /api/settings/ai-key — Retrieve the user's stored Google AI key.
+ * Returns the key if stored, null otherwise.
+ */
+export async function GET() {
+  try {
+    const { user } = await getAuthenticatedUser();
+    const key = await resolveAiKey(user.id);
+
+    return NextResponse.json({ key });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
 
 /**
  * POST /api/settings/ai-key — Persist the user's Google AI key (encrypted)
@@ -37,3 +52,4 @@ export async function DELETE() {
     return handleApiError(error);
   }
 }
+

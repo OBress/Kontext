@@ -4,8 +4,7 @@ import { ApiError, type ApiErrorPayload } from "./errors";
 export const GEMINI_GENERATION_MODEL = "gemini-3.1-flash-lite-preview";
 export const GEMINI_EMBEDDING_MODEL = "gemini-embedding-001";
 export const GEMINI_EMBEDDING_DIMENSIONS = 1536;
-export const GEMINI_EMBEDDING_BATCH_SIZE = 20;
-export const GEMINI_EMBEDDING_BATCH_DELAY_MS = 750;
+export const GEMINI_EMBEDDING_BATCH_SIZE = 50;
 
 export type AiFailureCode =
   | "AI_QUOTA_EXCEEDED"

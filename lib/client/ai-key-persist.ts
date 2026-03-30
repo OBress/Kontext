@@ -1,3 +1,5 @@
+import { useAppStore } from "@/lib/store/app-store";
+
 /**
  * Persist the user's Google AI key to the server (encrypted) for
  * background webhook use. Returns true on success, false on failure.
@@ -25,3 +27,26 @@ export async function persistAiKeyToServer(apiKey: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Load the user's stored AI key from the server and populate the Zustand store.
+ * Called on app startup to restore the key even after localStorage is cleared.
+ */
+export async function loadAiKeyFromServer(): Promise<void> {
+  try {
+    const res = await fetch("/api/settings/ai-key");
+    if (!res.ok) return;
+
+    const data = await res.json();
+    if (data.key && typeof data.key === "string") {
+      const currentKey = useAppStore.getState().apiKey;
+      if (!currentKey) {
+        useAppStore.getState().setApiKey(data.key);
+        console.log("[ai-key] Restored AI key from server");
+      }
+    }
+  } catch {
+    // Silent — non-critical
+  }
+}
+

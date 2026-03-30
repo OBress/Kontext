@@ -138,12 +138,19 @@ export function RepoCard3D({
                 Indexed
               </span>
             )}
-            {isIngesting && (
-              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-mono bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20">
-                <Loader2 size={10} className="animate-spin" />
-                {ingestionStatus.progress}%
-              </span>
-            )}
+            {isIngesting && (() => {
+              const waiting = ingestionStatus.isWaiting === true;
+              return (
+                <span className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-mono border ${
+                  waiting
+                    ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                    : "bg-[var(--accent-green)]/10 text-[var(--accent-green)] border-[var(--accent-green)]/20"
+                }`}>
+                  <Loader2 size={10} className={waiting ? "animate-pulse" : "animate-spin"} />
+                  {waiting ? "Waiting..." : `${ingestionStatus.progress}%`}
+                </span>
+              );
+            })()}
             {isSyncing && (
               <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
                 <RefreshCw size={10} className="animate-spin" />
@@ -176,25 +183,29 @@ export function RepoCard3D({
         </p>
 
         {/* Ingestion progress bar */}
-        {isIngesting && (
-          <div className="mb-4">
-            <div className="w-full h-1.5 rounded-full bg-[var(--alpha-white-8)] overflow-hidden">
-              <motion.div
-                className="h-full rounded-full"
-                style={{
-                  background:
-                    "linear-gradient(90deg, #238636, #3FB950)",
-                }}
-                initial={{ width: "0%" }}
-                animate={{ width: `${ingestionStatus.progress}%` }}
-                transition={{ duration: 0.3, ease: "easeOut" }}
-              />
+        {isIngesting && (() => {
+          const waiting = ingestionStatus.isWaiting === true;
+          return (
+            <div className="mb-4">
+              <div className="w-full h-1.5 rounded-full bg-[var(--alpha-white-8)] overflow-hidden">
+                <motion.div
+                  className={`h-full rounded-full ${waiting ? "animate-pulse" : ""}`}
+                  style={{
+                    background: waiting
+                      ? "linear-gradient(90deg, #D97706, #F59E0B)"
+                      : "linear-gradient(90deg, #238636, #3FB950)",
+                  }}
+                  initial={{ width: "0%" }}
+                  animate={{ width: `${ingestionStatus.progress}%` }}
+                  transition={{ duration: 0.3, ease: "easeOut" }}
+                />
+              </div>
+              <p className={`font-mono text-xs mt-1.5 m-0 ${waiting ? "text-amber-400/70" : "text-[var(--gray-500)]"}`}>
+                {ingestionStatus.message}
+              </p>
             </div>
-            <p className="font-mono text-xs text-[var(--gray-500)] mt-1.5 m-0">
-              {ingestionStatus.message}
-            </p>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Background sync progress bar */}
         {isSyncing && (

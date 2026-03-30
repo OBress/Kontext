@@ -97,9 +97,28 @@ export function ApiKeyGate() {
             <h2 className="text-center text-lg font-medium text-[var(--gray-100)] mb-1 font-mono">
               Google AI API Key
             </h2>
-            <p className="text-center text-sm text-[var(--gray-500)] mb-6 font-mono">
+            <p className="text-center text-sm text-[var(--gray-500)] mb-4 font-mono">
               Enter your Google AI Studio API key to enable AI features.
             </p>
+
+            {/* Tier recommendation */}
+            <div className="mb-5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3.5 py-2.5">
+              <p className="text-xs font-mono text-amber-400/90 m-0 mb-1 font-medium">
+                ⚡ Paid tier recommended
+              </p>
+              <p className="text-xs font-mono text-[var(--gray-400)] m-0 leading-relaxed">
+                Free-tier API keys have very low rate limits and will be slow for large repositories. We strongly recommend{" "}
+                <a
+                  href="https://ai.google.dev/pricing"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-amber-400 underline underline-offset-2 hover:text-amber-300 transition-colors"
+                >
+                  enabling billing
+                </a>
+                {" "}(Tier 1+) in Google AI Studio for a smooth experience.
+              </p>
+            </div>
 
             {/* Input */}
             <div className="relative mb-4">

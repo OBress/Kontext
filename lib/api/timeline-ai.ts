@@ -1,6 +1,7 @@
 
 import { createAdminClient } from "./auth";
 import { generateEmbeddings, generateText } from "./embeddings";
+import { delay } from "./gemini";
 import {
   buildTaskSystemInstruction,
   PROMPT_GENERATION_CONFIGS,
@@ -85,9 +86,11 @@ export async function summarizeAndEmbedCommits(
   apiKey: string,
   commits: CommitForSummary[]
 ): Promise<{ summaries: string[]; embeddings: number[][] }> {
-  // Generate individual summaries
+  // Generate individual summaries with a small delay between each
+  // to avoid hammering the generation model rate limit
   const summaries: string[] = [];
-  for (const commit of commits) {
+  for (let idx = 0; idx < commits.length; idx++) {
+    const commit = commits[idx];
     try {
       const summary = await generateCommitSummary(
         apiKey,
@@ -102,6 +105,11 @@ export async function summarizeAndEmbedCommits(
       );
       // Fallback: use the first line of the commit message
       summaries.push(commit.message.split("\n")[0].slice(0, 200));
+    }
+
+    // Small delay between summaries to avoid stacking generation rate limits
+    if (idx < commits.length - 1) {
+      await delay(500);
     }
   }
 

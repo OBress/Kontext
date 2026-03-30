@@ -6,13 +6,35 @@ import { ApiError } from "./errors";
 import {
   createGeminiClient,
   delay,
-  GEMINI_EMBEDDING_BATCH_DELAY_MS,
   GEMINI_EMBEDDING_BATCH_SIZE,
   GEMINI_EMBEDDING_DIMENSIONS,
   GEMINI_EMBEDDING_MODEL,
   GEMINI_GENERATION_MODEL,
   normalizeGeminiError,
 } from "./gemini";
+
+// ── Global embedding mutex ──────────────────────────────────────────
+// Ensures only one embedding operation runs at a time across all
+// concurrent ingests/syncs, preventing TPM quota thrashing.
+let embeddingLock: Promise<void> = Promise.resolve();
+let embeddingLockRelease: (() => void) | null = null;
+
+function acquireEmbeddingLock(): Promise<() => void> {
+  return new Promise<() => void>((resolveAcquire) => {
+    const prev = embeddingLock;
+    let release: () => void;
+    embeddingLock = new Promise<void>((resolveLock) => {
+      release = () => {
+        embeddingLockRelease = null;
+        resolveLock();
+      };
+    });
+    prev.then(() => {
+      embeddingLockRelease = release!;
+      resolveAcquire(release!);
+    });
+  });
+}
 import {
   buildTaskSystemInstruction,
   PROMPT_GENERATION_CONFIGS,
@@ -20,6 +42,7 @@ import {
 
 interface EmbeddingOptions {
   onBatchComplete?: (completed: number, total: number) => void;
+  onRetry?: (message: string) => void;
 }
 
 export interface TextGenerationOptions {
@@ -123,63 +146,77 @@ export async function generateEmbeddings(
   taskType: string = "RETRIEVAL_DOCUMENT",
   options: EmbeddingOptions = {}
 ): Promise<number[][]> {
-  const ai = createGeminiClient(apiKey);
-  const results: number[][] = [];
+  // Acquire global lock — only one embedding operation at a time
+  const release = await acquireEmbeddingLock();
 
-  const MAX_RETRIES = 4;
-  const BASE_BACKOFF_MS = 2000;
+  try {
+    const ai = createGeminiClient(apiKey);
+    const results: number[][] = [];
 
-  for (let i = 0; i < texts.length; i += GEMINI_EMBEDDING_BATCH_SIZE) {
-    const batch = texts.slice(i, i + GEMINI_EMBEDDING_BATCH_SIZE);
-    let attempts = 0;
+    // Greedy strategy: fire as fast as possible, let the API tell us
+    // when to stop. On rate limit, wait 60s and retry (max 2 retries).
+    const MAX_RETRIES = 2;
 
-    while (true) {
-      try {
-        // The new SDK's embedContent accepts a contents array for batch embedding
-        const response = await ai.models.embedContent({
-          model: GEMINI_EMBEDDING_MODEL,
-          contents: batch,
-          config: {
-            taskType,
-            outputDimensionality: GEMINI_EMBEDDING_DIMENSIONS,
-          },
-        });
+    const totalBatches = Math.ceil(texts.length / GEMINI_EMBEDDING_BATCH_SIZE);
 
-        if (response.embeddings) {
-          for (const embedding of response.embeddings) {
-            results.push(embedding.values || []);
+    for (let i = 0; i < texts.length; i += GEMINI_EMBEDDING_BATCH_SIZE) {
+      const batch = texts.slice(i, i + GEMINI_EMBEDDING_BATCH_SIZE);
+      const batchNum = Math.floor(i / GEMINI_EMBEDDING_BATCH_SIZE) + 1;
+      let attempts = 0;
+
+      while (true) {
+        try {
+          const response = await ai.models.embedContent({
+            model: GEMINI_EMBEDDING_MODEL,
+            contents: batch,
+            config: {
+              taskType,
+              outputDimensionality: GEMINI_EMBEDDING_DIMENSIONS,
+            },
+          });
+
+          if (response.embeddings) {
+            for (const embedding of response.embeddings) {
+              results.push(embedding.values || []);
+            }
           }
+
+          options.onBatchComplete?.(results.length, texts.length);
+          break;
+        } catch (error: unknown) {
+          const normalized = normalizeGeminiError(error, "embedding");
+          const isQuotaError = normalized.code === "AI_QUOTA_EXCEEDED";
+          const isTransientError = normalized.code === "AI_TRANSIENT";
+          const canRetry = (isQuotaError || isTransientError) && attempts < MAX_RETRIES;
+
+          if (!canRetry) {
+            throw normalized;
+          }
+
+          attempts += 1;
+
+          // Wait 60s for quota reset (TPM resets per minute)
+          const backoff = 60_000 + Math.random() * 5000;
+          const waitSec = Math.round(backoff / 1000);
+          console.warn(
+            `[embeddings] ${isQuotaError ? "TPM quota" : "Rate limit"} hit on batch ${batchNum}/${totalBatches}, ` +
+            `waiting ${waitSec}s (attempt ${attempts}/${MAX_RETRIES})`
+          );
+          options.onRetry?.(
+            `Rate limit reached — waiting ${waitSec}s for cooldown (attempt ${attempts}/${MAX_RETRIES})...`
+          );
+
+          await delay(backoff);
         }
-
-        options.onBatchComplete?.(results.length, texts.length);
-        break;
-      } catch (error: unknown) {
-        const normalized = normalizeGeminiError(error, "embedding");
-        const shouldRetry =
-          normalized.code === "AI_TRANSIENT" && attempts < MAX_RETRIES;
-
-        if (!shouldRetry) {
-          throw normalized;
-        }
-
-        attempts += 1;
-        // Exponential backoff: 2s, 4s, 8s, 16s
-        const backoff = BASE_BACKOFF_MS * Math.pow(2, attempts - 1);
-        console.warn(
-          `[embeddings] Rate limited on batch ${Math.floor(i / GEMINI_EMBEDDING_BATCH_SIZE) + 1}, ` +
-          `retry ${attempts}/${MAX_RETRIES} after ${backoff}ms`
-        );
-        await delay(backoff);
       }
+
+      // No delay between successful batches — go full speed
     }
 
-    const hasMore = i + GEMINI_EMBEDDING_BATCH_SIZE < texts.length;
-    if (hasMore) {
-      await delay(GEMINI_EMBEDDING_BATCH_DELAY_MS);
-    }
+    return results;
+  } finally {
+    release();
   }
-
-  return results;
 }
 
 /**

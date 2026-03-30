@@ -49,6 +49,9 @@ export interface IngestionState {
   chunksTotal: number;
   message?: string;
   error?: string;
+  isWaiting?: boolean;          // true when pausing for rate-limit cooldown
+  lastCompletedBatch?: number;  // for resume-on-retry
+  totalBatches?: number;
 }
 
 export interface RepoCheckRunState {

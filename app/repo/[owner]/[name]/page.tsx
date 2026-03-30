@@ -120,72 +120,81 @@ export default function RepoOverviewPage() {
   return (
     <div className="space-y-6">
       {/* Ingestion Progress Panel — shown when actively ingesting */}
-      {isIngesting && (
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-        >
-          <GlowCard glowColor="cyan" className="p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <Loader2 size={18} className="text-[var(--accent-green)] animate-spin" />
-              <h3 className="font-mono text-sm font-medium text-[var(--gray-200)] m-0">
-                Ingesting Repository...
-              </h3>
-              <span className="ml-auto font-mono text-lg font-semibold text-[var(--accent-green)]">
-                {ingestionStatus.progress}%
-              </span>
-            </div>
+      {isIngesting && (() => {
+        const waiting = ingestionStatus.isWaiting === true;
+        const accentColor = waiting ? "#D97706" : "var(--accent-green)";
+        const barGradient = waiting
+          ? "linear-gradient(90deg, #D97706, #F59E0B)"
+          : "linear-gradient(90deg, #238636, #3FB950)";
 
-            {/* Progress bar */}
-            <div className="w-full h-2 rounded-full bg-[var(--alpha-white-8)] overflow-hidden mb-4">
-              <motion.div
-                className="h-full rounded-full"
-                style={{
-                  background: "linear-gradient(90deg, #238636, #3FB950)",
-                }}
-                initial={{ width: "0%" }}
-                animate={{ width: `${ingestionStatus.progress}%` }}
-                transition={{ duration: 0.4, ease: "easeOut" }}
-              />
-            </div>
+        return (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <GlowCard glowColor={waiting ? "none" : "cyan"} className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <Loader2
+                  size={18}
+                  className={waiting ? "text-amber-500 animate-pulse" : "text-[var(--accent-green)] animate-spin"}
+                />
+                <h3 className="font-mono text-sm font-medium text-[var(--gray-200)] m-0">
+                  {waiting ? "Rate Limit — Waiting for Cooldown" : "Ingesting Repository..."}
+                </h3>
+                <span className="ml-auto font-mono text-lg font-semibold" style={{ color: accentColor }}>
+                  {ingestionStatus.progress}%
+                </span>
+              </div>
 
-            {/* Status details */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div>
-                <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Status</p>
-                <p className="font-mono text-xs text-[var(--gray-200)] m-0 capitalize">
-                  {ingestionStatus.status}
-                </p>
+              {/* Progress bar */}
+              <div className="w-full h-2 rounded-full bg-[var(--alpha-white-8)] overflow-hidden mb-4">
+                <motion.div
+                  className={`h-full rounded-full ${waiting ? "animate-pulse" : ""}`}
+                  style={{ background: barGradient }}
+                  initial={{ width: "0%" }}
+                  animate={{ width: `${ingestionStatus.progress}%` }}
+                  transition={{ duration: 0.4, ease: "easeOut" }}
+                />
               </div>
-              <div>
-                <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Files</p>
-                <p className="font-mono text-xs text-[var(--gray-200)] m-0">
-                  {ingestionStatus.filesProcessed} / {ingestionStatus.filesTotal || "—"}
-                </p>
-              </div>
-              <div>
-                <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Chunks</p>
-                <p className="font-mono text-xs text-[var(--gray-200)] m-0">
-                  {ingestionStatus.chunksCreated}
-                </p>
-              </div>
-              <div>
-                <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Embeddings</p>
-                <p className="font-mono text-xs text-[var(--gray-200)] m-0">
-                  {ingestionStatus.status === "embedding"
-                    ? `${ingestionStatus.chunksCreated} / ${ingestionStatus.chunksTotal}`
-                    : "Waiting..."}
-                </p>
-              </div>
-            </div>
 
-            <p className="font-mono text-xs text-[var(--gray-500)] mt-3 m-0">
-              {ingestionStatus.message}
-            </p>
-          </GlowCard>
-        </motion.div>
-      )}
+              {/* Status details */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div>
+                  <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Status</p>
+                  <p className={`font-mono text-xs m-0 capitalize ${waiting ? "text-amber-400" : "text-[var(--gray-200)]"}`}>
+                    {waiting ? "⏸ Waiting" : ingestionStatus.status}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Files</p>
+                  <p className="font-mono text-xs text-[var(--gray-200)] m-0">
+                    {ingestionStatus.filesProcessed.toLocaleString()} / {ingestionStatus.filesTotal ? ingestionStatus.filesTotal.toLocaleString() : "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Chunks</p>
+                  <p className="font-mono text-xs text-[var(--gray-200)] m-0">
+                    {ingestionStatus.chunksTotal ? ingestionStatus.chunksTotal.toLocaleString() : ingestionStatus.chunksCreated.toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-mono text-xs uppercase text-[var(--gray-500)] m-0 mb-1">Embeddings</p>
+                  <p className="font-mono text-xs text-[var(--gray-200)] m-0">
+                    {ingestionStatus.status === "embedding" || ingestionStatus.status === "finalizing"
+                      ? `${ingestionStatus.chunksCreated.toLocaleString()} / ${ingestionStatus.chunksTotal ? ingestionStatus.chunksTotal.toLocaleString() : "—"}`
+                      : "Waiting..."}
+                  </p>
+                </div>
+              </div>
+
+              <p className={`font-mono text-xs mt-3 m-0 ${waiting ? "text-amber-400/70" : "text-[var(--gray-500)]"}`}>
+                {ingestionStatus.message}
+              </p>
+            </GlowCard>
+          </motion.div>
+        );
+      })()}
 
       {/* Error state */}
       {isError && (
@@ -199,6 +208,7 @@ export default function RepoOverviewPage() {
               <h3 className="font-mono text-sm font-medium text-[var(--accent-red)] m-0">
                 Ingestion Failed
               </h3>
+              <RetryIngestionButton fullName={fullName} />
             </div>
             <p className="font-mono text-xs text-[var(--gray-400)] m-0">
               {ingestionStatus.error || "An unknown error occurred during ingestion."}
@@ -466,6 +476,69 @@ export default function RepoOverviewPage() {
         />
       </div>
     </div>
+  );
+}
+
+function RetryIngestionButton({ fullName }: { fullName: string }) {
+  const [retrying, setRetrying] = useState(false);
+  const { apiKey, setIngestionStatus, updateRepo } = useAppStore();
+
+  const handleRetry = async () => {
+    if (!apiKey || retrying) return;
+    setRetrying(true);
+
+    setIngestionStatus(fullName, {
+      status: "fetching",
+      progress: 0,
+      filesTotal: 0,
+      filesProcessed: 0,
+      chunksCreated: 0,
+      chunksTotal: 0,
+      message: "Retrying ingestion...",
+    });
+    updateRepo(fullName, { indexing: true });
+
+    try {
+      const { streamIngestion } = await import("@/lib/client/ingestion-stream");
+      await streamIngestion(
+        fullName,
+        apiKey,
+        { repo_full_name: fullName },
+        { setIngestionStatus, updateRepo }
+      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : "Retry failed";
+      setIngestionStatus(fullName, {
+        status: "error",
+        progress: 0,
+        filesTotal: 0,
+        filesProcessed: 0,
+        chunksCreated: 0,
+        chunksTotal: 0,
+        error: errMsg,
+        message: errMsg,
+      });
+      updateRepo(fullName, { indexing: false });
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  if (!apiKey) return null;
+
+  return (
+    <button
+      onClick={handleRetry}
+      disabled={retrying}
+      className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-mono text-xs bg-[var(--surface-2)] border border-[var(--alpha-white-10)] text-[var(--gray-300)] hover:text-[var(--gray-100)] hover:bg-[var(--surface-3)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {retrying ? (
+        <Loader2 size={12} className="animate-spin" />
+      ) : (
+        <RefreshCw size={12} />
+      )}
+      {retrying ? "Retrying..." : "Retry"}
+    </button>
   );
 }
 

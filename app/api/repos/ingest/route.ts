@@ -7,7 +7,7 @@ import { logActivity } from "@/lib/api/activity";
 import { queueArchitectureRefresh } from "@/lib/api/architecture-refresh";
 import { chunkFile } from "@/lib/api/chunker";
 import { generateEmbeddings, generateFileSummary } from "@/lib/api/embeddings";
-import { fetchFileContent, fetchLatestCommit, fetchRepoTree, fetchRecentCommits } from "@/lib/api/github";
+import { fetchFileContent, fetchLatestCommit, fetchRepoTree, fetchRecentCommits, type GitHubTreeItem } from "@/lib/api/github";
 import { extractImports } from "@/lib/api/graph-builder";
 import { getAiBlockedStatus } from "@/lib/api/gemini";
 import { rateLimit } from "@/lib/api/rate-limit";
@@ -49,6 +49,28 @@ function serializeChunkRows(
     embedding: JSON.stringify(embeddings[index]),
     metadata: chunk.metadata,
   }));
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function runWorker() {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= items.length) return;
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  }
+
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  return results;
 }
 
 /**
@@ -170,62 +192,78 @@ export async function POST(request: Request) {
 
           const fileRecords: PreparedFileRecord[] = [];
           const preparedChunks: PreparedChunk[] = [];
+          let filesProcessed = 0;
 
-          for (let index = 0; index < tree.length; index += 1) {
-            const file = tree[index];
-            const content = await fetchFileContent(
-              effectiveToken,
-              owner,
-              name,
-              file.path,
-              defaultBranch
-            );
+          const concurrencyLimit = understandingTier === 3 ? 3 : 6;
+          const fileResults = await mapWithConcurrency(
+            tree,
+            concurrencyLimit,
+            async (file) => {
+              const content = await fetchFileContent(
+                effectiveToken,
+                owner,
+                name,
+                file.path,
+                defaultBranch
+              );
 
-            if (content) {
-              const extension = file.path.split(".").pop() || "";
-              const lines = content.split("\n").length;
-              const imports = extractImports(content);
+              let record: PreparedFileRecord | null = null;
+              const chunks: PreparedChunk[] = [];
 
-              fileRecords.push({
-                file_path: file.path,
-                file_name: file.path.split("/").pop() || file.path,
-                extension,
-                line_count: lines,
-                size_bytes: content.length,
-                content_hash: hashContent(content),
-                imports,
-              });
+              if (content) {
+                const extension = file.path.split(".").pop() || "";
+                const lines = content.split("\n").length;
+                const imports = extractImports(content);
 
-              const chunks = chunkFile(content, file.path);
-
-              // Tier 3: generate LLM file summary for each file
-              const llmSummary =
-                understandingTier === 3
-                  ? await generateFileSummary(apiKey, file.path, content).catch(() => null)
-                  : null;
-
-              for (const chunk of chunks) {
-                preparedChunks.push({
+                record = {
                   file_path: file.path,
-                  chunk_index: chunk.chunkIndex,
-                  content: chunk.content,
-                  token_count: chunk.tokenCount,
-                  metadata: {
-                    ...chunk.metadata,
-                    ...(llmSummary ? { llm_summary: llmSummary } : {}),
-                  },
+                  file_name: file.path.split("/").pop() || file.path,
+                  extension,
+                  line_count: lines,
+                  size_bytes: content.length,
+                  content_hash: hashContent(content),
+                  imports,
+                };
+
+                const fileChunks = chunkFile(content, file.path);
+
+                // Tier 3: generate LLM file summary for each file
+                const llmSummary =
+                  understandingTier === 3
+                    ? await generateFileSummary(apiKey, file.path, content).catch(() => null)
+                    : null;
+
+                for (const chunk of fileChunks) {
+                  chunks.push({
+                    file_path: file.path,
+                    chunk_index: chunk.chunkIndex,
+                    content: chunk.content,
+                    token_count: chunk.tokenCount,
+                    metadata: {
+                      ...chunk.metadata,
+                      ...(llmSummary ? { llm_summary: llmSummary } : {}),
+                    },
+                  });
+                }
+              }
+
+              filesProcessed += 1;
+              if (filesProcessed % 5 === 0 || filesProcessed === filesTotal) {
+                send({
+                  status: "chunking",
+                  filesTotal,
+                  filesProcessed,
+                  chunksCreated: preparedChunks.length + chunks.length,
                 });
               }
-            }
 
-            if ((index + 1) % 5 === 0 || index === tree.length - 1) {
-              send({
-                status: "chunking",
-                filesTotal,
-                filesProcessed: index + 1,
-                chunksCreated: preparedChunks.length,
-              });
+              return { record, chunks };
             }
+          );
+
+          for (const result of fileResults) {
+            if (result.record) fileRecords.push(result.record);
+            preparedChunks.push(...result.chunks);
           }
 
           await supabase
@@ -236,11 +274,21 @@ export async function POST(request: Request) {
             })
             .eq("id", job.id);
 
+          // Context carried by every embedding SSE event so the
+          // client always has accurate file/chunk counts
+          const embedContext = {
+            filesTotal: tree.length,
+            filesProcessed: tree.length,
+            chunksTotal: preparedChunks.length,
+          };
+
           send({
             status: "embedding",
+            ...embedContext,
             message: `Embedding ${preparedChunks.length} chunks...`,
-            chunksTotal: preparedChunks.length,
           });
+
+          const embedStartMs = Date.now();
 
           const embeddings = await generateEmbeddings(
             apiKey,
@@ -250,8 +298,18 @@ export async function POST(request: Request) {
               onBatchComplete: (completed, total) => {
                 send({
                   status: "embedding",
+                  ...embedContext,
                   chunksEmbedded: completed,
-                  chunksTotal: total,
+                  elapsedMs: Date.now() - embedStartMs,
+                  isWaiting: false,
+                });
+              },
+              onRetry: (message) => {
+                send({
+                  status: "embedding",
+                  ...embedContext,
+                  message,
+                  isWaiting: true,
                 });
               },
             }
@@ -280,23 +338,123 @@ export async function POST(request: Request) {
           const promotedAt = new Date().toISOString();
           const serializedChunks = serializeChunkRows(preparedChunks, embeddings);
 
-          const { error: promoteError } = await adminDb.rpc("replace_repo_index", {
-            p_user_id: user.id,
-            p_repo_full_name: fullName,
-            p_files: fileRecords,
-            p_chunks: serializedChunks,
-            p_chunk_count: preparedChunks.length,
-            p_last_indexed_at: promotedAt,
-            p_last_synced_sha: headSHA,
-            p_watched_branch: defaultBranch,
-            p_indexed: true,
-            p_indexing: false,
-            p_sync_blocked_reason: null,
-            p_pending_sync_head_sha: null,
-          });
+          // ── Batched index promotion ──────────────────────────────
+          // Optimized for Supabase free tier statement timeout (~60s):
+          // - Skip DELETE on first ingestion (no old data to clear)
+          // - Small batch sizes to keep each INSERT under the timeout
+          // - Batch DELETE operations to avoid single massive scans
 
-          if (promoteError) {
-            throw promoteError;
+          // Check if this is a re-index (has existing data)
+          const { data: existingRepo } = await adminDb
+            .from("repos")
+            .select("chunk_count")
+            .eq("user_id", user.id)
+            .eq("full_name", fullName)
+            .single();
+
+          const hasExistingIndex = (existingRepo?.chunk_count || 0) > 0;
+
+          // 1. Delete old chunks and files (skip on first ingestion)
+          if (hasExistingIndex) {
+            send({ status: "finalizing", message: "Clearing old index..." });
+
+            // Batch delete chunks to stay under statement timeout
+            const DELETE_BATCH_SIZE = 500;
+            let deletedCount = 0;
+            while (true) {
+              const { data: toDelete } = await adminDb
+                .from("repo_chunks")
+                .select("id")
+                .eq("user_id", user.id)
+                .eq("repo_full_name", fullName)
+                .limit(DELETE_BATCH_SIZE);
+
+              if (!toDelete || toDelete.length === 0) break;
+
+              const ids = toDelete.map((r: { id: number }) => r.id);
+              await adminDb
+                .from("repo_chunks")
+                .delete()
+                .in("id", ids);
+
+              deletedCount += ids.length;
+              send({
+                status: "finalizing",
+                message: `Clearing old chunks (${deletedCount} removed)...`,
+              });
+            }
+
+            await adminDb
+              .from("repo_files")
+              .delete()
+              .eq("user_id", user.id)
+              .eq("repo_full_name", fullName);
+          }
+
+          // 2. Insert files (usually small, single batch is fine)
+          if (fileRecords.length > 0) {
+            const fileRows = fileRecords.map((f) => ({
+              user_id: user.id,
+              repo_full_name: fullName,
+              ...f,
+            }));
+            const FILE_BATCH_SIZE = 200;
+            for (let i = 0; i < fileRows.length; i += FILE_BATCH_SIZE) {
+              const batch = fileRows.slice(i, i + FILE_BATCH_SIZE);
+              const { error: fileErr } = await adminDb
+                .from("repo_files")
+                .insert(batch);
+              if (fileErr) throw fileErr;
+            }
+          }
+
+          // 3. Insert chunks in small batches (50 rows each to stay
+          //    under the free tier statement timeout with vector data)
+          const CHUNK_BATCH_SIZE = 50;
+          const totalChunkBatches = Math.ceil(serializedChunks.length / CHUNK_BATCH_SIZE);
+          for (let i = 0; i < serializedChunks.length; i += CHUNK_BATCH_SIZE) {
+            const batch = serializedChunks.slice(i, i + CHUNK_BATCH_SIZE).map((c) => ({
+              user_id: user.id,
+              repo_full_name: fullName,
+              file_path: c.file_path,
+              chunk_index: c.chunk_index,
+              content: c.content,
+              token_count: c.token_count,
+              embedding: c.embedding,
+              metadata: c.metadata,
+            }));
+
+            const { error: chunkErr } = await adminDb
+              .from("repo_chunks")
+              .insert(batch);
+            if (chunkErr) throw chunkErr;
+
+            const batchNum = Math.floor(i / CHUNK_BATCH_SIZE) + 1;
+            send({
+              status: "finalizing",
+              message: `Writing chunks to database (${batchNum}/${totalChunkBatches})...`,
+            });
+          }
+
+          // 4. Update repo record
+          const { error: repoUpdateError } = await adminDb
+            .from("repos")
+            .update({
+              indexed: true,
+              indexing: false,
+              chunk_count: preparedChunks.length,
+              last_indexed_at: promotedAt,
+              last_synced_sha: headSHA,
+              watched_branch: defaultBranch,
+              sync_blocked_reason: null,
+              pending_sync_head_sha: null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("user_id", user.id)
+            .eq("full_name", fullName);
+
+          if (repoUpdateError) {
+            throw repoUpdateError;
           }
 
           if (headSHA && backfillTimeline) {
@@ -345,29 +503,44 @@ export async function POST(request: Request) {
               }
 
               if (commitRows.length > 0) {
+                // Process commit summaries in capped batches to avoid
+                // stacking API calls on top of chunk embeddings
+                const COMMIT_SUMMARY_BATCH = 15;
                 send({ status: "timeline", message: `Summarizing ${commitRows.length} historical commits...` });
                 try {
-                  const { summaries, embeddings } = await summarizeAndEmbedCommits(
-                    apiKey,
-                    commitRows.map((c) => ({
-                      sha: c.sha,
-                      message: c.message,
-                      files_changed: c.files_changed,
-                    }))
-                  );
-                  for (let i = 0; i < commitRows.length; i++) {
-                    await adminDb
-                      .from("repo_commits")
-                      .update({
-                        ai_summary: summaries[i],
-                        ai_summary_embedding: JSON.stringify(embeddings[i]),
-                      })
-                      .eq("user_id", user.id)
-                      .eq("repo_full_name", fullName)
-                      .eq("sha", commitRows[i].sha);
+                  for (let batchStart = 0; batchStart < commitRows.length; batchStart += COMMIT_SUMMARY_BATCH) {
+                    const batchEnd = Math.min(batchStart + COMMIT_SUMMARY_BATCH, commitRows.length);
+                    const commitBatch = commitRows.slice(batchStart, batchEnd);
+
+                    const { summaries, embeddings: commitEmbeddings } = await summarizeAndEmbedCommits(
+                      apiKey,
+                      commitBatch.map((c) => ({
+                        sha: c.sha,
+                        message: c.message,
+                        files_changed: c.files_changed,
+                      }))
+                    );
+                    for (let i = 0; i < commitBatch.length; i++) {
+                      await adminDb
+                        .from("repo_commits")
+                        .update({
+                          ai_summary: summaries[i],
+                          ai_summary_embedding: JSON.stringify(commitEmbeddings[i]),
+                        })
+                        .eq("user_id", user.id)
+                        .eq("repo_full_name", fullName)
+                        .eq("sha", commitBatch[i].sha);
+                    }
+
+                    // Delay between batches to ease API pressure
+                    if (batchEnd < commitRows.length) {
+                      send({ status: "timeline", message: `Summarized ${batchEnd}/${commitRows.length} commits...` });
+                      await new Promise((r) => setTimeout(r, 2000));
+                    }
                   }
                 } catch (aiErr) {
-                  console.warn("[ingest] AI summary generation failed:", aiErr);
+                  console.warn("[ingest] AI commit summary generation failed (non-fatal):", aiErr);
+                  // Non-fatal: commits are already stored, summaries can be backfilled later
                 }
               }
             } catch (timelineError) {

@@ -372,6 +372,36 @@ $$;
 
 ALTER FUNCTION "public"."rls_auto_enable"() OWNER TO "postgres";
 
+
+CREATE OR REPLACE FUNCTION "public"."user_is_team_admin"("p_repo" "text", "p_user" "uuid") RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.team_members
+    WHERE repo_full_name = p_repo
+      AND user_id = p_user
+      AND role IN ('owner', 'admin')
+  );
+$$;
+
+
+ALTER FUNCTION "public"."user_is_team_admin"("p_repo" "text", "p_user" "uuid") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."user_is_team_member"("p_repo" "text", "p_user" "uuid") RETURNS boolean
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.team_members
+    WHERE repo_full_name = p_repo AND user_id = p_user
+  );
+$$;
+
+
+ALTER FUNCTION "public"."user_is_team_member"("p_repo" "text", "p_user" "uuid") OWNER TO "postgres";
+
 SET default_tablespace = '';
 
 SET default_table_access_method = "heap";
@@ -442,11 +472,16 @@ CREATE TABLE IF NOT EXISTS "public"."generated_prompts" (
     "detected_stack" "jsonb" DEFAULT '[]'::"jsonb",
     "prompt_text" "text" NOT NULL,
     "custom_instructions" "text",
-    "created_at" timestamp with time zone DEFAULT "now"()
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "rule_files" "jsonb" DEFAULT '[]'::"jsonb"
 );
 
 
 ALTER TABLE "public"."generated_prompts" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."generated_prompts"."rule_files" IS 'Array of {path, content, scope, description} objects for multi-file rule packages';
+
 
 
 CREATE SEQUENCE IF NOT EXISTS "public"."generated_prompts_id_seq"
@@ -751,6 +786,7 @@ CREATE TABLE IF NOT EXISTS "public"."repo_check_findings" (
     "fixed_in_run_id" bigint,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "dismissed_at" timestamp with time zone,
     CONSTRAINT "repo_check_findings_severity_check" CHECK (("severity" = ANY (ARRAY['low'::"text", 'medium'::"text", 'high'::"text", 'critical'::"text"]))),
     CONSTRAINT "repo_check_findings_status_check" CHECK (("status" = ANY (ARRAY['open'::"text", 'resolved'::"text"]))),
     CONSTRAINT "repo_check_findings_transition_check" CHECK (("transition_state" = ANY (ARRAY['new'::"text", 'persistent'::"text", 'regressed'::"text", 'resolved'::"text"]))),
@@ -1123,7 +1159,8 @@ CREATE TABLE IF NOT EXISTS "public"."user_tokens" (
     "updated_at" timestamp with time zone DEFAULT "now"(),
     "encrypted_ai_key" "text",
     "ai_key_iv" "text",
-    "ai_key_tag" "text"
+    "ai_key_tag" "text",
+    "google_ai_key" "text"
 );
 
 
@@ -1457,6 +1494,10 @@ CREATE INDEX "idx_repo_check_configs_lookup" ON "public"."repo_check_configs" US
 
 
 
+CREATE INDEX "idx_repo_check_findings_dismissed" ON "public"."repo_check_findings" USING "btree" ("user_id", "repo_full_name", "status") WHERE ("dismissed_at" IS NULL);
+
+
+
 CREATE INDEX "idx_repo_check_findings_lookup" ON "public"."repo_check_findings" USING "btree" ("user_id", "repo_full_name", "status", "severity");
 
 
@@ -1712,21 +1753,15 @@ CREATE POLICY "Inviters manage invites" ON "public"."team_invites" USING (("auth
 
 
 
-CREATE POLICY "Owners/admins delete team" ON "public"."team_members" FOR DELETE USING ((("auth"."uid"() = "user_id") OR (EXISTS ( SELECT 1
-   FROM "public"."team_members" "tm"
-  WHERE (("tm"."repo_full_name" = "team_members"."repo_full_name") AND ("tm"."user_id" = "auth"."uid"()) AND ("tm"."role" = ANY (ARRAY['owner'::"text", 'admin'::"text"])))))));
+CREATE POLICY "Owners/admins delete team" ON "public"."team_members" FOR DELETE USING ((("auth"."uid"() = "user_id") OR "public"."user_is_team_admin"("repo_full_name", "auth"."uid"())));
 
 
 
-CREATE POLICY "Owners/admins manage team" ON "public"."team_members" FOR INSERT WITH CHECK ((("auth"."uid"() = "user_id") OR (EXISTS ( SELECT 1
-   FROM "public"."team_members" "tm"
-  WHERE (("tm"."repo_full_name" = "team_members"."repo_full_name") AND ("tm"."user_id" = "auth"."uid"()) AND ("tm"."role" = ANY (ARRAY['owner'::"text", 'admin'::"text"])))))));
+CREATE POLICY "Owners/admins manage team" ON "public"."team_members" FOR INSERT WITH CHECK ((("auth"."uid"() = "user_id") OR "public"."user_is_team_admin"("repo_full_name", "auth"."uid"())));
 
 
 
-CREATE POLICY "Owners/admins update team" ON "public"."team_members" FOR UPDATE USING ((EXISTS ( SELECT 1
-   FROM "public"."team_members" "tm"
-  WHERE (("tm"."repo_full_name" = "team_members"."repo_full_name") AND ("tm"."user_id" = "auth"."uid"()) AND ("tm"."role" = ANY (ARRAY['owner'::"text", 'admin'::"text"]))))));
+CREATE POLICY "Owners/admins update team" ON "public"."team_members" FOR UPDATE USING ("public"."user_is_team_admin"("repo_full_name", "auth"."uid"()));
 
 
 
@@ -1822,9 +1857,7 @@ CREATE POLICY "Users manage own tokens" ON "public"."user_tokens" USING (("auth"
 
 
 
-CREATE POLICY "Users see co-members" ON "public"."team_members" FOR SELECT USING ((EXISTS ( SELECT 1
-   FROM "public"."team_members" "tm"
-  WHERE (("tm"."repo_full_name" = "team_members"."repo_full_name") AND ("tm"."user_id" = "auth"."uid"())))));
+CREATE POLICY "Users see co-members" ON "public"."team_members" FOR SELECT USING ("public"."user_is_team_member"("repo_full_name", "auth"."uid"()));
 
 
 
@@ -2437,6 +2470,18 @@ GRANT ALL ON FUNCTION "public"."replace_repo_paths"("p_user_id" "uuid", "p_repo_
 GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "anon";
 GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."user_is_team_admin"("p_repo" "text", "p_user" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."user_is_team_admin"("p_repo" "text", "p_user" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."user_is_team_admin"("p_repo" "text", "p_user" "uuid") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."user_is_team_member"("p_repo" "text", "p_user" "uuid") TO "anon";
+GRANT ALL ON FUNCTION "public"."user_is_team_member"("p_repo" "text", "p_user" "uuid") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."user_is_team_member"("p_repo" "text", "p_user" "uuid") TO "service_role";
 
 
 

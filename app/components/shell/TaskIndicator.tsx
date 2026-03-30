@@ -342,7 +342,8 @@ export function TaskIndicator() {
         : task.repoJob.status === "queued" || task.repoJob.status === "running"
   );
 
-  // Adaptive polling: restart interval at 3s when active, 15s when idle
+  // Adaptive polling: 10s when active jobs exist, 30s when idle
+  // (kept slow to reduce Supabase Disk IO; SSE handles real-time ingestion updates)
   useEffect(() => {
     const hasAny = activeTasks.length > 0;
     if (hasAny === hasActiveRef.current && pollIntervalRef.current) return;
@@ -351,7 +352,7 @@ export function TaskIndicator() {
     if (pollIntervalRef.current) {
       window.clearInterval(pollIntervalRef.current);
     }
-    const ms = hasAny ? 3000 : 15000;
+    const ms = hasAny ? 10_000 : 30_000;
     pollIntervalRef.current = window.setInterval(fetchTaskData, ms);
 
     return () => {
